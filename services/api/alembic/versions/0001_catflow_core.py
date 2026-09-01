@@ -102,7 +102,8 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "kind IN ('plan_story','generate_image','diagnose_image','generate_video','render_export')",
+            "kind IN ('plan_story','generate_image','diagnose_image',"
+            "'generate_video','render_export')",
             name="ck_jobs_kind",
         ),
         sa.CheckConstraint(
@@ -326,7 +327,10 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=16), nullable=False),
         sa.Column("rendered_asset_id", postgresql.UUID(as_uuid=True), nullable=True),
         _created_at(),
-        sa.CheckConstraint("status IN ('draft','rendered','approved')", name="ck_edit_versions_status"),
+        sa.CheckConstraint(
+            "status IN ('draft','rendered','approved')",
+            name="ck_edit_versions_status",
+        ),
         sa.ForeignKeyConstraint(["project_id"], [f"{SCHEMA}.projects.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["rendered_asset_id"], [f"{SCHEMA}.assets.id"], ondelete="SET NULL"

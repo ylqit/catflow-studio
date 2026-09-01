@@ -15,10 +15,20 @@ function defaultShots(): ShotSpecDto[] {
   const base = Math.floor(duration / count);
   const remainder = duration % count;
   const micro = props.workspace.activeStory?.microEvent;
+  const endings: Record<string, { child: string; cat: string; change: string }> = {
+    "雨天擦爪": { child: "拿起并折好毛巾", cat: "沿干燥脚垫向室内走两步，尾巴自然摆动", change: "湿爪和地面水印明显减少" },
+    "浇花": { child: "放回水壶并轻推托盘归位", cat: "绕花盆走一小步避开最后一滴水，尾巴轻摆", change: "土壤变深，托盘接住最后一滴水" },
+    "寻找滚落线团": { child: "把线团放进篮子并提起篮子", cat: "跟着孩子向前走两步", change: "线团回到收纳篮，动作继续发生" },
+  };
+  const ending = endings[props.workspace.project.theme] ?? {
+    child: "完成整理并继续一个自然小动作",
+    cat: micro?.warmEnding ?? "猫咪跟着移动两步",
+    change: "生活事件得到清楚解决，结尾不静止填时长",
+  };
   return [
     { id: "shot-1", order: 1, durationSeconds: base, framing: "中景", cameraMovement: "固定观察", childAction: micro?.childAction ?? "孩子注意到眼前的小事", catAction: micro?.catResponse ?? "猫咪停下观察", environmentChange: micro?.trigger ?? "生活事件被触发", transition: "continuous" },
     { id: "shot-2", order: 2, durationSeconds: base, framing: "近景", cameraMovement: "轻微下移", childAction: micro?.childAction ?? "孩子完成一个简单动作", catAction: micro?.catResponse ?? "猫咪安静回应", environmentChange: micro?.visibleChange ?? "画面出现可见变化", transition: "soft_cut" },
-    { id: "shot-3", order: 3, durationSeconds: base + remainder, framing: "中近景", cameraMovement: "缓慢推进", childAction: "孩子停下来陪在猫咪身边", catAction: micro?.warmEnding ?? "猫咪靠近孩子", environmentChange: "柔和暖光落在一人一猫身上", transition: "continuous" },
+    { id: "shot-3", order: 3, durationSeconds: base + remainder, framing: "中近景", cameraMovement: "缓慢跟随", childAction: ending.child, catAction: ending.cat, environmentChange: ending.change, transition: "continuous" },
   ];
 }
 

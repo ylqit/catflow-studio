@@ -80,17 +80,55 @@ class ProjectRecord(Base):
     )
 
 
+class ValidationRunRecord(Base):
+    __tablename__ = "validation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','authorized','paused','completed','cancelled')",
+            name="ck_validation_runs_status",
+        ),
+        CheckConstraint("duration_seconds = 12", name="ck_validation_runs_duration"),
+        CheckConstraint("resolution = '480p'", name="ck_validation_runs_resolution"),
+        CheckConstraint("aspect_ratio = '9:16'", name="ck_validation_runs_aspect_ratio"),
+        CheckConstraint(
+            "status = 'cancelled' OR canon_snapshot_json IS NOT NULL",
+            name="ck_validation_runs_canon_snapshot",
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    manifest_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    topics_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    resolution: Mapped[str] = mapped_column(String(16), nullable=False)
+    aspect_ratio: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_budget_cny: Mapped[int] = mapped_column(Integer, nullable=False)
+    call_limits_json: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+    usage_json: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    models_json: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False)
+    capability_revision: Mapped[str] = mapped_column(String(120), nullable=False)
+    cost_estimate_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    canon_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class JobRecord(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         CheckConstraint(
             "kind IN ('plan_story','generate_image','diagnose_image',"
-            "'generate_video','render_export')",
+            "'generate_video','diagnose_video','render_export')",
             name="ck_jobs_kind",
         ),
         CheckConstraint(
             "status IN ('queued','submitting','submitted','polling','storing','succeeded',"
-            "'failed','cancel_requested','cancelled')",
+            "'failed','cancel_requested','cancelled','submission_unknown')",
             name="ck_jobs_status",
         ),
         CheckConstraint(
@@ -98,6 +136,14 @@ class JobRecord(Base):
         ),
         Index("ix_jobs_queue", "status", "created_at"),
         Index("ix_jobs_provider_task", "provider", "provider_task_id"),
+        Index(
+            "uq_jobs_validation_project_kind",
+            "validation_run_id",
+            "project_id",
+            "kind",
+            unique=True,
+            postgresql_where=text("validation_run_id IS NOT NULL"),
+        ),
         {"schema": SCHEMA_NAME},
     )
 
@@ -114,6 +160,18 @@ class JobRecord(Base):
     provider: Mapped[str | None] = mapped_column(String(80))
     model: Mapped[str | None] = mapped_column(String(120))
     provider_task_id: Mapped[str | None] = mapped_column(String(200))
+    validation_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.validation_runs.id", ondelete="RESTRICT"),
+    )
+    parent_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="SET NULL")
+    )
+    provider_submission_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    provider_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    actual_usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     expected_cost_micros: Mapped[int | None] = mapped_column(BigInteger)
     frozen_input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     supersedes_job_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -159,6 +217,35 @@ class AssetRecord(Base):
     height: Mapped[int | None] = mapped_column(Integer)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class EnvironmentPresetRecord(Base):
+    __tablename__ = "environment_presets"
+    __table_args__ = (
+        Index(
+            "uq_environment_presets_active",
+            "active",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

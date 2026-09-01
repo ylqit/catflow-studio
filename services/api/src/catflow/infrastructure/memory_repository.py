@@ -6,12 +6,18 @@ import uuid
 from datetime import UTC, datetime
 
 from catflow.application.service import (
+    FIXED_CANON_ROLES,
     AssetDto,
+    CanonProfileDto,
+    CanonRevisionCreateCommand,
     EditDecisionListDto,
     EditVersionDto,
+    EnvironmentPresetDto,
+    FixedCanonRole,
     JobDto,
     JobEventDto,
     LifeStoryProposalDto,
+    PlannerJobDto,
     PlannerMessageCommand,
     PlannerMessageDto,
     PlannerSnapshotDto,
@@ -20,12 +26,20 @@ from catflow.application.service import (
     ProjectPatch,
     ProjectSelectionDto,
     ShotPlanVersionDto,
+    StoredAssetDto,
     StoryCreateCommand,
     StoryVersionDto,
     StudioConflictError,
     StudioNotFoundError,
+    ValidationRunDto,
+    ValidationRunPreviewDto,
 )
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
+from catflow.domain.validation import (
+    ValidationCallKind,
+    first_release_manifest,
+    reserve_validation_call,
+)
 
 
 class MemoryStudioRepository:
@@ -33,21 +47,188 @@ class MemoryStudioRepository:
 
     def __init__(self) -> None:
         self._canon_profile_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        self._assets: dict[uuid.UUID, StoredAssetDto] = {}
+        fixed_assets: dict[FixedCanonRole, StoredAssetDto] = {}
+        for index, role in enumerate(FIXED_CANON_ROLES, start=1):
+            asset = StoredAssetDto(
+                id=uuid.uuid4(),
+                projectId=None,
+                role=role,
+                mediaType="image",
+                storageKey=f"canon/test/{role}.png",
+                sha256=f"{index:x}" * 64,
+                byteSize=100,
+                createdAt=now,
+            )
+            self._assets[asset.id] = asset
+            fixed_assets[role] = asset
+        profile_document = {
+            "profileId": "canon-v4-healing-child-cat-style-board",
+            "child": {
+                "age": "6-7",
+                "heightCm": 120,
+                "heightRangeCm": [115, 125],
+                "bodyProportion": "约4.5至5头身的柔和儿童插画比例",
+            },
+            "fixedAssets": {
+                role: {"assetId": str(asset.id), "sha256": asset.sha256}
+                for role, asset in fixed_assets.items()
+            },
+        }
+        self._canon_profiles: list[CanonProfileDto] = [
+            CanonProfileDto(
+                id=self._canon_profile_id,
+                version=4,
+                specVersion=4,
+                active=True,
+                profileHash=hashlib.sha256(
+                    json.dumps(
+                        profile_document,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest(),
+                profile=profile_document,
+                fixedAssets=fixed_assets,
+                createdAt=now,
+            )
+        ]
         self._projects: dict[uuid.UUID, ProjectDto] = {}
         self._planner_sessions: dict[uuid.UUID, tuple[uuid.UUID, int]] = {}
         self._messages: dict[uuid.UUID, list[PlannerMessageDto]] = {}
         self._proposals: dict[uuid.UUID, LifeStoryProposalDto] = {}
         self._stories: dict[uuid.UUID, list[StoryVersionDto]] = {}
         self._shot_plans: dict[uuid.UUID, list[ShotPlanVersionDto]] = {}
-        self._assets: dict[uuid.UUID, AssetDto] = {}
         self._selections: dict[uuid.UUID, list[ProjectSelectionDto]] = {}
         self._jobs: dict[uuid.UUID, JobDto] = {}
         self._jobs_by_idempotency: dict[str, uuid.UUID] = {}
         self._job_events: list[JobEventDto] = []
         self._edits: dict[uuid.UUID, list[EditVersionDto]] = {}
+        self._validation_runs: dict[uuid.UUID, ValidationRunDto] = {}
+        self._environment_presets: list[EnvironmentPresetDto] = []
 
     def active_canon_profile_id(self) -> uuid.UUID:
         return self._canon_profile_id
+
+    def current_canon_profile(self) -> CanonProfileDto:
+        return next(profile for profile in self._canon_profiles if profile.active)
+
+    def register_canon_asset(
+        self,
+        *,
+        role: FixedCanonRole,
+        sha256: str,
+        storage_key: str,
+        byte_size: int,
+    ) -> StoredAssetDto:
+        existing = next(
+            (
+                asset
+                for asset in self._assets.values()
+                if asset.project_id is None and asset.role == role and asset.sha256 == sha256
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        asset = StoredAssetDto(
+            id=uuid.uuid4(),
+            projectId=None,
+            role=role,
+            mediaType="image",
+            storageKey=storage_key,
+            sha256=sha256,
+            byteSize=byte_size,
+            createdAt=datetime.now(UTC),
+        )
+        self._assets[asset.id] = asset
+        return asset
+
+    def publish_canon_revision(
+        self, command: CanonRevisionCreateCommand
+    ) -> CanonProfileDto:
+        fixed: dict[FixedCanonRole, AssetDto] = {}
+        for role in FIXED_CANON_ROLES:
+            asset = self._assets.get(command.fixed_assets[role])
+            if asset is None or asset.project_id is not None or asset.role != role:
+                raise StudioConflictError("fixed asset must be a matching global Canon candidate")
+            fixed[role] = asset
+        document = {
+            "profileId": "canon-v4-healing-child-cat-style-board",
+            "child": {
+                "age": "6-7",
+                "heightCm": 120,
+                "heightRangeCm": [115, 125],
+                "bodyProportion": "约4.5至5头身的柔和儿童插画比例",
+            },
+            "fixedAssets": {
+                role: {"assetId": str(asset.id), "sha256": asset.sha256}
+                for role, asset in fixed.items()
+            },
+        }
+        digest = hashlib.sha256(
+            json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self._canon_profiles = [
+            profile.model_copy(update={"active": False}) for profile in self._canon_profiles
+        ]
+        profile = CanonProfileDto(
+            id=uuid.uuid4(),
+            version=max(item.version for item in self._canon_profiles) + 1,
+            specVersion=4,
+            active=True,
+            profileHash=digest,
+            profile=document,
+            fixedAssets=fixed,
+            createdAt=datetime.now(UTC),
+        )
+        self._canon_profiles.append(profile)
+        self._canon_profile_id = profile.id
+        return profile
+
+    def create_validation_run(self, preview: ValidationRunPreviewDto) -> ValidationRunDto:
+        now = datetime.now(UTC)
+        run = ValidationRunDto(
+            **preview.model_dump(by_alias=True),
+            id=uuid.uuid4(),
+            status="authorized",
+            usage=dict.fromkeys(preview.call_limits, 0),
+            createdAt=now,
+            authorizedAt=now,
+        )
+        self._validation_runs[run.id] = run
+        return run
+
+    def get_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto | None:
+        return self._validation_runs.get(run_id)
+
+    def latest_validation_run(self) -> ValidationRunDto | None:
+        return next(reversed(self._validation_runs.values()), None)
+
+    def set_validation_run_status(
+        self, run_id: uuid.UUID, status: str
+    ) -> ValidationRunDto:
+        run = self._validation_runs.get(run_id)
+        if run is None:
+            raise StudioNotFoundError("validation run not found")
+        updated = run.model_copy(update={"status": status})
+        self._validation_runs[run_id] = updated
+        return updated
+
+    def reserve_validation_call(
+        self, run_id: uuid.UUID, kind: ValidationCallKind
+    ) -> ValidationRunDto:
+        run = self._validation_runs.get(run_id)
+        if run is None:
+            raise StudioNotFoundError("validation run not found")
+        if run.status != "authorized":
+            raise StudioConflictError("validation run is not authorized")
+        usage = reserve_validation_call(first_release_manifest(), run.usage, kind)
+        updated = run.model_copy(update={"usage": usage})
+        self._validation_runs[run_id] = updated
+        return updated
 
     def create_project(self, draft: ProjectCreate, *, canon_profile_id: uuid.UUID) -> ProjectDto:
         now = datetime.now(UTC)
@@ -102,6 +283,15 @@ class MemoryStudioRepository:
             session_id, context_revision = self._planner_sessions[project_id]
         except KeyError as exc:
             raise StudioNotFoundError("planner session not found") from exc
+        latest_job = max(
+            (
+                job
+                for job in self._jobs.values()
+                if job.project_id == project_id and job.kind == "plan_story"
+            ),
+            key=lambda job: (job.created_at, job.id.hex),
+            default=None,
+        )
         return PlannerSnapshotDto(
             sessionId=session_id,
             projectId=project_id,
@@ -111,15 +301,30 @@ class MemoryStudioRepository:
                 [item for item in self._proposals.values() if item.project_id == project_id],
                 key=lambda item: item.id.hex,
             ),
+            latestJob=(
+                PlannerJobDto(
+                    id=latest_job.id,
+                    status=latest_job.status,
+                    provider=latest_job.provider,
+                    model=latest_job.model,
+                    providerTaskId=latest_job.provider_task_id,
+                    error=latest_job.error,
+                    createdAt=latest_job.created_at,
+                    updatedAt=latest_job.updated_at,
+                )
+                if latest_job is not None
+                else None
+            ),
         )
 
     def enqueue_planner_message(
-        self, project_id: uuid.UUID, command: PlannerMessageCommand, *, input_hash: str
+        self, project_id: uuid.UUID, command: PlannerMessageCommand, *, job: JobDto
     ) -> JobDto:
-        existing = self._existing_job(command.idempotency_key, input_hash=input_hash)
+        existing = self._existing_job(command.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
             return existing
         session_id, _ = self._planner_sessions[project_id]
+        created = self.create_job(job)
         messages = self._messages[session_id]
         now = datetime.now(UTC)
         messages.append(
@@ -131,30 +336,7 @@ class MemoryStudioRepository:
                 createdAt=now,
             )
         )
-        return self.create_job(
-            JobDto(
-                id=uuid.uuid4(),
-                projectId=project_id,
-                kind="plan_story",
-                status="queued",
-                inputHash=input_hash,
-                idempotencyKey=command.idempotency_key,
-                provider="fake",
-                model="catflow-fake-planner-v1",
-                expectedCostMicros=0,
-                frozenInput={
-                    "text": command.text,
-                    "contextRevision": command.expected_context_revision,
-                    "sessionId": str(session_id),
-                    "targetDurationSeconds": self._projects[
-                        project_id
-                    ].target_duration_seconds,
-                },
-                resultAssetIds=[],
-                createdAt=now,
-                updatedAt=now,
-            )
-        )
+        return created
 
     def complete_planner_job(
         self, job_id: uuid.UUID, proposal: LifeStoryProposalDraft
@@ -320,7 +502,7 @@ class MemoryStudioRepository:
         storage_key: str,
         byte_size: int,
         producing_job_id: uuid.UUID | None,
-    ) -> AssetDto:
+    ) -> StoredAssetDto:
         existing = next(
             (
                 asset
@@ -331,7 +513,7 @@ class MemoryStudioRepository:
         )
         if existing is not None:
             return existing
-        asset = AssetDto(
+        asset = StoredAssetDto(
             id=uuid.uuid4(),
             projectId=project_id,
             producingJobId=producing_job_id,
@@ -354,9 +536,13 @@ class MemoryStudioRepository:
         asset_id: uuid.UUID,
         decision: str = "selected",
     ) -> ProjectSelectionDto:
+        if slot in self.current_canon_profile().fixed_assets:
+            raise StudioConflictError("global Canon slots cannot be overridden by a project")
         asset = self._assets.get(asset_id)
         if asset is None or asset.project_id != project_id:
             raise StudioNotFoundError("asset not found")
+        if slot == "environment" and (asset.role != "environment" or asset.media_type != "image"):
+            raise StudioConflictError("shared environment must be an environment image")
         selection = ProjectSelectionDto(
             id=uuid.uuid4(),
             projectId=project_id,
@@ -367,14 +553,42 @@ class MemoryStudioRepository:
             createdAt=datetime.now(UTC),
         )
         self._selections.setdefault(project_id, []).append(selection)
+        if slot == "environment":
+            self._environment_presets = [
+                preset.model_copy(update={"active": False})
+                for preset in self._environment_presets
+            ]
+            self._environment_presets.insert(
+                0,
+                EnvironmentPresetDto(
+                    id=uuid.uuid4(),
+                    sourceProjectId=project_id,
+                    asset=asset,
+                    active=True,
+                    createdAt=datetime.now(UTC),
+                ),
+            )
         return selection
 
     def current_selections(self, project_id: uuid.UUID) -> dict[str, AssetDto]:
-        current: dict[str, AssetDto] = {}
+        project = self._projects.get(project_id)
+        if project is None:
+            raise StudioNotFoundError("project not found")
+        profile = next(item for item in self._canon_profiles if item.id == project.canon_profile_id)
+        current: dict[str, AssetDto] = dict(profile.fixed_assets)
         for selection in self._selections.get(project_id, []):
             if selection.decision in {"selected", "approved"}:
                 current[selection.slot] = self._assets[selection.asset_id]
+        active_environment = next(
+            (preset.asset for preset in self._environment_presets if preset.active),
+            None,
+        )
+        if active_environment is not None:
+            current["environment"] = active_environment
         return current
+
+    def environment_presets(self) -> list[EnvironmentPresetDto]:
+        return list(self._environment_presets)
 
     def list_assets(self, project_id: uuid.UUID) -> list[AssetDto]:
         return sorted(
@@ -383,13 +597,31 @@ class MemoryStudioRepository:
             reverse=True,
         )
 
-    def get_asset(self, asset_id: uuid.UUID) -> AssetDto | None:
+    def get_asset(self, asset_id: uuid.UUID) -> StoredAssetDto | None:
         return self._assets.get(asset_id)
 
     def create_job(self, job: JobDto) -> JobDto:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
             return existing
+        if job.validation_run_id is not None:
+            duplicate = next(
+                (
+                    item
+                    for item in self._jobs.values()
+                    if item.validation_run_id == job.validation_run_id
+                    and item.project_id == job.project_id
+                    and item.kind == job.kind
+                ),
+                None,
+            )
+            if duplicate is not None:
+                raise StudioConflictError(
+                    "validation run already has this project call"
+                )
+            self.reserve_validation_call(
+                job.validation_run_id, ValidationCallKind(job.kind)
+            )
         self._jobs[job.id] = job
         self._jobs_by_idempotency[job.idempotency_key] = job.id
         self._record_event(job, "job.queued")
@@ -397,6 +629,38 @@ class MemoryStudioRepository:
 
     def get_job(self, job_id: uuid.UUID) -> JobDto | None:
         return self._jobs.get(job_id)
+
+    def latest_job(self, project_id: uuid.UUID, *, kind: str) -> JobDto | None:
+        return max(
+            (
+                job
+                for job in self._jobs.values()
+                if job.project_id == project_id and job.kind == kind
+            ),
+            key=lambda job: (job.created_at, job.id.hex),
+            default=None,
+        )
+
+    def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise StudioNotFoundError("job not found")
+        if (
+            job.status != "failed"
+            or not isinstance(job.error, dict)
+            or job.error.get("code") != "result_storage_failed"
+            or job.kind not in {"generate_image", "generate_video"}
+            or not isinstance(job.provider_result, dict)
+            or not (job.provider_result.get("url") or job.provider_result.get("videoUrl"))
+            or (job.kind == "generate_video" and not job.provider_task_id)
+        ):
+            raise StudioConflictError("job is not eligible for result storage recovery")
+        updated = job.model_copy(
+            update={"status": "storing", "error": None, "updated_at": datetime.now(UTC)}
+        )
+        self._jobs[job_id] = updated
+        self._record_event(updated, "job.storing")
+        return updated
 
     def cancel_job(self, job_id: uuid.UUID) -> JobDto:
         job = self._jobs.get(job_id)
@@ -413,6 +677,9 @@ class MemoryStudioRepository:
 
     def list_job_events(self, *, after_event_id: int, limit: int = 100) -> list[JobEventDto]:
         return [event for event in self._job_events if event.id > after_event_id][:limit]
+
+    def latest_job_event_id(self) -> int:
+        return self._job_events[-1].id if self._job_events else 0
 
     def create_edit(
         self,

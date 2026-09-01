@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -9,6 +10,7 @@ from catflow.application.service import (
     AssetGenerationPreviewCommand,
     GenerationCommand,
     ImageDiagnosisCommand,
+    JobDto,
     PlannerMessageCommand,
     ProjectCreate,
     ProjectPatch,
@@ -64,7 +66,11 @@ def test_planner_message_is_idempotent_and_adoption_activates_one_story() -> Non
     assert first.id == second.id
     assert first.kind == "plan_story"
     assert first.frozen_input["targetDurationSeconds"] == project.target_duration_seconds
-    assert len(service.get_planner(project.id).messages) == 1
+    pending_planner = service.get_planner(project.id)
+    assert len(pending_planner.messages) == 1
+    assert pending_planner.latest_job is not None
+    assert pending_planner.latest_job.id == first.id
+    assert pending_planner.latest_job.status == "queued"
 
     proposal = service.complete_planner_job(first.id, _proposal())
     story = service.adopt_proposal(project.id, proposal.id)
@@ -124,17 +130,16 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     proposal = service.complete_planner_job(job.id, _proposal())
     story = service.adopt_proposal(project.id, proposal.id)
 
-    selected_assets: dict[str, uuid.UUID] = {}
-    for index, slot in enumerate(
-        ("episode_child", "episode_cat", "pair_scale", "environment", "style_board"), start=1
-    ):
-        asset = service.register_asset(
-            project.id,
-            role=slot,
-            sha256=f"{index:x}" * 64,
-        )
-        service.select_asset(project.id, slot=slot, asset_id=asset.id)
-        selected_assets[slot] = asset.id
+    selected_assets = {
+        role: asset.id for role, asset in service.current_selections(project.id).items()
+    }
+    environment = service.register_asset(
+        project.id,
+        role="environment",
+        sha256="5" * 64,
+    )
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    selected_assets["environment"] = environment.id
 
     shot_plan = service.create_shot_plan(
         project.id,
@@ -181,15 +186,15 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
                     durationSeconds=4,
                     framing="中近景",
                     cameraMovement="缓慢推进",
-                    childAction="收起毛巾",
-                    catAction="靠着孩子打呼噜",
+                    childAction="孩子收起毛巾",
+                    catAction="猫咪靠着孩子打呼噜",
                     environmentChange="暖光落在人猫身上",
                     transition="continuous",
                 ),
             ],
         ),
     )
-    preview = service.preview_video_generation(project.id, maximum_references=4)
+    preview = service.preview_video_generation(project.id)
 
     assert shot_plan.revision == 1
     assert [reference.role for reference in preview.references if reference.included] == [
@@ -197,12 +202,21 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
         "episode_cat",
         "pair_scale",
         "environment",
+        "style_board",
     ]
-    assert next(
-        item for item in preview.references if item.role == "style_board"
-    ).omitted_reason == ("provider_reference_limit")
+    assert all(reference.omitted_reason is None for reference in preview.references)
+    assert "6至7岁" in preview.prompt
+    assert "约1.2米" in preview.prompt
+    assert "4.5至5头身" in preview.prompt
+    assert "禁止8岁以上" in preview.negative_prompt
+    assert "8至9岁" not in preview.prompt
     assert preview.story_version_id == story.id
     assert preview.shot_plan_version_id == shot_plan.id
+    assert "孩子孩子" not in preview.prompt
+    assert "猫咪猫咪" not in preview.prompt
+    assert story.body not in preview.prompt
+    assert story.micro_event.trigger in preview.prompt
+    assert story.micro_event.visible_change in preview.prompt
 
     command = GenerationCommand(
         expectedInputHash=preview.input_hash,
@@ -213,9 +227,18 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     same_video_job = service.create_video_job(project.id, command)
 
     assert first_video_job.id == same_video_job.id
+    workspace = service.workspace(project.id)
+    assert workspace["latestVideoJob"]["id"] == str(first_video_job.id)
+    assert workspace["eventCursor"] >= 1
     assert first_video_job.frozen_input["referenceAssetIds"] == [
         str(selected_assets[slot])
-        for slot in ("episode_child", "episode_cat", "pair_scale", "environment")
+        for slot in (
+            "episode_child",
+            "episode_cat",
+            "pair_scale",
+            "environment",
+            "style_board",
+        )
     ]
 
     selected_video = service.register_asset(
@@ -238,6 +261,71 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
                 idempotencyKey="video-stale",
             ),
         )
+
+
+def test_selected_environment_preset_is_shared_by_every_project() -> None:
+    service = _service()
+    first = _project(service)
+    second = service.create_project(
+        ProjectCreate(
+            title="浇花",
+            theme="孩子浇花，猫咪避开最后一滴水",
+            targetDurationSeconds=12,
+        )
+    )
+    environment = service.register_asset(
+        first.id,
+        role="environment",
+        sha256="9" * 64,
+    )
+
+    service.select_asset(first.id, slot="environment", asset_id=environment.id)
+
+    assert service.current_selections(first.id)["environment"].id == environment.id
+    assert service.current_selections(second.id)["environment"].id == environment.id
+    assert service.environment_presets()[0].asset.id == environment.id
+    assert service.environment_presets()[0].active is True
+
+
+def test_result_storage_failure_can_resume_without_creating_or_resubmitting_a_job() -> None:
+    repository = MemoryStudioRepository()
+    service = StudioService(repository)
+    project = _project(service)
+    now = datetime.now(UTC)
+    job = repository.create_job(
+        JobDto(
+            id=uuid.uuid4(),
+            projectId=project.id,
+            kind="generate_video",
+            status="failed",
+            inputHash="a" * 64,
+            idempotencyKey=f"video-storage-recovery-{project.id}",
+            provider="ark",
+            model="video-model",
+            providerTaskId="provider-task-1",
+            providerResult={
+                "videoUrl": "https://ark.cn-beijing.volces.com/result.mp4",
+                "ratio": "9:16",
+                "resolution": "480p",
+            },
+            frozenInput={"durationSeconds": 12},
+            error={
+                "code": "result_storage_failed",
+                "message": "native Ark size was rejected",
+                "retryable": False,
+            },
+            createdAt=now,
+            updatedAt=now,
+        )
+    )
+
+    resumed = service.resume_job_storage(job.id)
+
+    assert resumed.id == job.id
+    assert resumed.status == "storing"
+    assert resumed.provider_task_id == "provider-task-1"
+    assert resumed.error is None
+    assert service.workspace(project.id)["latestVideoJob"]["id"] == str(job.id)
 
 
 def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> None:
@@ -265,13 +353,7 @@ def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> 
 def test_image_diagnosis_freezes_candidate_and_labeled_identity_style_references() -> None:
     service = _service()
     project = _project(service)
-    assets = {}
-    for index, role in enumerate(
-        ("episode_child", "episode_cat", "pair_scale", "style_board"), start=1
-    ):
-        asset = service.register_asset(project.id, role=role, sha256=f"{index}" * 64)
-        service.select_asset(project.id, slot=role, asset_id=asset.id)
-        assets[role] = asset
+    assets = service.current_selections(project.id)
 
     job = service.create_image_diagnosis_job(
         project.id,

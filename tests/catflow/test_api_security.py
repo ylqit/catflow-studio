@@ -15,21 +15,23 @@ def _client() -> TestClient:
         settings=AppSettings(
             csrf_token="csrf-for-test",
             allowed_hosts=("testserver", "127.0.0.1", "localhost"),
-            allowed_origins=("http://127.0.0.1:8765", "http://localhost:8765"),
+            allowed_origins=("http://127.0.0.1:8877", "http://localhost:8877"),
+            base_url="http://127.0.0.1:8877",
         ),
     )
     return TestClient(app)
 
 
-def test_runtime_bootstrap_exposes_only_the_ephemeral_csrf_token() -> None:
+def test_runtime_bootstrap_exposes_loopback_readiness_without_provider_secrets() -> None:
     response = _client().get("/api/v1/runtime/bootstrap")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "csrfToken": "csrf-for-test",
-        "baseUrl": "http://127.0.0.1:8765",
-        "localOnly": True,
-    }
+    payload = response.json()
+    assert payload["csrfToken"] == "csrf-for-test"
+    assert payload["baseUrl"] == "http://127.0.0.1:8877"
+    assert payload["localOnly"] is True
+    assert payload["provider"]["apiKeyConfigured"] is False
+    assert "apiKey" not in payload["provider"]
 
 
 def test_write_request_requires_same_origin_and_csrf_header() -> None:
@@ -50,7 +52,7 @@ def test_write_request_requires_same_origin_and_csrf_header() -> None:
         "/api/v1/projects",
         json=payload,
         headers={
-            "Origin": "http://127.0.0.1:8765",
+            "Origin": "http://127.0.0.1:8877",
             "X-CatFlow-CSRF": "csrf-for-test",
         },
     )

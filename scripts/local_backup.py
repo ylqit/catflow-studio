@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from sqlalchemy import DateTime, select
 from sqlalchemy.dialects.postgresql import UUID
 
+from catflow.config import RuntimePaths
 from catflow.infrastructure.database import (
     DatabaseSettings,
     create_database_engine,
@@ -21,6 +22,7 @@ from catflow.infrastructure.models import Base
 TABLE_ORDER = (
     "canon_profiles",
     "projects",
+    "validation_runs",
     "life_planner_sessions",
     "life_planner_messages",
     "life_planner_proposals",
@@ -28,6 +30,7 @@ TABLE_ORDER = (
     "shot_plan_versions",
     "jobs",
     "assets",
+    "environment_presets",
     "project_selections",
     "job_events",
     "edit_versions",
@@ -42,15 +45,16 @@ def main() -> None:
     arguments = parser.parse_args()
     project_root = Path(__file__).resolve().parents[1]
     load_dotenv(project_root / ".env", override=True)
+    paths = RuntimePaths.from_env(project_root)
     settings = DatabaseSettings.from_env()
     if inspect_database_name(settings.url) != "catflow_studio":
         raise RuntimeError("backup and restore are restricted to the catflow_studio database")
     engine = create_database_engine(settings)
     try:
         if arguments.mode == "backup":
-            backup(engine, project_root, arguments.archive)
+            backup(engine, paths, arguments.archive)
         else:
-            restore(engine, project_root, arguments.archive, replace=arguments.replace)
+            restore(engine, paths, arguments.archive, replace=arguments.replace)
     finally:
         engine.dispose()
 
@@ -61,7 +65,7 @@ def inspect_database_name(url: str) -> str | None:
     return make_url(url).database
 
 
-def backup(engine: Any, project_root: Path, archive: Path) -> None:
+def backup(engine: Any, paths: RuntimePaths, archive: Path) -> None:
     archive = archive.resolve()
     archive.parent.mkdir(parents=True, exist_ok=True)
     document: dict[str, list[dict[str, object]]] = {}
@@ -70,7 +74,7 @@ def backup(engine: Any, project_root: Path, archive: Path) -> None:
             table = Base.metadata.tables[f"catflow.{name}"]
             rows = connection.execute(select(table)).mappings().all()
             document[name] = [{key: _encode(value) for key, value in row.items()} for row in rows]
-    media_root = project_root / "var" / "media"
+    media_root = paths.media_root
     temporary = archive.with_suffix(archive.suffix + ".partial")
     with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr(
@@ -94,7 +98,7 @@ def backup(engine: Any, project_root: Path, archive: Path) -> None:
     print(f"Backup created: {archive}")
 
 
-def restore(engine: Any, project_root: Path, archive: Path, *, replace: bool) -> None:
+def restore(engine: Any, paths: RuntimePaths, archive: Path, *, replace: bool) -> None:
     archive = archive.resolve()
     if not archive.is_file():
         raise FileNotFoundError(archive)
@@ -143,7 +147,7 @@ def restore(engine: Any, project_root: Path, archive: Path, *, replace: bool) ->
                     (maximum_event_id,),
                 )
 
-        media_root = project_root / "var" / "media"
+        media_root = paths.media_root
         media_root.mkdir(parents=True, exist_ok=True)
         for member in bundle.infolist():
             if member.is_dir() or not member.filename.startswith("media/"):

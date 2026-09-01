@@ -52,10 +52,14 @@ def canon_v4_document() -> dict[str, object]:
     return {
         "profileId": "canon-v4-healing-child-cat-style-board",
         "child": {
-            "age": "8-9",
-            "identity": "固定同一位8至9岁儿童",
-            "hair": "齐下颌短发",
-            "lockedTraits": ["脸型", "年龄感", "发型", "身体比例"],
+            "age": "6-7",
+            "heightCm": 120,
+            "heightRangeCm": [115, 125],
+            "bodyProportion": "约4.5至5头身的柔和儿童插画比例",
+            "identity": "固定同一位6至7岁、身高约1.2米的儿童",
+            "hair": "深棕黑色齐下颌短发、轻薄刘海",
+            "face": "柔和圆润的低龄儿童脸型",
+            "lockedTraits": ["脸型", "年龄感", "发型", "身高感", "头身比例", "身体结构"],
         },
         "cat": {
             "identity": "固定同一只灰白虎斑猫",
@@ -73,6 +77,8 @@ def canon_v4_document() -> dict[str, object]:
                 "摄影写实",
                 "3D塑料玩具质感",
                 "角色身份漂移",
+                "8岁以上的修长儿童比例、青少年或成人脸型、过长四肢",
+                "超过约5头身或人猫比例失真",
                 "文字、Logo、水印",
                 "叶片、露珠和绿色微距摄影构图",
             ],
@@ -93,6 +99,14 @@ def canon_v4_hash() -> str:
 
 
 def ensure_canon_v4(session: Session) -> CanonProfileRecord:
+    active = session.scalar(
+        select(CanonProfileRecord).where(
+            CanonProfileRecord.profile_key == "canon-v4-healing-child-cat-style-board",
+            CanonProfileRecord.active.is_(True),
+        )
+    )
+    if active is not None:
+        return active
     existing = session.scalar(
         select(CanonProfileRecord).where(
             CanonProfileRecord.profile_key == "canon-v4-healing-child-cat-style-board",
@@ -100,9 +114,8 @@ def ensure_canon_v4(session: Session) -> CanonProfileRecord:
         )
     )
     if existing is not None:
-        if not existing.active:
-            session.execute(update(CanonProfileRecord).values(active=False))
-            existing.active = True
+        session.execute(update(CanonProfileRecord).values(active=False))
+        existing.active = True
         return existing
     session.execute(update(CanonProfileRecord).values(active=False))
     profile = CanonProfileRecord(

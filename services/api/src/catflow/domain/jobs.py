@@ -13,12 +13,18 @@ class JobStatus(StrEnum):
     FAILED = "failed"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
+    SUBMISSION_UNKNOWN = "submission_unknown"
 
 
 _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     JobStatus.QUEUED: frozenset({JobStatus.SUBMITTING, JobStatus.CANCELLED}),
     JobStatus.SUBMITTING: frozenset(
-        {JobStatus.SUBMITTED, JobStatus.FAILED, JobStatus.CANCEL_REQUESTED}
+        {
+            JobStatus.SUBMITTED,
+            JobStatus.FAILED,
+            JobStatus.CANCEL_REQUESTED,
+            JobStatus.SUBMISSION_UNKNOWN,
+        }
     ),
     JobStatus.SUBMITTED: frozenset(
         {JobStatus.POLLING, JobStatus.FAILED, JobStatus.CANCEL_REQUESTED}
@@ -31,6 +37,7 @@ _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     JobStatus.SUCCEEDED: frozenset(),
     JobStatus.FAILED: frozenset(),
     JobStatus.CANCELLED: frozenset(),
+    JobStatus.SUBMISSION_UNKNOWN: frozenset(),
 }
 
 

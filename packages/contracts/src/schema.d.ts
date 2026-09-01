@@ -73,6 +73,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/canon/assets/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Canon Asset */
+        post: operations["upload_canon_asset_api_v1_canon_assets_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/canon/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Canon Revision */
+        post: operations["publish_canon_revision_api_v1_canon_revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/validation-runs/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Validation Run */
+        post: operations["preview_validation_run_api_v1_validation_runs_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/validation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Authorize Validation Run */
+        post: operations["authorize_validation_run_api_v1_validation_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/validation-runs/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current Validation Run */
+        get: operations["current_validation_run_api_v1_validation_runs_current_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/validation-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Validation Run */
+        get: operations["get_validation_run_api_v1_validation_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/validation-runs/{run_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Validation Run */
+        post: operations["pause_validation_run_api_v1_validation_runs__run_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -264,6 +383,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/environment-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Environment Presets */
+        get: operations["environment_presets_api_v1_environment_presets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assets/{asset_id}": {
         parameters: {
             query?: never;
@@ -400,6 +536,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-diagnoses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Diagnose Video */
+        post: operations["diagnose_video_api_v1_projects__project_id__video_diagnoses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -428,6 +581,23 @@ export interface paths {
         put?: never;
         /** Cancel Job */
         post: operations["cancel_job_api_v1_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/resume-storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Job Storage */
+        post: operations["resume_job_storage_api_v1_jobs__job_id__resume_storage_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -533,6 +703,8 @@ export interface components {
             id: string;
             /** Projectid */
             projectId?: string | null;
+            /** Canonprofileid */
+            canonProfileId?: string | null;
             /** Producingjobid */
             producingJobId?: string | null;
             /** Candidateindex */
@@ -544,8 +716,6 @@ export interface components {
              * @enum {string}
              */
             mediaType: "image" | "video" | "audio";
-            /** Storagekey */
-            storageKey: string;
             /** Sha256 */
             sha256: string;
             /** Bytesize */
@@ -565,9 +735,16 @@ export interface components {
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Expectedcostmicros */
-            expectedCostMicros: number;
+            expectedCostMicros?: number | null;
             /** Idempotencykey */
             idempotencyKey: string;
+            /** Validationrunid */
+            validationRunId?: string | null;
+            /**
+             * Paidcallacknowledged
+             * @default false
+             */
+            paidCallAcknowledged: boolean;
             /**
              * Kind
              * @enum {string}
@@ -604,7 +781,12 @@ export interface components {
             /** References */
             references: components["schemas"]["CompiledReference"][];
             /** Expectedcostmicros */
-            expectedCostMicros: number;
+            expectedCostMicros?: number | null;
+            /**
+             * Costestimatestatus
+             * @enum {string}
+             */
+            costEstimateStatus: "priced" | "unmetered_paid";
             /** Warnings */
             warnings?: {
                 [key: string]: string;
@@ -614,6 +796,51 @@ export interface components {
         Body_upload_asset_api_v1_projects__project_id__assets_upload_post: {
             /** File */
             file: string;
+        };
+        /** Body_upload_canon_asset_api_v1_canon_assets_upload_post */
+        Body_upload_canon_asset_api_v1_canon_assets_upload_post: {
+            /** File */
+            file: string;
+        };
+        /** CanonProfileDto */
+        CanonProfileDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /**
+             * Specversion
+             * @default 4
+             * @constant
+             */
+            specVersion: 4;
+            /** Active */
+            active: boolean;
+            /** Profilehash */
+            profileHash: string;
+            /** Profile */
+            profile: {
+                [key: string]: unknown;
+            };
+            /** Fixedassets */
+            fixedAssets: {
+                [key: string]: components["schemas"]["AssetDto"];
+            };
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** CanonRevisionCreateCommand */
+        CanonRevisionCreateCommand: {
+            /** Fixedassets */
+            fixedAssets: {
+                [key: string]: string;
+            };
         };
         /** CompiledReference */
         CompiledReference: {
@@ -732,6 +959,27 @@ export interface components {
              */
             createdAt: string;
         };
+        /** EnvironmentPresetDto */
+        EnvironmentPresetDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Sourceprojectid
+             * Format: uuid
+             */
+            sourceProjectId: string;
+            asset: components["schemas"]["AssetDto"];
+            /** Active */
+            active: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
         /** ExportCommand */
         ExportCommand: {
             /**
@@ -755,9 +1003,16 @@ export interface components {
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Expectedcostmicros */
-            expectedCostMicros: number;
+            expectedCostMicros?: number | null;
             /** Idempotencykey */
             idempotencyKey: string;
+            /** Validationrunid */
+            validationRunId?: string | null;
+            /**
+             * Paidcallacknowledged
+             * @default false
+             */
+            paidCallAcknowledged: boolean;
         };
         /** GenerationPreviewDto */
         GenerationPreviewDto: {
@@ -782,7 +1037,12 @@ export interface components {
             /** References */
             references: components["schemas"]["CompiledReference"][];
             /** Expectedcostmicros */
-            expectedCostMicros: number;
+            expectedCostMicros?: number | null;
+            /**
+             * Costestimatestatus
+             * @enum {string}
+             */
+            costEstimateStatus: "priced" | "unmetered_paid";
             /**
              * Storyversionid
              * Format: uuid
@@ -814,12 +1074,15 @@ export interface components {
             assetId: string;
             /** Idempotencykey */
             idempotencyKey: string;
+            /** Expectedcostmicros */
+            expectedCostMicros?: number | null;
+            /** Validationrunid */
+            validationRunId?: string | null;
             /**
-             * Expectedcostmicros
-             * @default 0
-             * @constant
+             * Paidcallacknowledged
+             * @default false
              */
-            expectedCostMicros: 0;
+            paidCallAcknowledged: boolean;
         };
         /** JobDto */
         JobDto: {
@@ -837,12 +1100,12 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "render_export";
+            kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "render_export";
             /**
              * Status
              * @enum {string}
              */
-            status: "queued" | "submitting" | "submitted" | "polling" | "storing" | "succeeded" | "failed" | "cancel_requested" | "cancelled";
+            status: "queued" | "submitting" | "submitted" | "polling" | "storing" | "succeeded" | "failed" | "cancel_requested" | "cancelled" | "submission_unknown";
             /** Inputhash */
             inputHash: string;
             /** Idempotencykey */
@@ -853,6 +1116,20 @@ export interface components {
             model?: string | null;
             /** Providertaskid */
             providerTaskId?: string | null;
+            /** Validationrunid */
+            validationRunId?: string | null;
+            /** Parentjobid */
+            parentJobId?: string | null;
+            /** Providersubmissionstartedat */
+            providerSubmissionStartedAt?: string | null;
+            /** Providerresult */
+            providerResult?: {
+                [key: string]: unknown;
+            } | null;
+            /** Actualusage */
+            actualUsage?: {
+                [key: string]: unknown;
+            } | null;
             /** Expectedcostmicros */
             expectedCostMicros?: number | null;
             /** Frozeninput */
@@ -962,6 +1239,39 @@ export interface components {
             /** Warmending */
             warmEnding: string;
         };
+        /** PlannerJobDto */
+        PlannerJobDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "submitting" | "submitted" | "polling" | "storing" | "succeeded" | "failed" | "cancel_requested" | "cancelled" | "submission_unknown";
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Providertaskid */
+            providerTaskId?: string | null;
+            /** Error */
+            error?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
         /** PlannerMessageCommand */
         PlannerMessageCommand: {
             /** Text */
@@ -970,6 +1280,13 @@ export interface components {
             expectedContextRevision: number;
             /** Idempotencykey */
             idempotencyKey: string;
+            /** Validationrunid */
+            validationRunId?: string | null;
+            /**
+             * Paidcallacknowledged
+             * @default false
+             */
+            paidCallAcknowledged: boolean;
         };
         /** PlannerMessageDto */
         PlannerMessageDto: {
@@ -1011,14 +1328,7 @@ export interface components {
             messages: components["schemas"]["PlannerMessageDto"][];
             /** Proposals */
             proposals: components["schemas"]["LifeStoryProposalDto"][];
-        };
-        /** PreviewCommand */
-        PreviewCommand: {
-            /**
-             * Maximumreferences
-             * @default 4
-             */
-            maximumReferences: number;
+            latestJob?: components["schemas"]["PlannerJobDto"] | null;
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -1245,6 +1555,50 @@ export interface components {
              */
             createdAt: string;
         };
+        /**
+         * ValidationCallKind
+         * @enum {string}
+         */
+        ValidationCallKind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video";
+        /** ValidationCanonReferenceDto */
+        ValidationCanonReferenceDto: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "episode_child" | "episode_cat" | "pair_scale" | "style_board";
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** ValidationCanonSnapshotDto */
+        ValidationCanonSnapshotDto: {
+            /**
+             * Profileid
+             * Format: uuid
+             */
+            profileId: string;
+            /** Version */
+            version: number;
+            /** Profilehash */
+            profileHash: string;
+            /**
+             * Childage
+             * @constant
+             */
+            childAge: "6-7";
+            /**
+             * Childheightcm
+             * @constant
+             */
+            childHeightCm: 120;
+            /** References */
+            references: components["schemas"]["ValidationCanonReferenceDto"][];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1257,6 +1611,130 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** ValidationRunCreateCommand */
+        ValidationRunCreateCommand: {
+            /** Expectedmanifesthash */
+            expectedManifestHash: string;
+            /**
+             * Paidcallacknowledged
+             * @constant
+             */
+            paidCallAcknowledged: true;
+        };
+        /** ValidationRunDto */
+        ValidationRunDto: {
+            /** Manifesthash */
+            manifestHash: string;
+            /** Topics */
+            topics: string[];
+            /** Durationseconds */
+            durationSeconds: number;
+            /** Resolution */
+            resolution: string;
+            /** Aspectratio */
+            aspectRatio: string;
+            /** Targetbudgetcny */
+            targetBudgetCny: number;
+            /** Calllimits */
+            callLimits: {
+                [key: string]: number;
+            };
+            /** Totalcalllimit */
+            totalCallLimit: number;
+            /** Maximumvideocalls */
+            maximumVideoCalls: number;
+            /** Provider */
+            provider: string;
+            /** Models */
+            models: {
+                [key: string]: string;
+            };
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /**
+             * Costestimatestatus
+             * @enum {string}
+             */
+            costEstimateStatus: "priced" | "unmetered_paid";
+            canon?: components["schemas"]["ValidationCanonSnapshotDto"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "authorized" | "paused" | "completed" | "cancelled";
+            /** Usage */
+            usage: {
+                [key: string]: number;
+            };
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Authorizedat */
+            authorizedAt?: string | null;
+        };
+        /** ValidationRunPreviewDto */
+        ValidationRunPreviewDto: {
+            /** Manifesthash */
+            manifestHash: string;
+            /** Topics */
+            topics: string[];
+            /** Durationseconds */
+            durationSeconds: number;
+            /** Resolution */
+            resolution: string;
+            /** Aspectratio */
+            aspectRatio: string;
+            /** Targetbudgetcny */
+            targetBudgetCny: number;
+            /** Calllimits */
+            callLimits: {
+                [key: string]: number;
+            };
+            /** Totalcalllimit */
+            totalCallLimit: number;
+            /** Maximumvideocalls */
+            maximumVideoCalls: number;
+            /** Provider */
+            provider: string;
+            /** Models */
+            models: {
+                [key: string]: string;
+            };
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /**
+             * Costestimatestatus
+             * @enum {string}
+             */
+            costEstimateStatus: "priced" | "unmetered_paid";
+            canon: components["schemas"]["ValidationCanonSnapshotDto"];
+        };
+        /** VideoDiagnosisCommand */
+        VideoDiagnosisCommand: {
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Expectedcostmicros */
+            expectedCostMicros?: number | null;
+            /** Validationrunid */
+            validationRunId?: string | null;
+            /**
+             * Paidcallacknowledged
+             * @default false
+             */
+            paidCallAcknowledged: boolean;
         };
     };
     responses: never;
@@ -1385,9 +1863,231 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanonProfileDto"];
+                };
+            };
+        };
+    };
+    upload_canon_asset_api_v1_canon_assets_upload_post: {
+        parameters: {
+            query: {
+                role: "episode_child" | "episode_cat" | "pair_scale" | "style_board";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_canon_asset_api_v1_canon_assets_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_canon_revision_api_v1_canon_revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CanonRevisionCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CanonProfileDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_validation_run_api_v1_validation_runs_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationRunPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authorize_validation_run_api_v1_validation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidationRunCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationRunDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    current_validation_run_api_v1_validation_runs_current_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationRunDto"] | null;
+                };
+            };
+        };
+    };
+    get_validation_run_api_v1_validation_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationRunDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_validation_run_api_v1_validation_runs__run_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationRunDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1887,6 +2587,26 @@ export interface operations {
             };
         };
     };
+    environment_presets_api_v1_environment_presets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentPresetDto"][];
+                };
+            };
+        };
+    };
     asset_api_v1_assets__asset_id__get: {
         parameters: {
             query?: never;
@@ -2105,9 +2825,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
-                "application/json": components["schemas"]["PreviewCommand"];
+                "application/json": {
+                    [key: string]: unknown;
+                };
             };
         };
         responses: {
@@ -2166,6 +2888,41 @@ export interface operations {
             };
         };
     };
+    diagnose_video_api_v1_projects__project_id__video_diagnoses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoDiagnosisCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     job_api_v1_jobs__job_id__get: {
         parameters: {
             query?: never;
@@ -2198,6 +2955,43 @@ export interface operations {
         };
     };
     cancel_job_api_v1_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_job_storage_api_v1_jobs__job_id__resume_storage_post: {
         parameters: {
             query?: never;
             header?: never;

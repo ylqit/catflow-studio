@@ -3,9 +3,23 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$pidFile = Join-Path $projectRoot 'var\work\local-processes.json'
+$environmentFile = Join-Path $projectRoot '.env'
+if (Test-Path -LiteralPath $environmentFile) {
+    foreach ($line in Get-Content -LiteralPath $environmentFile) {
+        if ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+        }
+    }
+}
+. (Join-Path $PSScriptRoot 'runtime-paths.ps1')
+$runtimePaths = Get-CatFlowRuntimePaths -ProjectRoot $projectRoot
+$pidFile = Join-Path $runtimePaths.WorkRoot 'local-processes.json'
+$workerReadyFile = Join-Path $runtimePaths.WorkRoot 'worker-ready.json'
 
 if (-not (Test-Path -LiteralPath $pidFile)) {
+    if (Test-Path -LiteralPath $workerReadyFile) {
+        Remove-Item -LiteralPath $workerReadyFile
+    }
     Write-Host 'No CatFlow process record exists; business data was not touched.'
     return
 }
@@ -19,4 +33,7 @@ foreach ($processId in @($recorded.apiPid, $recorded.workerPid)) {
     }
 }
 Remove-Item -LiteralPath $pidFile
+if (Test-Path -LiteralPath $workerReadyFile) {
+    Remove-Item -LiteralPath $workerReadyFile
+}
 Write-Host 'CatFlow API and Worker stopped. PostgreSQL, media, configuration and backups were preserved.'

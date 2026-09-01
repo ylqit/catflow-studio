@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import time
@@ -8,7 +9,9 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
+from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import StudioService
+from catflow.config import RuntimePaths
 from catflow.infrastructure.database import (
     DatabaseSettings,
     create_database_engine,
@@ -17,9 +20,14 @@ from catflow.infrastructure.database import (
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 
+from .ark_gateway import ArkGatewaySettings, ArkTypedGateway
+from .ark_job_gateway import ArkProviderJobGateway
+from .ark_results import ArkResultLandingService
 from .fake_provider import FakeProviderGateway
 from .media_jobs import MediaJobExecutor
+from .provider_media import ProviderMediaDownloader
 from .runner import DurableJobWorker
+from .runtime_support import AssetMediaResolver, JobResultDispatcher
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -32,29 +40,63 @@ def run_worker(
     """Run the durable planning, fake-media and FFmpeg worker."""
     project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
     load_dotenv(project_root / ".env", override=True)
-    provider_name = os.environ.get("CATFLOW_PROVIDER", "fake")
-    if provider_name != "fake":
-        raise typer.BadParameter(
-            "Only the zero-cost fake provider is enabled in this implementation."
-        )
+    paths = RuntimePaths.from_env(project_root)
+    provider_runtime = ProviderRuntime.from_env()
     ffmpeg_path = _required_tool("FFMPEG_PATH")
     ffprobe_path = _required_tool("FFPROBE_PATH")
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(PostgresStudioRepository(sessions))
-    media_store = LocalMediaStore(project_root / os.environ.get("CATFLOW_MEDIA_ROOT", "var/media"))
-    worker = DurableJobWorker(
+    service = StudioService(
+        PostgresStudioRepository(sessions), provider_runtime=provider_runtime
+    )
+    media_store = LocalMediaStore(paths.media_root)
+    local_results = MediaJobExecutor(
         sessions,
-        FakeProviderGateway(),
-        worker_id=f"{socket.gethostname()}-{os.getpid()}",
-        studio_service=service,
-        result_handler=MediaJobExecutor(
+        media_store,
+        ffmpeg_path=ffmpeg_path,
+        ffprobe_path=ffprobe_path,
+    )
+    if provider_runtime.provider == "ark":
+        typed_gateway = ArkTypedGateway(ArkGatewaySettings.from_env())
+        resolver = AssetMediaResolver(
             sessions,
             media_store,
             ffmpeg_path=ffmpeg_path,
+        )
+        provider = ArkProviderJobGateway(
+            typed_gateway,
+            resolve_asset_paths=resolver.resolve_paths,
+            extract_video_frames=resolver.extract_video_frames,
+        )
+        ark_results = ArkResultLandingService(
+            sessions,
+            media_store,
+            studio_service=service,
+            downloader=ProviderMediaDownloader(),
             ffprobe_path=ffprobe_path,
+        )
+    else:
+        provider = FakeProviderGateway()
+        ark_results = None
+    worker = DurableJobWorker(
+        sessions,
+        provider,
+        worker_id=f"{socket.gethostname()}-{os.getpid()}",
+        studio_service=service,
+        result_handler=JobResultDispatcher(
+            sessions,
+            local=local_results,
+            ark=ark_results,
         ),
     )
+    ready_file = paths.work_root / "worker-ready.json"
+    ready_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary_ready_file = ready_file.with_suffix(".partial")
+    temporary_ready_file.write_text(
+        json.dumps({"pid": os.getpid(), "provider": provider_runtime.provider}),
+        encoding="utf-8",
+    )
+    temporary_ready_file.replace(ready_file)
     try:
         while True:
             handled = worker.run_once()
@@ -65,6 +107,7 @@ def run_worker(
     except KeyboardInterrupt:
         return
     finally:
+        ready_file.unlink(missing_ok=True)
         engine.dispose()
 
 

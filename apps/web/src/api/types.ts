@@ -2,6 +2,68 @@ export interface RuntimeBootstrapDto {
   csrfToken: string;
   baseUrl: string;
   localOnly: true;
+  databaseReady: boolean;
+  workerReady: boolean;
+  ffmpegReady: boolean;
+  ffprobeReady: boolean;
+  provider: {
+    name: "fake" | "ark";
+    planningModel: string;
+    imageModel: string;
+    videoModel: string;
+    diagnosticModel: string;
+    capabilityRevision: string;
+    paidCallsEnabled: boolean;
+    apiKeyConfigured: boolean;
+  };
+}
+
+export type ValidationCallKind =
+  | "plan_story"
+  | "generate_image"
+  | "diagnose_image"
+  | "generate_video"
+  | "diagnose_video";
+
+export type FixedCanonRole = "episode_child" | "episode_cat" | "pair_scale" | "style_board";
+
+export interface ValidationCanonSnapshotDto {
+  profileId: string;
+  version: number;
+  profileHash: string;
+  childAge: "6-7";
+  childHeightCm: 120;
+  references: Array<{
+    role: FixedCanonRole;
+    assetId: string;
+    sha256: string;
+  }>;
+}
+
+export interface ValidationRunPreviewDto {
+  manifestHash: string;
+  topics: string[];
+  durationSeconds: 12;
+  resolution: "480p";
+  aspectRatio: "9:16";
+  targetBudgetCny: number;
+  callLimits: Record<ValidationCallKind, number>;
+  totalCallLimit: number;
+  maximumVideoCalls: number;
+  provider: string;
+  models: Record<string, string>;
+  capabilityRevision: string;
+  costEstimateStatus: "priced" | "unmetered_paid";
+  canon: ValidationCanonSnapshotDto;
+}
+
+export interface ValidationRunDto extends Omit<ValidationRunPreviewDto, "canon"> {
+  canon: ValidationCanonSnapshotDto | null;
+  id: string;
+  status: "draft" | "authorized" | "paused" | "completed" | "cancelled";
+  usage: Record<ValidationCallKind, number>;
+  createdAt: string;
+  authorizedAt?: string;
 }
 
 export interface ProjectCreate {
@@ -21,7 +83,7 @@ export interface ProjectDto extends ProjectCreate {
 export interface JobDto {
   id: string;
   projectId: string;
-  kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "render_export";
+  kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "render_export";
   status:
     | "queued"
     | "submitting"
@@ -31,13 +93,17 @@ export interface JobDto {
     | "succeeded"
     | "failed"
     | "cancel_requested"
-    | "cancelled";
+    | "cancelled"
+    | "submission_unknown";
   inputHash: string;
+  provider?: string;
+  model?: string;
   providerTaskId?: string;
-  expectedCostMicros?: number;
+  validationRunId?: string;
+  expectedCostMicros?: number | null;
   frozenInput: Record<string, unknown>;
   resultAssetIds: string[];
-  error?: { code: string; message: string; retryable: boolean };
+  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; timedOut?: boolean };
 }
 
 export interface PlannerMessageDto {
@@ -46,6 +112,17 @@ export interface PlannerMessageDto {
   content: string;
   ordinal: number;
   createdAt: string;
+}
+
+export interface PlannerJobDto {
+  id: string;
+  status: JobDto["status"];
+  provider?: string;
+  model?: string;
+  providerTaskId?: string;
+  error?: { code?: string; message?: string; retryable?: boolean; requestId?: string };
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface MicroEventDto {
@@ -77,6 +154,7 @@ export interface PlannerSnapshotDto {
   contextRevision: number;
   messages: PlannerMessageDto[];
   proposals: LifeStoryProposalDto[];
+  latestJob?: PlannerJobDto;
 }
 
 export interface StoryVersionDto {
@@ -106,12 +184,33 @@ export type AssetGenerationKind = Exclude<AssetSlot, "video" | "final">;
 
 export interface AssetDto {
   id: string;
-  projectId: string;
+  projectId?: string;
+  canonProfileId?: string;
+  producingJobId?: string;
   role: string;
   mediaType: "image" | "video" | "audio";
   sha256: string;
   byteSize: number;
   metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface EnvironmentPresetDto {
+  id: string;
+  sourceProjectId: string;
+  asset: AssetDto;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface CanonProfileDto {
+  id: string;
+  version: number;
+  specVersion: 4;
+  active: boolean;
+  profileHash: string;
+  profile: Record<string, unknown>;
+  fixedAssets: Partial<Record<FixedCanonRole, AssetDto>>;
   createdAt: string;
 }
 
@@ -147,7 +246,11 @@ export interface GenerationPreviewDto {
   model: string;
   prompt: string;
   negativePrompt: string;
-  expectedCostMicros: number;
+  expectedCostMicros: number | null;
+  costEstimateStatus: "priced" | "unmetered_paid";
+  capabilityRevision: string;
+  storyVersionId: string;
+  shotPlanVersionId: string;
   selectionHash: string;
   references: Array<{
     assetId: string;
@@ -169,7 +272,8 @@ export interface AssetGenerationPreviewDto {
   prompt: string;
   negativePrompt: string;
   references: GenerationPreviewDto["references"];
-  expectedCostMicros: number;
+  expectedCostMicros: number | null;
+  costEstimateStatus: "priced" | "unmetered_paid";
   warnings: Array<{ code: string; message: string }>;
 }
 
@@ -201,10 +305,12 @@ export interface EditVersionDto {
 }
 
 export interface WorkspaceDto {
-  project: ProjectDto;
+    eventCursor: number;
+    project: ProjectDto;
   steps: Array<{ id: string; ready: boolean }>;
   activeStory: StoryVersionDto | null;
   activeShotPlan: ShotPlanVersionDto | null;
   selections: Partial<Record<AssetSlot, AssetDto>>;
   selectionHash: string;
+  latestVideoJob?: JobDto | null;
 }

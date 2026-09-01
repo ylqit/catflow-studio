@@ -4,10 +4,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from catflow.application.gateways import ProviderGatewayError
 from catflow.application.service import StudioService
 from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.models import JobEventRecord, JobRecord
@@ -17,11 +18,24 @@ class ProviderPoll(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["running", "succeeded", "failed"]
+    result: dict[str, object] | None = None
+    usage: dict[str, object] | None = None
     error: dict[str, object] | None = None
 
 
+class ProviderSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    task_id: str | None = Field(alias="taskId", default=None)
+    result: dict[str, object] | None = None
+    usage: dict[str, object] | None = None
+    metadata: dict[str, object] | None = None
+
+
 class ProviderTaskGateway(Protocol):
-    def submit(self, *, job_id: uuid.UUID, frozen_input: dict[str, object]) -> str: ...
+    def submit(
+        self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
+    ) -> ProviderSubmission: ...
 
     def poll(self, provider_task_id: str) -> ProviderPoll: ...
 
@@ -54,27 +68,53 @@ class DurableJobWorker:
         claimed = self._claim()
         if claimed is None:
             return False
-        job_id, kind, status, provider_task_id, frozen_input = claimed
+        (
+            job_id,
+            kind,
+            provider,
+            status,
+            provider_task_id,
+            submission_started_at,
+            frozen_input,
+        ) = claimed
 
         if status == "cancel_requested":
             self._cancel(job_id, provider_task_id)
         elif status == "storing":
             self._store_local_result(job_id)
-        elif kind == "plan_story" and status == "submitting":
+        elif kind == "plan_story" and provider == "fake" and status == "submitting":
             self._complete_fake_planner_job(job_id, frozen_input)
         elif kind == "render_export" and status == "submitting":
             self._store_local_result(job_id)
-        elif status == "submitting" and provider_task_id is None:
-            self._submit(job_id, frozen_input)
-        elif status == "submitting":
+        elif status == "submitting" and provider_task_id is not None:
             self._mark_submitted(job_id)
+        elif status == "submitting" and submission_started_at is not None:
+            self._mark_submission_unknown(
+                job_id,
+                ProviderGatewayError(
+                    code="provider_submission_interrupted",
+                    message="provider submission started before the worker restarted",
+                    retryable=False,
+                    submission_unknown=True,
+                ),
+            )
+        elif status == "submitting":
+            self._submit(job_id, frozen_input)
         elif status in {"submitted", "polling"}:
             self._poll(job_id, provider_task_id)
         return True
 
     def _claim(
         self,
-    ) -> tuple[uuid.UUID, str, str, str | None, dict[str, object]] | None:
+    ) -> tuple[
+        uuid.UUID,
+        str,
+        str | None,
+        str,
+        str | None,
+        datetime | None,
+        dict[str, object],
+    ] | None:
         now = datetime.now(UTC)
         priority = case(
             (JobRecord.status.in_(("cancel_requested", "storing")), 0),
@@ -113,8 +153,10 @@ class DurableJobWorker:
             return (
                 job.id,
                 job.kind,
+                job.provider,
                 job.status,
                 job.provider_task_id,
+                job.provider_submission_started_at,
                 dict(job.frozen_input_json),
             )
 
@@ -149,9 +191,46 @@ class DurableJobWorker:
         )
 
     def _submit(self, job_id: uuid.UUID, frozen_input: dict[str, object]) -> None:
-        provider_task_id = self._provider.submit(job_id=job_id, frozen_input=frozen_input)
-        if not provider_task_id:
-            raise RuntimeError("provider did not return a task id")
+        if not self._begin_submission(job_id):
+            return
+        try:
+            submission = self._provider.submit(
+                job_id=job_id,
+                kind=self._job_kind(job_id),
+                frozen_input=frozen_input,
+            )
+        except ProviderGatewayError as exc:
+            if exc.submission_unknown:
+                self._mark_submission_unknown(job_id, exc)
+            else:
+                self._fail_with_document(job_id, exc.as_error_document())
+            return
+        except Exception as exc:
+            self._mark_submission_unknown(
+                job_id,
+                ProviderGatewayError(
+                    code="provider_submission_exception",
+                    message=str(exc),
+                    retryable=False,
+                    submission_unknown=True,
+                ),
+            )
+            return
+        if submission.result is not None:
+            self._persist_immediate_result(job_id, submission)
+            return
+        if not submission.task_id:
+            self._mark_submission_unknown(
+                job_id,
+                ProviderGatewayError(
+                    code="missing_provider_task_id",
+                    message="provider did not return a task id",
+                    retryable=False,
+                    submission_unknown=True,
+                ),
+            )
+            return
+        provider_task_id = submission.task_id
         with self._sessions.begin() as session:
             job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None:
@@ -163,10 +242,65 @@ class DurableJobWorker:
                 self._release(job)
                 return
             job.provider_task_id = provider_task_id
+            job.provider_result_json = submission.metadata
             job.status = "submitted"
             job.updated_at = datetime.now(UTC)
             self._release(job)
             self._add_event(session, job, "job.submitted")
+
+    def _job_kind(self, job_id: uuid.UUID) -> str:
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if job is None:
+                raise ValueError("job not found")
+            return job.kind
+
+    def _persist_immediate_result(
+        self, job_id: uuid.UUID, submission: ProviderSubmission
+    ) -> None:
+        with self._sessions.begin() as session:
+            job = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if job is None or job.status != "submitting":
+                return
+            job.provider_result_json = submission.result
+            job.actual_usage_json = submission.usage
+            job.status = "storing" if self._result_handler is not None else "succeeded"
+            job.updated_at = datetime.now(UTC)
+            self._release(job)
+            self._add_event(session, job, f"job.{job.status}")
+        if self._result_handler is not None:
+            self._store_local_result(job_id)
+
+    def _begin_submission(self, job_id: uuid.UUID) -> bool:
+        with self._sessions.begin() as session:
+            job = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if job is None or job.status != "submitting" or job.provider_task_id is not None:
+                return False
+            if job.provider_submission_started_at is not None:
+                return False
+            job.provider_submission_started_at = datetime.now(UTC)
+            job.updated_at = job.provider_submission_started_at
+            session.flush()
+            return True
+
+    def _mark_submission_unknown(
+        self, job_id: uuid.UUID, error: ProviderGatewayError
+    ) -> None:
+        with self._sessions.begin() as session:
+            job = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if job is None:
+                return
+            job.status = "submission_unknown"
+            job.error_json = error.as_error_document()
+            job.updated_at = datetime.now(UTC)
+            self._release(job)
+            self._add_event(session, job, "job.submission_unknown")
 
     def _mark_submitted(self, job_id: uuid.UUID) -> None:
         with self._sessions.begin() as session:
@@ -192,6 +326,11 @@ class DurableJobWorker:
                 job.status = "polling"
                 event_type = "job.polling"
             elif result.status == "succeeded":
+                job.provider_result_json = {
+                    **dict(job.provider_result_json or {}),
+                    **dict(result.result or {}),
+                }
+                job.actual_usage_json = result.usage
                 job.status = "storing" if self._result_handler is not None else "succeeded"
                 event_type = f"job.{job.status}"
             else:
@@ -258,6 +397,19 @@ class DurableJobWorker:
                 "message": message,
                 "retryable": retryable,
             }
+            job.updated_at = datetime.now(UTC)
+            self._release(job)
+            self._add_event(session, job, "job.failed")
+
+    def _fail_with_document(self, job_id: uuid.UUID, error: dict[str, object]) -> None:
+        with self._sessions.begin() as session:
+            job = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if job is None:
+                return
+            job.status = "failed"
+            job.error_json = error
             job.updated_at = datetime.now(UTC)
             self._release(job)
             self._add_event(session, job, "job.failed")

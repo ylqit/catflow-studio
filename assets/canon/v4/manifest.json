@@ -1,0 +1,56 @@
+{
+  "format": "catflow-canon-pack-v1",
+  "specVersion": 4,
+  "profileKey": "canon-v4-healing-child-cat-style-board",
+  "identityAuthority": {
+    "childAge": "6-7",
+    "childHeightCm": 120,
+    "childHeightRangeCm": [115, 125],
+    "childBodyProportion": "4.5-5-heads",
+    "childHair": "jaw-length-short",
+    "catPattern": "gray-white-tabby"
+  },
+  "assets": [
+    {
+      "role": "episode_child",
+      "file": "episode-child.png",
+      "sha256": "f36c293aaa0064daab3a82bb1ddf05e4f019ffb3441f0470708f0bf8cad5632f",
+      "providerEligible": true
+    },
+    {
+      "role": "episode_cat",
+      "file": "episode-cat.png",
+      "sha256": "ba9ff0c48cc38cc125e9e8fcf18eba0c8ccd398bb5d7497afb6550963660dd4c",
+      "providerEligible": true
+    },
+    {
+      "role": "pair_scale",
+      "file": "pair-scale.png",
+      "sha256": "fdca346beae17e000ae580cf13849bde9134fa9cd811fc676f7bbd65dcfe8037",
+      "providerEligible": true
+    },
+    {
+      "role": "style_board",
+      "file": "style-board.png",
+      "sha256": "2201e1771b7ba309bb9b51223704ab0f69478b035c27dfe8f35a704dbf57c4fc",
+      "providerEligible": true
+    }
+  ],
+  "lineage": [
+    {
+      "sourcePath": "风格定稿/Canon-v1/人物-全身.png",
+      "sourceSha256": "f36c293aaa0064daab3a82bb1ddf05e4f019ffb3441f0470708f0bf8cad5632f",
+      "providerEligible": false
+    },
+    {
+      "sourcePath": "风格定稿/Canon-v1/猫咪-侧面.png",
+      "sourceSha256": "ba9ff0c48cc38cc125e9e8fcf18eba0c8ccd398bb5d7497afb6550963660dd4c",
+      "providerEligible": false
+    },
+    {
+      "sourcePath": "风格定稿/Canon-v4/画风-治愈线条材质板.png",
+      "sourceSha256": "2201e1771b7ba309bb9b51223704ab0f69478b035c27dfe8f35a704dbf57c4fc",
+      "providerEligible": false
+    }
+  ]
+}

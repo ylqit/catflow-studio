@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
+import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,10 +20,14 @@ from catflow.application.service import (
     AssetGenerationCommand,
     AssetGenerationPreviewCommand,
     AssetGenerationPreviewDto,
+    CanonProfileDto,
+    CanonRevisionCreateCommand,
     EditCreateCommand,
     EditVersionDto,
+    EnvironmentPresetDto,
     ExportCommand,
     FinalSelectionCommand,
+    FixedCanonRole,
     GenerationCommand,
     GenerationPreviewDto,
     ImageDiagnosisCommand,
@@ -38,30 +44,35 @@ from catflow.application.service import (
     StudioConflictError,
     StudioNotFoundError,
     StudioService,
+    ValidationRunCreateCommand,
+    ValidationRunDto,
+    ValidationRunPreviewDto,
+    VideoDiagnosisCommand,
 )
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import ShotPlanDraft
-from catflow.infrastructure.database import canon_v4_document, canon_v4_hash
 from catflow.infrastructure.media import InvalidMediaError, LocalMediaStore
 
 
 @dataclass(frozen=True, slots=True)
 class AppSettings:
     csrf_token: str
+    base_url: str = "http://127.0.0.1:8877"
+    ark_api_key_configured: bool = False
+    worker_ready: bool = True
+    worker_ready_file: Path | None = None
+    ffmpeg_ready: bool = True
+    ffprobe_ready: bool = True
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost")
     allowed_origins: tuple[str, ...] = (
-        "http://127.0.0.1:8765",
-        "http://localhost:8765",
+        "http://127.0.0.1:8877",
+        "http://localhost:8877",
     )
 
 
 class SelectionCommand(ContractModel):
     slot: str = Field(min_length=1, max_length=32)
     asset_id: uuid.UUID = Field(alias="assetId")
-
-
-class PreviewCommand(ContractModel):
-    maximum_references: int = Field(alias="maximumReferences", default=4, ge=0, le=20)
 
 
 def create_app(
@@ -126,19 +137,38 @@ def create_app(
 
     @app.get("/api/v1/runtime/bootstrap")
     def runtime_bootstrap() -> dict[str, object]:
+        provider = service.provider_runtime
         return {
             "csrfToken": settings.csrf_token,
-            "baseUrl": "http://127.0.0.1:8765",
+            "baseUrl": settings.base_url,
             "localOnly": True,
+            "databaseReady": True,
+            "workerReady": _worker_ready(settings),
+            "ffmpegReady": settings.ffmpeg_ready,
+            "ffprobeReady": settings.ffprobe_ready,
+            "provider": {
+                "name": provider.provider,
+                "planningModel": provider.planning_model,
+                "imageModel": provider.image_model,
+                "videoModel": provider.video_model,
+                "diagnosticModel": provider.diagnostic_model,
+                "capabilityRevision": provider.capability_revision,
+                "paidCallsEnabled": provider.paid_calls_enabled,
+                "apiKeyConfigured": settings.ark_api_key_configured,
+            },
         }
 
     @app.get("/api/v1/runtime/settings")
     def runtime_settings() -> dict[str, object]:
+        provider = service.provider_runtime
         return {
-            "provider": "fake",
-            "planningModel": "catflow-fake-planner-v1",
-            "videoModel": "catflow-fake-video-v1",
-            "paidCallsEnabled": False,
+            "provider": provider.provider,
+            "planningModel": provider.planning_model,
+            "imageModel": provider.image_model,
+            "videoModel": provider.video_model,
+            "diagnosticModel": provider.diagnostic_model,
+            "capabilityRevision": provider.capability_revision,
+            "paidCallsEnabled": provider.paid_calls_enabled,
         }
 
     @app.put("/api/v1/runtime/settings")
@@ -148,13 +178,74 @@ def create_app(
         return runtime_settings()
 
     @app.get("/api/v1/canon/current")
-    def current_canon() -> dict[str, object]:
-        return {
-            "id": str(service.current_canon_profile_id()),
-            "version": 4,
-            "profileHash": canon_v4_hash(),
-            "profile": canon_v4_document(),
-        }
+    def current_canon() -> CanonProfileDto:
+        return service.current_canon()
+
+    @app.post(
+        "/api/v1/canon/assets/upload",
+        response_model=AssetDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_canon_asset(
+        role: FixedCanonRole,
+        file: UploadFile = File(...),
+    ) -> AssetDto:
+        if media_store is None:
+            raise HTTPException(status_code=503, detail="media storage unavailable")
+        payload = await file.read(30 * 1024 * 1024 + 1)
+        if len(payload) > 30 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Canon image exceeds 30 MiB")
+        stored = media_store.save_upload(
+            payload,
+            filename=file.filename or "canon.png",
+            declared_content_type=file.content_type or "application/octet-stream",
+            role=f"canon-{role}",
+        )
+        return service.register_canon_asset(
+            role=role,
+            sha256=stored.sha256,
+            storage_key=stored.storage_key,
+            byte_size=stored.byte_size,
+        )
+
+    @app.post(
+        "/api/v1/canon/revisions",
+        response_model=CanonProfileDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def publish_canon_revision(command: CanonRevisionCreateCommand) -> CanonProfileDto:
+        return service.publish_canon_revision(command)
+
+    @app.post(
+        "/api/v1/validation-runs/preview",
+        response_model=ValidationRunPreviewDto,
+    )
+    def preview_validation_run(
+        _payload: dict[str, Any] = Body(default={}),
+    ) -> ValidationRunPreviewDto:
+        return service.preview_validation_run()
+
+    @app.post(
+        "/api/v1/validation-runs",
+        response_model=ValidationRunDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def authorize_validation_run(command: ValidationRunCreateCommand) -> ValidationRunDto:
+        return service.authorize_validation_run(command)
+
+    @app.get("/api/v1/validation-runs/current", response_model=ValidationRunDto | None)
+    def current_validation_run() -> ValidationRunDto | None:
+        return service.current_validation_run()
+
+    @app.get("/api/v1/validation-runs/{run_id}", response_model=ValidationRunDto)
+    def get_validation_run(run_id: uuid.UUID) -> ValidationRunDto:
+        return service.get_validation_run(run_id)
+
+    @app.post("/api/v1/validation-runs/{run_id}/pause", response_model=ValidationRunDto)
+    def pause_validation_run(
+        run_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+    ) -> ValidationRunDto:
+        return service.pause_validation_run(run_id)
 
     @app.get("/api/v1/projects", response_model=list[ProjectDto])
     def list_projects() -> list[ProjectDto]:
@@ -251,6 +342,13 @@ def create_app(
     def assets(project_id: uuid.UUID) -> list[AssetDto]:
         return service.list_assets(project_id)
 
+    @app.get(
+        "/api/v1/environment-presets",
+        response_model=list[EnvironmentPresetDto],
+    )
+    def environment_presets() -> list[EnvironmentPresetDto]:
+        return service.environment_presets()
+
     @app.get("/api/v1/assets/{asset_id}", response_model=AssetDto)
     def asset(asset_id: uuid.UUID) -> AssetDto:
         return service.get_asset(asset_id)
@@ -328,10 +426,10 @@ def create_app(
         "/api/v1/projects/{project_id}/video-generations/preview",
         response_model=GenerationPreviewDto,
     )
-    def preview_video(project_id: uuid.UUID, command: PreviewCommand) -> GenerationPreviewDto:
-        return service.preview_video_generation(
-            project_id, maximum_references=command.maximum_references
-        )
+    def preview_video(
+        project_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+    ) -> GenerationPreviewDto:
+        return service.preview_video_generation(project_id)
 
     @app.post(
         "/api/v1/projects/{project_id}/video-generations",
@@ -341,6 +439,14 @@ def create_app(
     def create_video_job(project_id: uuid.UUID, command: GenerationCommand) -> JobDto:
         return service.create_video_job(project_id, command)
 
+    @app.post(
+        "/api/v1/projects/{project_id}/video-diagnoses",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def diagnose_video(project_id: uuid.UUID, command: VideoDiagnosisCommand) -> JobDto:
+        return service.create_video_diagnosis_job(project_id, command)
+
     @app.get("/api/v1/jobs/{job_id}", response_model=JobDto)
     def job(job_id: uuid.UUID) -> JobDto:
         return service.get_job(job_id)
@@ -348,6 +454,12 @@ def create_app(
     @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobDto)
     def cancel_job(job_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})) -> JobDto:
         return service.cancel_job(job_id)
+
+    @app.post("/api/v1/jobs/{job_id}/resume-storage", response_model=JobDto)
+    def resume_job_storage(
+        job_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+    ) -> JobDto:
+        return service.resume_job_storage(job_id)
 
     @app.get("/api/v1/events")
     async def events(request: Request, afterEventId: int = 0) -> StreamingResponse:  # noqa: N803
@@ -408,7 +520,7 @@ def create_app(
     def asset_content(asset_id: uuid.UUID) -> FileResponse:
         if media_store is None:
             raise HTTPException(status_code=503, detail="media storage unavailable")
-        asset = service.get_asset(asset_id)
+        asset = service.get_stored_asset(asset_id)
         path = media_store.resolve(asset.storage_key)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="asset content not found")
@@ -419,7 +531,7 @@ def create_app(
             ".webp": "image/webp",
             ".mp4": "video/mp4",
         }.get(path.suffix.lower(), "application/octet-stream")
-        return FileResponse(path, media_type=media_type, filename=path.name)
+        return FileResponse(path, media_type=media_type)
 
     if spa_dist is not None:
         index_path = spa_dist / "index.html"
@@ -436,3 +548,33 @@ def create_app(
             return FileResponse(index_path, media_type="text/html")
 
     return app
+
+
+def _worker_ready(settings: AppSettings) -> bool:
+    if settings.worker_ready_file is None:
+        return settings.worker_ready
+    try:
+        document = json.loads(settings.worker_ready_file.read_text(encoding="utf-8"))
+        process_id = int(document["pid"])
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return False
+    return _process_exists(process_id)
+
+
+def _process_exists(process_id: int) -> bool:
+    if os.name != "nt":
+        try:
+            os.kill(process_id, 0)
+        except OSError:
+            return False
+        return True
+    process_query_limited_information = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+        process_query_limited_information,
+        False,
+        process_id,
+    )
+    if not handle:
+        return False
+    ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+    return True

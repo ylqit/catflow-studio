@@ -117,9 +117,296 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Current Canon Api V1 Canon Current Get"
+                  "$ref": "#/components/schemas/CanonProfileDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/canon/assets/upload": {
+      "post": {
+        "summary": "Upload Canon Asset",
+        "operationId": "upload_canon_asset_api_v1_canon_assets_upload_post",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "episode_child",
+                "episode_cat",
+                "pair_scale",
+                "style_board"
+              ],
+              "type": "string",
+              "title": "Role"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_canon_asset_api_v1_canon_assets_upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/canon/revisions": {
+      "post": {
+        "summary": "Publish Canon Revision",
+        "operationId": "publish_canon_revision_api_v1_canon_revisions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CanonRevisionCreateCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanonProfileDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/validation-runs/preview": {
+      "post": {
+        "summary": "Preview Validation Run",
+        "operationId": "preview_validation_run_api_v1_validation_runs_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": " Payload",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRunPreviewDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/validation-runs": {
+      "post": {
+        "summary": "Authorize Validation Run",
+        "operationId": "authorize_validation_run_api_v1_validation_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidationRunCreateCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRunDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/validation-runs/current": {
+      "get": {
+        "summary": "Current Validation Run",
+        "operationId": "current_validation_run_api_v1_validation_runs_current_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ValidationRunDto"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Current Validation Run Api V1 Validation Runs Current Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/validation-runs/{run_id}": {
+      "get": {
+        "summary": "Get Validation Run",
+        "operationId": "get_validation_run_api_v1_validation_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRunDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/validation-runs/{run_id}/pause": {
+      "post": {
+        "summary": "Pause Validation Run",
+        "operationId": "pause_validation_run_api_v1_validation_runs__run_id__pause_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRunDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -819,6 +1106,28 @@
         }
       }
     },
+    "/api/v1/environment-presets": {
+      "get": {
+        "summary": "Environment Presets",
+        "operationId": "environment_presets_api_v1_environment_presets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EnvironmentPresetDto"
+                  },
+                  "type": "array",
+                  "title": "Response Environment Presets Api V1 Environment Presets Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assets/{asset_id}": {
       "get": {
         "summary": "Asset",
@@ -1145,11 +1454,13 @@
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PreviewCommand"
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
               }
             }
           }
@@ -1228,6 +1539,56 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/video-diagnoses": {
+      "post": {
+        "summary": "Diagnose Video",
+        "operationId": "diagnose_video_api_v1_projects__project_id__video_diagnoses_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoDiagnosisCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs/{job_id}": {
       "get": {
         "summary": "Job",
@@ -1272,6 +1633,58 @@
       "post": {
         "summary": "Cancel Job",
         "operationId": "cancel_job_api_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/resume-storage": {
+      "post": {
+        "summary": "Resume Job Storage",
+        "operationId": "resume_job_storage_api_v1_jobs__job_id__resume_storage_post",
         "parameters": [
           {
             "name": "job_id",
@@ -1610,6 +2023,18 @@
             ],
             "title": "Projectid"
           },
+          "canonProfileId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonprofileid"
+          },
           "producingJobId": {
             "anyOf": [
               {
@@ -1646,10 +2071,6 @@
             ],
             "title": "Mediatype"
           },
-          "storageKey": {
-            "type": "string",
-            "title": "Storagekey"
-          },
           "sha256": {
             "type": "string",
             "title": "Sha256"
@@ -1675,7 +2096,6 @@
           "id",
           "role",
           "mediaType",
-          "storageKey",
           "sha256",
           "byteSize",
           "createdAt"
@@ -1690,8 +2110,15 @@
             "title": "Expectedinputhash"
           },
           "expectedCostMicros": {
-            "type": "integer",
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expectedcostmicros"
           },
           "idempotencyKey": {
@@ -1699,6 +2126,23 @@
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "paidCallAcknowledged": {
+            "type": "boolean",
+            "title": "Paidcallacknowledged",
+            "default": false
           },
           "kind": {
             "type": "string",
@@ -1716,7 +2160,6 @@
         "type": "object",
         "required": [
           "expectedInputHash",
-          "expectedCostMicros",
           "idempotencyKey",
           "kind"
         ],
@@ -1788,8 +2231,23 @@
             "title": "References"
           },
           "expectedCostMicros": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expectedcostmicros"
+          },
+          "costEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "unmetered_paid"
+            ],
+            "title": "Costestimatestatus"
           },
           "warnings": {
             "items": {
@@ -1813,7 +2271,7 @@
           "prompt",
           "negativePrompt",
           "references",
-          "expectedCostMicros"
+          "costEstimateStatus"
         ],
         "title": "AssetGenerationPreviewDto"
       },
@@ -1830,6 +2288,110 @@
           "file"
         ],
         "title": "Body_upload_asset_api_v1_projects__project_id__assets_upload_post"
+      },
+      "Body_upload_canon_asset_api_v1_canon_assets_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_canon_asset_api_v1_canon_assets_upload_post"
+      },
+      "CanonProfileDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "specVersion": {
+            "type": "integer",
+            "const": 4,
+            "title": "Specversion",
+            "default": 4
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "profileHash": {
+            "type": "string",
+            "title": "Profilehash"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile"
+          },
+          "fixedAssets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AssetDto"
+            },
+            "propertyNames": {
+              "enum": [
+                "episode_child",
+                "episode_cat",
+                "pair_scale",
+                "style_board"
+              ]
+            },
+            "type": "object",
+            "title": "Fixedassets"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "version",
+          "active",
+          "profileHash",
+          "profile",
+          "fixedAssets",
+          "createdAt"
+        ],
+        "title": "CanonProfileDto"
+      },
+      "CanonRevisionCreateCommand": {
+        "properties": {
+          "fixedAssets": {
+            "additionalProperties": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "propertyNames": {
+              "enum": [
+                "episode_child",
+                "episode_cat",
+                "pair_scale",
+                "style_board"
+              ]
+            },
+            "type": "object",
+            "title": "Fixedassets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "fixedAssets"
+        ],
+        "title": "CanonRevisionCreateCommand"
       },
       "CompiledReference": {
         "properties": {
@@ -2100,6 +2662,42 @@
         ],
         "title": "EditVersionDto"
       },
+      "EnvironmentPresetDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "sourceProjectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sourceprojectid"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/AssetDto"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "sourceProjectId",
+          "asset",
+          "active",
+          "createdAt"
+        ],
+        "title": "EnvironmentPresetDto"
+      },
       "ExportCommand": {
         "properties": {
           "editVersionId": {
@@ -2145,8 +2743,15 @@
             "title": "Expectedinputhash"
           },
           "expectedCostMicros": {
-            "type": "integer",
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expectedcostmicros"
           },
           "idempotencyKey": {
@@ -2154,13 +2759,29 @@
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "paidCallAcknowledged": {
+            "type": "boolean",
+            "title": "Paidcallacknowledged",
+            "default": false
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "expectedInputHash",
-          "expectedCostMicros",
           "idempotencyKey"
         ],
         "title": "GenerationCommand"
@@ -2205,8 +2826,23 @@
             "title": "References"
           },
           "expectedCostMicros": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expectedcostmicros"
+          },
+          "costEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "unmetered_paid"
+            ],
+            "title": "Costestimatestatus"
           },
           "storyVersionId": {
             "type": "string",
@@ -2243,7 +2879,7 @@
           "prompt",
           "negativePrompt",
           "references",
-          "expectedCostMicros",
+          "costEstimateStatus",
           "storyVersionId",
           "shotPlanVersionId",
           "selectionHash"
@@ -2277,10 +2913,33 @@
             "title": "Idempotencykey"
           },
           "expectedCostMicros": {
-            "type": "integer",
-            "const": 0,
-            "title": "Expectedcostmicros",
-            "default": 0
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedcostmicros"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "paidCallAcknowledged": {
+            "type": "boolean",
+            "title": "Paidcallacknowledged",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -2310,6 +2969,7 @@
               "generate_image",
               "diagnose_image",
               "generate_video",
+              "diagnose_video",
               "render_export"
             ],
             "title": "Kind"
@@ -2325,7 +2985,8 @@
               "succeeded",
               "failed",
               "cancel_requested",
-              "cancelled"
+              "cancelled",
+              "submission_unknown"
             ],
             "title": "Status"
           },
@@ -2369,6 +3030,66 @@
               }
             ],
             "title": "Providertaskid"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "parentJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentjobid"
+          },
+          "providerSubmissionStartedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providersubmissionstartedat"
+          },
+          "providerResult": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerresult"
+          },
+          "actualUsage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualusage"
           },
           "expectedCostMicros": {
             "anyOf": [
@@ -2668,6 +3389,95 @@
         ],
         "title": "MicroEvent"
       },
+      "PlannerJobDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "submitting",
+              "submitted",
+              "polling",
+              "storing",
+              "succeeded",
+              "failed",
+              "cancel_requested",
+              "cancelled",
+              "submission_unknown"
+            ],
+            "title": "Status"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "providerTaskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providertaskid"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "PlannerJobDto"
+      },
       "PlannerMessageCommand": {
         "properties": {
           "text": {
@@ -2686,6 +3496,23 @@
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "paidCallAcknowledged": {
+            "type": "boolean",
+            "title": "Paidcallacknowledged",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -2766,6 +3593,16 @@
             },
             "type": "array",
             "title": "Proposals"
+          },
+          "latestJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlannerJobDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -2778,20 +3615,6 @@
           "proposals"
         ],
         "title": "PlannerSnapshotDto"
-      },
-      "PreviewCommand": {
-        "properties": {
-          "maximumReferences": {
-            "type": "integer",
-            "maximum": 20.0,
-            "minimum": 0.0,
-            "title": "Maximumreferences",
-            "default": 4
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "PreviewCommand"
       },
       "ProjectCreate": {
         "properties": {
@@ -3311,6 +4134,95 @@
         ],
         "title": "StoryVersionDto"
       },
+      "ValidationCallKind": {
+        "type": "string",
+        "enum": [
+          "plan_story",
+          "generate_image",
+          "diagnose_image",
+          "generate_video",
+          "diagnose_video"
+        ],
+        "title": "ValidationCallKind"
+      },
+      "ValidationCanonReferenceDto": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "episode_child",
+              "episode_cat",
+              "pair_scale",
+              "style_board"
+            ],
+            "title": "Role"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "assetId",
+          "sha256"
+        ],
+        "title": "ValidationCanonReferenceDto"
+      },
+      "ValidationCanonSnapshotDto": {
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Profileid"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "profileHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Profilehash"
+          },
+          "childAge": {
+            "type": "string",
+            "const": "6-7",
+            "title": "Childage"
+          },
+          "childHeightCm": {
+            "type": "integer",
+            "const": 120,
+            "title": "Childheightcm"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationCanonReferenceDto"
+            },
+            "type": "array",
+            "title": "References"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profileId",
+          "version",
+          "profileHash",
+          "childAge",
+          "childHeightCm",
+          "references"
+        ],
+        "title": "ValidationCanonSnapshotDto"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -3350,6 +4262,319 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ValidationRunCreateCommand": {
+        "properties": {
+          "expectedManifestHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedmanifesthash"
+          },
+          "paidCallAcknowledged": {
+            "type": "boolean",
+            "const": true,
+            "title": "Paidcallacknowledged"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedManifestHash",
+          "paidCallAcknowledged"
+        ],
+        "title": "ValidationRunCreateCommand"
+      },
+      "ValidationRunDto": {
+        "properties": {
+          "manifestHash": {
+            "type": "string",
+            "title": "Manifesthash"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "title": "Durationseconds"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "title": "Aspectratio"
+          },
+          "targetBudgetCny": {
+            "type": "integer",
+            "title": "Targetbudgetcny"
+          },
+          "callLimits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/ValidationCallKind"
+            },
+            "type": "object",
+            "title": "Calllimits"
+          },
+          "totalCallLimit": {
+            "type": "integer",
+            "title": "Totalcalllimit"
+          },
+          "maximumVideoCalls": {
+            "type": "integer",
+            "title": "Maximumvideocalls"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Models"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "costEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "unmetered_paid"
+            ],
+            "title": "Costestimatestatus"
+          },
+          "canon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationCanonSnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "authorized",
+              "paused",
+              "completed",
+              "cancelled"
+            ],
+            "title": "Status"
+          },
+          "usage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/ValidationCallKind"
+            },
+            "type": "object",
+            "title": "Usage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "authorizedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorizedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "manifestHash",
+          "topics",
+          "durationSeconds",
+          "resolution",
+          "aspectRatio",
+          "targetBudgetCny",
+          "callLimits",
+          "totalCallLimit",
+          "maximumVideoCalls",
+          "provider",
+          "models",
+          "capabilityRevision",
+          "costEstimateStatus",
+          "id",
+          "status",
+          "usage",
+          "createdAt"
+        ],
+        "title": "ValidationRunDto"
+      },
+      "ValidationRunPreviewDto": {
+        "properties": {
+          "manifestHash": {
+            "type": "string",
+            "title": "Manifesthash"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "title": "Durationseconds"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "title": "Aspectratio"
+          },
+          "targetBudgetCny": {
+            "type": "integer",
+            "title": "Targetbudgetcny"
+          },
+          "callLimits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/ValidationCallKind"
+            },
+            "type": "object",
+            "title": "Calllimits"
+          },
+          "totalCallLimit": {
+            "type": "integer",
+            "title": "Totalcalllimit"
+          },
+          "maximumVideoCalls": {
+            "type": "integer",
+            "title": "Maximumvideocalls"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Models"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "costEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "unmetered_paid"
+            ],
+            "title": "Costestimatestatus"
+          },
+          "canon": {
+            "$ref": "#/components/schemas/ValidationCanonSnapshotDto"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "manifestHash",
+          "topics",
+          "durationSeconds",
+          "resolution",
+          "aspectRatio",
+          "targetBudgetCny",
+          "callLimits",
+          "totalCallLimit",
+          "maximumVideoCalls",
+          "provider",
+          "models",
+          "capabilityRevision",
+          "costEstimateStatus",
+          "canon"
+        ],
+        "title": "ValidationRunPreviewDto"
+      },
+      "VideoDiagnosisCommand": {
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          },
+          "expectedCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedcostmicros"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "paidCallAcknowledged": {
+            "type": "boolean",
+            "title": "Paidcallacknowledged",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assetId",
+          "idempotencyKey"
+        ],
+        "title": "VideoDiagnosisCommand"
       }
     }
   }

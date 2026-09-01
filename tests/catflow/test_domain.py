@@ -161,3 +161,13 @@ def test_job_state_machine_never_reenters_submission_after_provider_acceptance()
 
     with pytest.raises(ValueError, match="submitted.*submitting"):
         transition_job(JobStatus.SUBMITTED, JobStatus.SUBMITTING)
+
+
+def test_submission_unknown_is_terminal_and_cannot_be_resubmitted() -> None:
+    assert (
+        transition_job(JobStatus.SUBMITTING, JobStatus.SUBMISSION_UNKNOWN)
+        is JobStatus.SUBMISSION_UNKNOWN
+    )
+
+    with pytest.raises(ValueError, match="submission_unknown.*submitting"):
+        transition_job(JobStatus.SUBMISSION_UNKNOWN, JobStatus.SUBMITTING)

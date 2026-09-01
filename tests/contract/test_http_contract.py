@@ -4,25 +4,39 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import StudioService
 from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
 from catflow.interfaces.api import AppSettings, create_app
 
 WRITE_HEADERS = {
-    "Origin": "http://127.0.0.1:8765",
+    "Origin": "http://127.0.0.1:8877",
     "X-CatFlow-CSRF": "contract-csrf",
 }
 
 
 def _app_client() -> tuple[StudioService, TestClient]:
-    service = StudioService(MemoryStudioRepository())
+    service = StudioService(
+        MemoryStudioRepository(),
+        provider_runtime=ProviderRuntime(
+            provider="ark",
+            planning_model="doubao-seed-2-1-pro-260628",
+            image_model="doubao-seedream-5-0-260128",
+            video_model="doubao-seedance-2-0-260128",
+            diagnostic_model="doubao-seed-2-1-pro-260628",
+            capability_revision="ark-seedance-2.0-v1",
+            paid_calls_enabled=True,
+            maximum_video_references=5,
+        ),
+    )
     app = create_app(
         service,
         settings=AppSettings(
             csrf_token="contract-csrf",
             allowed_hosts=("testserver",),
-            allowed_origins=("http://127.0.0.1:8765",),
+            allowed_origins=("http://127.0.0.1:8877",),
+            base_url="http://127.0.0.1:8877",
         ),
     )
     return service, TestClient(app)
@@ -35,6 +49,9 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
     assert {
         "/api/v1/health",
         "/api/v1/runtime/bootstrap",
+        "/api/v1/validation-runs/preview",
+        "/api/v1/validation-runs",
+        "/api/v1/validation-runs/{run_id}",
         "/api/v1/canon/current",
         "/api/v1/projects",
         "/api/v1/projects/{project_id}",
@@ -57,6 +74,7 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
         "/api/v1/projects/{project_id}/video-generations",
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/cancel",
+        "/api/v1/jobs/{job_id}/resume-storage",
         "/api/v1/events",
         "/api/v1/projects/{project_id}/edits",
         "/api/v1/projects/{project_id}/exports",
@@ -66,13 +84,52 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
     assert all("/api/v2" not in path for path in paths)
 
 
+def test_validation_run_http_flow_only_authorizes_the_frozen_manifest() -> None:
+    service, client = _app_client()
+
+    preview = client.post(
+        "/api/v1/validation-runs/preview",
+        json={},
+        headers=WRITE_HEADERS,
+    )
+    assert preview.status_code == 200
+    assert preview.json()["totalCallLimit"] == 9
+    assert preview.json()["maximumVideoCalls"] == 3
+
+    authorized = client.post(
+        "/api/v1/validation-runs",
+        json={
+            "expectedManifestHash": preview.json()["manifestHash"],
+            "paidCallAcknowledged": True,
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert authorized.status_code == 201
+    run_id = authorized.json()["id"]
+    assert client.get(f"/api/v1/validation-runs/{run_id}").json()["status"] == "authorized"
+    assert service.list_projects() == []
+
+
 def test_planner_http_flow_returns_durable_job_and_adopts_directly_to_story() -> None:
     service, client = _app_client()
+    manifest = client.post(
+        "/api/v1/validation-runs/preview",
+        json={},
+        headers=WRITE_HEADERS,
+    ).json()
+    validation_run_id = client.post(
+        "/api/v1/validation-runs",
+        json={
+            "expectedManifestHash": manifest["manifestHash"],
+            "paidCallAcknowledged": True,
+        },
+        headers=WRITE_HEADERS,
+    ).json()["id"]
     project_response = client.post(
         "/api/v1/projects",
         json={
             "title": "雨天擦爪",
-            "theme": "孩子替猫咪擦爪",
+            "theme": "雨天擦爪",
             "targetDurationSeconds": 12,
         },
         headers=WRITE_HEADERS,
@@ -85,6 +142,8 @@ def test_planner_http_flow_returns_durable_job_and_adopts_directly_to_story() ->
             "text": "做一个雨天擦爪的生活片段",
             "expectedContextRevision": 1,
             "idempotencyKey": "http-planner-rain",
+            "validationRunId": validation_run_id,
+            "paidCallAcknowledged": True,
         },
         headers=WRITE_HEADERS,
     )

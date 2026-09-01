@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import uuid
 
-from .runner import ProviderPoll
+from .runner import ProviderPoll, ProviderSubmission
 
 
 class FakeProviderGateway:
     """A zero-cost deterministic gateway used by local development and CI."""
 
-    def submit(self, *, job_id: uuid.UUID, frozen_input: dict[str, object]) -> str:
-        return f"fake-{job_id}"
+    def submit(
+        self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
+    ) -> ProviderSubmission:
+        return ProviderSubmission(taskId=f"fake-{job_id}")
 
     def poll(self, provider_task_id: str) -> ProviderPoll:
         if not provider_task_id.startswith("fake-"):

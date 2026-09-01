@@ -1,12 +1,12 @@
 # CatFlow Web Studio
 
-CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界面只有浏览器 Web 页面；FastAPI 在 `127.0.0.1:8765` 同源提供 Vue SPA、REST、SSE 和媒体内容，PostgreSQL 是唯一业务状态源，Python Worker 负责 durable planning、fake 媒体和 FFmpeg 成片。
+CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界面只有浏览器 Web 页面；FastAPI 在 `127.0.0.1:8877` 同源提供 Vue SPA、REST、SSE 和媒体内容，PostgreSQL 是唯一业务状态源，Python Worker 负责 durable planning、Ark 媒体和 FFmpeg 成片。
 
 首版产品边界固定为：
 
 - 一个项目对应一条独立的 8–15 秒生活短片。
 - 9:16、720×1280、无对白或极少对白。
-- 固定同一位 8–9 岁齐下颌短发儿童和同一只灰白虎斑猫。
+- 固定同一位 6–7 岁、约 1.2 米、约 4.5–5 头身的齐下颌短发儿童，以及同一只灰白虎斑猫。
 - Canon v4 柔和数字插画；`style_source` 永不进入图片或视频 Provider 输入。
 - 不使用 Electron、Toonflow-app、Express、SQLite、Socket.IO、Nginx 或第二业务状态源。
 - 不复制 Sowii 的具体角色、画面、台词、故事或品牌元素，只采用“日常微事件、低对白、人猫互动、温暖结尾”的原创内容语法。
@@ -27,6 +27,7 @@ CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界
 
 ```text
 apps/web/                 Vue/Vite 唯一正式前端
+assets/canon/v4/          四张可提交 Provider 的正式 Canon 生产包
 services/api/             FastAPI 模块化单体与新 Alembic 基线
 services/worker/          Durable Worker、fake gateway 与 FFmpeg
 packages/contracts/       OpenAPI 生成的 TypeScript 契约
@@ -34,6 +35,7 @@ scripts/                  本机配置、启动、停止及迁移脚本
 tests/catflow/            新领域、仓储、Worker、媒体测试
 tests/contract/           同源安全与 HTTP 契约测试
 var/                      媒体、工作文件、日志和备份（Git 忽略）
+风格定稿/                 历史设计源和审计材料，不直接进入 Provider
 ```
 
 仓库根目录保留从 `cat-video-generator@43b1213` 复制来的旧 `src/`、`web/`、旧 Alembic 与历史测试，作为迁移参考。新构建、测试和运行入口只使用上面的 CatFlow 目录；旧 43 表 Schema 和旧 API 不会连接到 `catflow_studio`。
@@ -77,7 +79,7 @@ npm run build
 2. 构建 Vue SPA。
 3. 对现有 PostgreSQL 执行待应用的 Alembic migration。
 4. 隐藏启动 FastAPI 与 Worker。
-5. 等待 `/api/v1/health`，成功后打开 `http://127.0.0.1:8765/projects`。
+5. 等待 `/api/v1/health` 与 Worker/FFmpeg 就绪，成功后打开 `http://127.0.0.1:8877/projects`。
 6. 失败时停止本次启动的进程，并保留 PostgreSQL、媒体、配置和备份。
 
 停止：
@@ -90,7 +92,7 @@ npm run build
 
 ## 备份、恢复与旧资产导入
 
-创建包含 12 张业务表和 `var/media` 的本机备份：
+创建包含业务表和 `CATFLOW_MEDIA_ROOT` 所指相对媒体目录的本机备份：
 
 ```powershell
 .\scripts\backup-local.ps1
@@ -122,6 +124,7 @@ npm run build
 - Provider task ID 持久化后，Worker 重启只能继续轮询、存储、取消或对账。
 - 当前 `CATFLOW_PROVIDER=fake`、`CATFLOW_PAID_CALLS_ENABLED=false`；本实现不会发起真实付费调用。
 - 上传图片会校验扩展名、MIME、文件头和 Pillow 解码结果，媒体磁盘路径不直接暴露。
+- 数据库只保存相对 `storage_key`；API、Worker、备份和恢复通过同一个 `RuntimePaths` 在项目根内解析，拒绝绝对路径与越界路径。
 
 ## 质量门槛
 

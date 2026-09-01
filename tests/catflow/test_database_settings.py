@@ -41,7 +41,12 @@ def test_canon_v4_seed_is_fixed_and_style_source_is_not_provider_eligible() -> N
     document = canon_v4_document()
 
     assert document["profileId"] == "canon-v4-healing-child-cat-style-board"
-    assert document["child"]["age"] == "8-9"
+    assert document["child"]["age"] == "6-7"
+    assert document["child"]["heightCm"] == 120
+    assert document["child"]["heightRangeCm"] == [115, 125]
+    assert document["child"]["bodyProportion"] == "约4.5至5头身的柔和儿童插画比例"
+    assert "6至7岁" in document["child"]["identity"]
+    assert "8至9岁" not in str(document)
     assert "灰白虎斑" in document["cat"]["identity"]
     assert document["references"]["styleSource"]["providerEligible"] is False
     assert document["references"]["styleBoard"]["providerEligible"] is True

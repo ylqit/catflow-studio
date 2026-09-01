@@ -3,8 +3,10 @@ import type {
   AssetGenerationKind,
   AssetGenerationPreviewDto,
   AssetSlot,
+  CanonProfileDto,
   EditDecisionListDto,
   EditVersionDto,
+  EnvironmentPresetDto,
   GenerationPreviewDto,
   JobDto,
   PlannerSnapshotDto,
@@ -14,6 +16,8 @@ import type {
   ShotPlanVersionDto,
   StoryVersionDto,
   WorkspaceDto,
+  ValidationRunDto,
+  ValidationRunPreviewDto,
 } from "./types";
 
 export class ApiError extends Error {
@@ -32,6 +36,43 @@ export class CatFlowClient {
     const bootstrap = await this.request<RuntimeBootstrapDto>("/api/v1/runtime/bootstrap");
     this.csrfToken = bootstrap.csrfToken;
     return bootstrap;
+  }
+
+  runtime(): Promise<RuntimeBootstrapDto> {
+    return this.bootstrap();
+  }
+
+  currentCanon(): Promise<CanonProfileDto> {
+    return this.request("/api/v1/canon/current");
+  }
+
+  uploadCanonAsset(role: "episode_child" | "episode_cat" | "pair_scale" | "style_board", file: File): Promise<AssetDto> {
+    const body = new FormData();
+    body.append("file", file);
+    return this.write(`/api/v1/canon/assets/upload?role=${role}`, "POST", body);
+  }
+
+  publishCanon(fixedAssets: Record<string, string>): Promise<CanonProfileDto> {
+    return this.json("/api/v1/canon/revisions", "POST", { fixedAssets });
+  }
+
+  previewValidationRun(): Promise<ValidationRunPreviewDto> {
+    return this.json("/api/v1/validation-runs/preview", "POST", {});
+  }
+
+  authorizeValidationRun(expectedManifestHash: string): Promise<ValidationRunDto> {
+    return this.json("/api/v1/validation-runs", "POST", {
+      expectedManifestHash,
+      paidCallAcknowledged: true,
+    });
+  }
+
+  currentValidationRun(): Promise<ValidationRunDto | null> {
+    return this.request("/api/v1/validation-runs/current");
+  }
+
+  pauseValidationRun(runId: string): Promise<ValidationRunDto> {
+    return this.json(`/api/v1/validation-runs/${runId}/pause`, "POST", {});
   }
 
   projects(): Promise<ProjectDto[]> {
@@ -56,7 +97,7 @@ export class CatFlowClient {
 
   plannerMessage(
     projectId: string,
-    command: { text: string; expectedContextRevision: number; idempotencyKey: string },
+    command: { text: string; expectedContextRevision: number; idempotencyKey: string; validationRunId?: string; paidCallAcknowledged?: boolean },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/planner/messages`, "POST", command);
   }
@@ -71,6 +112,10 @@ export class CatFlowClient {
 
   assets(projectId: string): Promise<AssetDto[]> {
     return this.request(`/api/v1/projects/${projectId}/assets`);
+  }
+
+  environmentPresets(): Promise<EnvironmentPresetDto[]> {
+    return this.request("/api/v1/environment-presets");
   }
 
   shotPlans(projectId: string): Promise<ShotPlanVersionDto[]> {
@@ -105,36 +150,52 @@ export class CatFlowClient {
     command: {
       kind: AssetGenerationKind;
       expectedInputHash: string;
-      expectedCostMicros: number;
+      expectedCostMicros: number | null;
       idempotencyKey: string;
+      validationRunId?: string;
+      paidCallAcknowledged?: boolean;
     },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/asset-generations`, "POST", command);
   }
 
-  diagnoseAsset(projectId: string, assetId: string): Promise<JobDto> {
+  diagnoseAsset(projectId: string, assetId: string, validationRunId?: string): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/assets/${assetId}/diagnose`, "POST", {
       assetId,
       idempotencyKey: crypto.randomUUID(),
-      expectedCostMicros: 0,
+      expectedCostMicros: validationRunId ? null : 0,
+      validationRunId,
+      paidCallAcknowledged: Boolean(validationRunId),
     });
   }
 
-  previewVideo(projectId: string, maximumReferences = 4): Promise<GenerationPreviewDto> {
-    return this.json(`/api/v1/projects/${projectId}/video-generations/preview`, "POST", {
-      maximumReferences,
-    });
+  previewVideo(projectId: string): Promise<GenerationPreviewDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-generations/preview`, "POST", {});
   }
 
   createVideoJob(
     projectId: string,
-    command: { expectedInputHash: string; expectedCostMicros: number; idempotencyKey: string },
+    command: { expectedInputHash: string; expectedCostMicros: number | null; idempotencyKey: string; validationRunId?: string; paidCallAcknowledged?: boolean },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/video-generations`, "POST", command);
   }
 
+  diagnoseVideo(projectId: string, assetId: string, validationRunId?: string): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-diagnoses`, "POST", {
+      assetId,
+      idempotencyKey: crypto.randomUUID(),
+      expectedCostMicros: validationRunId ? null : 0,
+      validationRunId,
+      paidCallAcknowledged: Boolean(validationRunId),
+    });
+  }
+
   job(jobId: string): Promise<JobDto> {
     return this.request(`/api/v1/jobs/${jobId}`);
+  }
+
+  resumeJobStorage(jobId: string): Promise<JobDto> {
+    return this.json(`/api/v1/jobs/${jobId}/resume-storage`, "POST", {});
   }
 
   edits(projectId: string): Promise<EditVersionDto[]> {

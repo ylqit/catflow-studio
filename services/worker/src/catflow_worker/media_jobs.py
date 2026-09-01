@@ -48,6 +48,8 @@ class MediaJobExecutor:
             kind = job.kind
         if kind == "diagnose_image":
             self._store_fake_diagnosis(job_id)
+        elif kind == "diagnose_video":
+            self._store_fake_video_diagnosis(job_id)
         elif kind == "generate_image":
             self._create_fake_image(job_id)
         elif kind == "generate_video":
@@ -83,6 +85,29 @@ class MediaJobExecutor:
             }
             metadata["diagnosedByJobId"] = str(job.id)
             candidate.metadata_json = metadata
+
+    def _store_fake_video_diagnosis(self, job_id: uuid.UUID) -> None:
+        with self._sessions.begin() as session:
+            job = session.get(JobRecord, job_id)
+            if job is None:
+                raise ValueError("job not found")
+            asset_id = uuid.UUID(str(job.frozen_input_json["videoAssetId"]))
+            video = session.get(AssetRecord, asset_id)
+            if video is None or video.project_id != job.project_id:
+                raise ValueError("video diagnosis target not found")
+            metadata = dict(video.metadata_json)
+            metadata["videoDiagnosis"] = {
+                "childIdentity": "pass",
+                "catIdentity": "pass",
+                "pairScale": "pass",
+                "styleConsistency": "pass",
+                "anatomy": "pass",
+                "technical": "pass",
+                "causalChainAndActiveEnding": "pass",
+                "warnings": [],
+            }
+            metadata["videoDiagnosisJobId"] = str(job.id)
+            video.metadata_json = metadata
 
     def _create_fake_image(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:
@@ -152,7 +177,7 @@ class MediaJobExecutor:
             "-f",
             "lavfi",
             "-i",
-            f"color=c=0xE4D2BC:s=720x1280:r=24:d={duration_seconds}",
+            f"color=c=0xE4D2BC:s=480x854:r=24:d={duration_seconds}",
             "-vf",
             "format=yuv420p",
             "-an",
@@ -166,7 +191,8 @@ class MediaJobExecutor:
         ]
         self._run(command)
         temporary.replace(destination)
-        metadata = self._probe(destination)
+        metadata = self._probe(destination, expected_size=(480, 854))
+        metadata.update({"resolution": "480p", "ratio": "9:16"})
         self._persist_asset(
             job_id,
             role="video",
@@ -309,7 +335,12 @@ class MediaJobExecutor:
             session.flush()
             return record.id
 
-    def _probe(self, path: Path) -> dict[str, object]:
+    def _probe(
+        self,
+        path: Path,
+        *,
+        expected_size: tuple[int, int] = (720, 1280),
+    ) -> dict[str, object]:
         completed = self._run(
             [
                 str(self._ffprobe_path),
@@ -329,7 +360,7 @@ class MediaJobExecutor:
         duration_ms = round(float(document["format"]["duration"]) * 1000)
         width = int(stream["width"])
         height = int(stream["height"])
-        if (width, height) != (720, 1280):
+        if (width, height) != expected_size:
             raise ValueError(f"unexpected output size: {width}x{height}")
         if not 7_900 <= duration_ms <= 15_100:
             raise ValueError(f"unexpected output duration: {duration_ms} ms")

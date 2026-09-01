@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 
 import { api } from "../api/client";
 import type { ProjectDto } from "../api/types";
 
 const router = useRouter();
+const route = useRoute();
 const projects = ref<ProjectDto[]>([]);
 const loading = ref(true);
 const creating = ref(false);
 const showCreate = ref(false);
 const error = ref("");
-const draft = reactive({ title: "", theme: "", targetDurationSeconds: 10 });
+const draft = reactive({ title: "", theme: "", targetDurationSeconds: 12 });
 
 async function loadProjects() {
   loading.value = true;
@@ -38,7 +40,16 @@ async function createProject() {
   }
 }
 
-onMounted(loadProjects);
+onMounted(() => {
+  const topic = typeof route.query.topic === "string" ? route.query.topic : "";
+  if (topic) {
+    draft.title = topic;
+    draft.theme = topic;
+    draft.targetDurationSeconds = 12;
+    showCreate.value = true;
+  }
+  void loadProjects();
+});
 </script>
 
 <template>

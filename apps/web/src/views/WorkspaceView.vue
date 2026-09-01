@@ -9,6 +9,7 @@ import DeliveryStep from "../components/workspace/DeliveryStep.vue";
 import GenerationStep from "../components/workspace/GenerationStep.vue";
 import PlannerStep from "../components/workspace/PlannerStep.vue";
 import StoryboardStep from "../components/workspace/StoryboardStep.vue";
+import { projectJobEvent } from "../projectJobEvents";
 import { useUiStore } from "../stores/ui";
 
 const props = defineProps<{ step: "planner" | "assets" | "storyboard" | "generation" | "delivery" }>();
@@ -31,6 +32,7 @@ const steps = [
 async function loadWorkspace() {
   try {
     workspace.value = await api.workspace(projectId.value);
+    store.lastEventId = Math.max(store.lastEventId, workspace.value.eventCursor);
     store.setProject(projectId.value);
     error.value = "";
   } catch (reason) {
@@ -47,6 +49,7 @@ function connectEvents() {
   eventSource.onerror = () => { store.sseConnected = false; };
   const refresh = (event: MessageEvent) => {
     if (event.lastEventId) store.lastEventId = Number(event.lastEventId);
+    if (!projectJobEvent(event, projectId.value)) return;
     void loadWorkspace();
   };
   for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.succeeded", "job.failed", "job.cancelled", "planner.proposal.created"]) {

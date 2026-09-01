@@ -6,9 +6,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $environmentFile = Join-Path $projectRoot '.env'
-$runtimeDirectory = Join-Path $projectRoot 'var\work'
-$logDirectory = Join-Path $projectRoot 'var\logs'
-$pidFile = Join-Path $runtimeDirectory 'local-processes.json'
 
 if (-not (Test-Path -LiteralPath $environmentFile)) {
     throw 'The ignored .env file is missing. Run scripts\configure-existing-postgres.ps1 first.'
@@ -20,6 +17,12 @@ foreach ($line in Get-Content -LiteralPath $environmentFile) {
     }
 }
 $env:CATFLOW_ROOT = $projectRoot
+$catflowPort = if ($env:CATFLOW_PORT) { [int]$env:CATFLOW_PORT } else { 8877 }
+. (Join-Path $PSScriptRoot 'runtime-paths.ps1')
+$runtimePaths = Get-CatFlowRuntimePaths -ProjectRoot $projectRoot
+$runtimeDirectory = $runtimePaths.WorkRoot
+$logDirectory = $runtimePaths.LogRoot
+$pidFile = Join-Path $runtimeDirectory 'local-processes.json'
 
 New-Item -ItemType Directory -Force -Path $runtimeDirectory, $logDirectory | Out-Null
 
@@ -33,11 +36,11 @@ if (Test-Path -LiteralPath $pidFile) {
     }
 }
 
-$portOwner = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+$portOwner = Get-NetTCPConnection -LocalPort $catflowPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($null -ne $portOwner) {
     $ownerProcess = Get-Process -Id $portOwner.OwningProcess -ErrorAction SilentlyContinue
     $ownerName = if ($null -ne $ownerProcess) { $ownerProcess.ProcessName } else { 'unknown' }
-    throw "Port 8765 is already used by PID $($portOwner.OwningProcess) ($ownerName). Stop that service before starting CatFlow."
+    throw "Port $catflowPort is already used by PID $($portOwner.OwningProcess) ($ownerName). Stop that service before starting CatFlow."
 }
 
 if (-not $SkipWebBuild) {
@@ -53,7 +56,7 @@ $apiExecutable = Join-Path $projectRoot '.venv\Scripts\catflow.exe'
 $workerExecutable = Join-Path $projectRoot '.venv\Scripts\catflow-worker.exe'
 $apiStart = @{
     FilePath = $apiExecutable
-    ArgumentList = @('--port', '8765')
+    ArgumentList = @('--port', $catflowPort.ToString())
     WorkingDirectory = $projectRoot
     WindowStyle = 'Hidden'
     RedirectStandardOutput = (Join-Path $logDirectory 'api.out.log')
@@ -82,8 +85,14 @@ $ready = $false
 for ($attempt = 1; $attempt -le 30; $attempt++) {
     if ($apiProcess.HasExited) { break }
     try {
-        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/v1/health' -TimeoutSec 1
-        if ($health.status -eq 'ok') { $ready = $true; break }
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:$catflowPort/api/v1/health" -TimeoutSec 1
+        if ($health.status -eq 'ok') {
+            $bootstrap = Invoke-RestMethod -Uri "http://127.0.0.1:$catflowPort/api/v1/runtime/bootstrap" -TimeoutSec 1
+            if ($bootstrap.databaseReady -and $bootstrap.workerReady -and $bootstrap.ffmpegReady -and $bootstrap.ffprobeReady) {
+                $ready = $true
+                break
+            }
+        }
     } catch {
         Start-Sleep -Seconds 1
     }
@@ -98,4 +107,4 @@ if (-not $ready) {
 
 Write-Host 'CatFlow API, PostgreSQL connection and Worker are ready.'
 Write-Host "Logs: $logDirectory"
-Start-Process 'http://127.0.0.1:8765/projects'
+Start-Process "http://127.0.0.1:$catflowPort/projects"

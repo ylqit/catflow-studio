@@ -48,9 +48,17 @@ def test_uploaded_asset_is_persisted_and_served_without_exposing_disk_path(tmp_p
 
     assert upload.status_code == 201
     asset = upload.json()
-    assert "storageKey" in asset
+    assert "storageKey" not in asset
     assert str(tmp_path) not in upload.text
     content = client.get(f"/api/v1/assets/{asset['id']}/content")
     assert content.status_code == 200
     assert content.content == payload
     assert content.headers["content-type"] == "image/png"
+    assert "content-disposition" not in content.headers
+    partial = client.get(
+        f"/api/v1/assets/{asset['id']}/content",
+        headers={"Range": "bytes=0-15"},
+    )
+    assert partial.status_code == 206
+    assert partial.content == payload[:16]
+    assert partial.headers["content-range"] == f"bytes 0-15/{len(payload)}"

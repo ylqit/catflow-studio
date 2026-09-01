@@ -71,8 +71,10 @@ def test_fake_video_result_is_a_valid_immutable_vertical_mp4(tmp_path: Path) -> 
             )
             assert len(assets) == 1
             assert assets[0].role == "video"
-            assert assets[0].width == 720
-            assert assets[0].height == 1280
+            assert assets[0].width == 480
+            assert assets[0].height == 854
+            assert assets[0].metadata_json["resolution"] == "480p"
+            assert assets[0].metadata_json["ratio"] == "9:16"
             assert 7_900 <= (assets[0].duration_ms or 0) <= 8_100
             assert (tmp_path / "media" / assets[0].storage_key).is_file()
     finally:

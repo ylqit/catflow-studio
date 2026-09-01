@@ -12,7 +12,7 @@ describe("CatFlowClient", () => {
         new Response(
           JSON.stringify({
             csrfToken: "csrf-1",
-            baseUrl: "http://127.0.0.1:8765",
+            baseUrl: "http://127.0.0.1:8877",
             localOnly: true,
           }),
           { status: 200, headers: { "content-type": "application/json" } },

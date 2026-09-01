@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool, text
 
 from catflow.infrastructure.database import DatabaseSettings
@@ -12,6 +14,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
 config.set_main_option("sqlalchemy.url", DatabaseSettings.from_env().url.replace("%", "%%"))
 
 target_metadata = Base.metadata

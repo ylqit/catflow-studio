@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 
 import { api } from "../../api/client";
-import type { PlannerSnapshotDto } from "../../api/types";
+import type { PlannerSnapshotDto, RuntimeBootstrapDto, ValidationRunDto } from "../../api/types";
 
 const props = defineProps<{ projectId: string }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -11,10 +11,17 @@ const message = ref("");
 const sending = ref(false);
 const adopting = ref<string | null>(null);
 const error = ref("");
+const runtime = ref<RuntimeBootstrapDto | null>(null);
+const validationRun = ref<ValidationRunDto | null>(null);
+const confirming = ref(false);
 
 async function load() {
   try {
-    snapshot.value = await api.planner(props.projectId);
+    [snapshot.value, runtime.value, validationRun.value] = await Promise.all([
+      api.planner(props.projectId),
+      api.runtime(),
+      api.currentValidationRun(),
+    ]);
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "生活灵感读取失败";
   }
@@ -22,6 +29,14 @@ async function load() {
 
 async function sendMessage() {
   if (!snapshot.value || !message.value.trim()) return;
+  if (runtime.value?.provider.name === "ark" && !confirming.value) {
+    confirming.value = true;
+    return;
+  }
+  if (runtime.value?.provider.name === "ark" && validationRun.value?.status !== "authorized") {
+    error.value = "需要先在首批真实验收页面授权付费调用";
+    return;
+  }
   sending.value = true;
   error.value = "";
   try {
@@ -29,8 +44,11 @@ async function sendMessage() {
       text: message.value.trim(),
       expectedContextRevision: snapshot.value.contextRevision,
       idempotencyKey: crypto.randomUUID(),
+      validationRunId: runtime.value?.provider.name === "ark" ? validationRun.value?.id : undefined,
+      paidCallAcknowledged: runtime.value?.provider.name === "ark",
     });
     message.value = "";
+    confirming.value = false;
     await load();
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "规划任务提交失败";
@@ -63,6 +81,18 @@ onMounted(load);
         <div><p class="eyebrow">Life planner</p><h2>和生活灵感导演聊一聊</h2></div>
         <button class="ghost" @click="load">刷新</button>
       </header>
+      <section v-if="snapshot?.latestJob" class="job-status" :class="snapshot.latestJob.status">
+        <div>
+          <b>最近规划任务</b>
+          <code>{{ snapshot.latestJob.id }}</code>
+        </div>
+        <span class="pill">{{ snapshot.latestJob.status }}</span>
+        <p v-if="snapshot.latestJob.error">
+          {{ snapshot.latestJob.error.code || "provider_error" }}：{{ snapshot.latestJob.error.message || "规划任务失败" }}
+          <small v-if="snapshot.latestJob.error.requestId">Request ID: {{ snapshot.latestJob.error.requestId }}</small>
+        </p>
+        <p v-else-if="!['succeeded', 'failed', 'cancelled', 'submission_unknown'].includes(snapshot.latestJob.status)">任务正在 Worker 中执行；刷新或重新打开页面不会重复提交。</p>
+      </section>
       <div class="messages">
         <div v-if="!snapshot?.messages.length" class="welcome-message">
           <span class="director-avatar">导</span>
@@ -81,8 +111,11 @@ onMounted(load);
       </div>
       <form class="composer" @submit.prevent="sendMessage">
         <textarea v-model="message" rows="3" maxlength="4000" placeholder="例如：雨停后，孩子发现猫咪在门口留下一串湿脚印……" @keydown.ctrl.enter="sendMessage" />
-        <div><small>Ctrl + Enter 发送 · 首版使用本机 fake planner</small><button class="primary" :disabled="sending || !message.trim()"><span v-if="sending" class="spinner" />生成提案</button></div>
+        <div><small>Ctrl + Enter · {{ runtime?.provider.name === "ark" ? "Ark typed planner" : "本机 fake planner" }}</small><button class="primary" :disabled="sending || !message.trim()"><span v-if="sending" class="spinner" />{{ runtime?.provider.name === "ark" && !confirming ? "查看付费确认" : "生成提案" }}</button></div>
       </form>
+      <section v-if="confirming && runtime" class="paid-confirm">
+        <b>规划付费确认</b><span>{{ runtime.provider.name }} · {{ runtime.provider.planningModel }}</span><span>占用 plan_story 额度 1 次 · 未计价付费调用</span><code>{{ message }}</code><div><button class="ghost" @click="confirming = false">返回修改</button><button class="primary" @click="sendMessage">确认并提交</button></div>
+      </section>
     </div>
 
     <aside class="proposal-panel card">
@@ -110,6 +143,12 @@ onMounted(load);
 .conversation, .proposal-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 17px; border-bottom: 1px solid var(--line); }
 .panel-head h2 { margin: 0; font-size: 20px; }
+.job-status { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 14px 20px 0; padding: 12px 14px; border: 1px solid #d9cdbf; border-radius: 12px; background: #faf7f2; font-size: 11px; }
+.job-status > div { display: grid; gap: 3px; min-width: 0; }
+.job-status code { overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+.job-status p { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.5; }
+.job-status p small { display: block; margin-top: 4px; }
+.job-status.failed, .job-status.submission_unknown { border-color: #d8aaa2; background: #fff3f1; }
 .messages { flex: 1; min-height: 300px; padding: 24px; overflow-y: auto; }
 .welcome-message { display: flex; gap: 15px; padding: 18px; border-radius: 16px; background: #f8f1e7; line-height: 1.65; }
 .welcome-message p { color: var(--muted); margin: 6px 0 13px; font-size: 13px; }
@@ -125,6 +164,10 @@ onMounted(load);
 .composer textarea { width: 100%; padding: 4px; border: 0; outline: 0; resize: none; color: var(--ink); }
 .composer > div { display: flex; justify-content: space-between; align-items: center; }
 .composer small { color: #999087; }
+.paid-confirm { display: grid; gap: 8px; margin: 0 20px 20px; padding: 14px; border: 1px solid #d8b89d; border-radius: 13px; background: #fff7ef; font-size: 11px; }
+.paid-confirm span { color: var(--muted); }
+.paid-confirm code { padding: 8px; border-radius: 8px; background: white; }
+.paid-confirm div { display: flex; justify-content: flex-end; gap: 8px; }
 .proposal-panel { max-height: calc(100vh - 215px); overflow-y: auto; }
 .proposal { margin: 16px; padding: 17px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
 .proposal + .proposal { margin-top: 0; }
