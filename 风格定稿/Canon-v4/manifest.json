@@ -1,0 +1,57 @@
+{
+  "version": 4,
+  "kind": "selection_profile",
+  "profileId": "canon-v4-healing-child-cat-style-board",
+  "presetKey": "healing_child_cat_style_board_v4",
+  "identityAssetSourceManifest": "../Canon-v1/manifest.json",
+  "styleSourceSemanticKey": "style_source:leaf_material_v1",
+  "assets": [
+    {
+      "semanticKey": "style_source:leaf_material_v1",
+      "file": "画风来源-叶片材质.png",
+      "sha256": "6f45a4ce0bbcdb7821adab5080b130ae62c4abd0a0418d007233586ee3895e69",
+      "group": "style_source",
+      "displayName": "叶片材质与柔光来源（仅提炼）",
+      "role": "style_source",
+      "recommendedDefault": false
+    },
+    {
+      "semanticKey": "style:healing_line_texture_v4",
+      "file": "画风-治愈线条材质板.png",
+      "sha256": "2201e1771b7ba309bb9b51223704ab0f69478b035c27dfe8f35a704dbf57c4fc",
+      "group": "style",
+      "displayName": "原创治愈线条材质画风板 v4",
+      "role": "style_board",
+      "recommendedDefault": true
+    }
+  ],
+  "requiredKeys": [
+    "person:headshot",
+    "person:fullbody",
+    "cat:front",
+    "cat:side",
+    "style:healing_line_texture_v4"
+  ],
+  "stylePositive": [
+    "原创二维柔和数字插画",
+    "细而克制的暖灰色轮廓线",
+    "细腻哑光肤色、灰白毛发与布料材质",
+    "轻微纸感颗粒",
+    "柔和漫射光",
+    "低到中等对比度",
+    "自然但不过度鲜艳的色彩"
+  ],
+  "globalExclusions": [
+    "摄影写实",
+    "3D塑料玩具质感",
+    "角色身份、年龄、发型、毛色或身体结构漂移",
+    "无剧情依据地复制画风来源中的物体、颜色或构图",
+    "文字、Logo、水印或供应商界面"
+  ],
+  "sourceExclusions": [
+    "叶片、枝条、花朵与草地",
+    "露珠、水滴与微距构图",
+    "绿色主导配色",
+    "摄影属性"
+  ]
+}

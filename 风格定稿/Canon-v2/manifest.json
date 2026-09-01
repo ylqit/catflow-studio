@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "kind": "selection_profile",
+  "profileId": "canon-v2-healing-child-cat",
+  "assetSourceManifest": "../Canon-v1/manifest.json",
+  "identityKeys": [
+    "person:headshot",
+    "person:fullbody",
+    "cat:front",
+    "cat:side"
+  ],
+  "environmentStyleKeys": {
+    "indoor": "style:indoor",
+    "outdoor": "style:outdoor"
+  }
+}

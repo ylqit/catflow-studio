@@ -1,0 +1,31 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      MEDIA_WORK_ROOT: /data/work
+      MEDIA_ASSET_ROOT: /data/assets
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./docker-data/work:/data/work
+      - ./docker-data/assets:/data/assets
+      - ./docker-data/diagnostics:/app/var/diagnostics
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/v1/health')
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,12 @@
+[
+  {"id":"indoor-rain-window","theme":"雨后，孩子擦去窗台水珠，猫咪发现一片贴在玻璃上的小叶子","durationSeconds":15,"environment":"indoor","catBehaviorMode":"natural","maxPaidVideoAttemptsPerShot":2},
+  {"id":"indoor-breakfast","theme":"清晨，孩子摆好一小碗早餐，猫咪用尾巴轻轻碰响木勺","durationSeconds":30,"environment":"indoor","catBehaviorMode":"natural","maxPaidVideoAttemptsPerShot":2},
+  {"id":"indoor-laundry","theme":"午后，孩子叠好一块小毛巾，猫咪短暂帮忙压住翘起的一角","durationSeconds":16,"environment":"indoor","catBehaviorMode":"light_anthropomorphic","maxPaidVideoAttemptsPerShot":2},
+  {"id":"indoor-bedtime","theme":"睡前，孩子合上绘本，猫咪绕过枕边后安静蜷卧","durationSeconds":8,"environment":"indoor","catBehaviorMode":"natural","maxPaidVideoAttemptsPerShot":2},
+  {"id":"indoor-lantern","theme":"冬夜，孩子点亮一盏纸灯，猫咪短暂扶正旁边的小卡片","durationSeconds":45,"environment":"indoor","catBehaviorMode":"light_anthropomorphic","maxPaidVideoAttemptsPerShot":2},
+  {"id":"outdoor-leaf","theme":"秋日雨后，孩子捡起一片发亮的叶子，猫咪闻了闻又靠近孩子","durationSeconds":15,"environment":"outdoor","catBehaviorMode":"natural","maxPaidVideoAttemptsPerShot":2},
+  {"id":"outdoor-field","theme":"初夏田边，孩子把被风吹倒的小木牌扶正，猫咪在草边观察","durationSeconds":31,"environment":"outdoor","catBehaviorMode":"natural","maxPaidVideoAttemptsPerShot":2},
+  {"id":"outdoor-seeds","theme":"春日院子里，孩子收拢散落的种子，猫咪轻轻拨回最后一颗","durationSeconds":60,"environment":"outdoor","catBehaviorMode":"light_anthropomorphic","maxPaidVideoAttemptsPerShot":2},
+  {"id":"outdoor-puddle","theme":"雨停后，孩子用小树枝画开水洼倒影，猫咪绕开水边靠近","durationSeconds":30,"environment":"outdoor","catBehaviorMode":"natural","maxPaidVideoAttemptsPerShot":2},
+  {"id":"outdoor-scarf","theme":"黄昏起风，孩子捡起落在长椅旁的小围巾，猫咪短暂踩住一角","durationSeconds":45,"environment":"outdoor","catBehaviorMode":"light_anthropomorphic","maxPaidVideoAttemptsPerShot":2}
+]

@@ -1,0 +1,28 @@
+{
+  "version": 3,
+  "kind": "selection_profile",
+  "profileId": "canon-v3-healing-child-cat-line-texture",
+  "presetKey": "healing_child_cat_line_texture_v3",
+  "assetSourceManifest": "../Canon-v1/manifest.json",
+  "requiredKeys": [
+    "person:headshot",
+    "person:fullbody",
+    "cat:front",
+    "cat:side",
+    "style:line_texture"
+  ],
+  "stylePositive": [
+    "细腻柔和的数字插画材质",
+    "克制轮廓线",
+    "湿润半透明高光",
+    "柔和漫射光",
+    "自然层次"
+  ],
+  "styleNegative": [
+    "摄影写实",
+    "复制参考物体或构图",
+    "绿色污染",
+    "改变儿童或猫咪身份"
+  ],
+  "styleReferenceInstruction": "只提取线条、材质、半透明高光和柔和漫射光；不得复制叶片、露珠、绿色配色或微距构图。"
+}

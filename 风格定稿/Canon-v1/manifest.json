@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "assets": [
+    {"semanticKey": "person:headshot", "file": "人物-大头照.png", "sha256": "15a75dac3bd49c919d9024da8905da182b8d159e3141bfb3cceb7bc11b888bcc", "group": "person", "displayName": "人物大头照", "role": "identity", "recommendedDefault": true},
+    {"semanticKey": "person:fullbody", "file": "人物-全身.png", "sha256": "f36c293aaa0064daab3a82bb1ddf05e4f019ffb3441f0470708f0bf8cad5632f", "group": "person", "displayName": "人物全身", "role": "identity", "recommendedDefault": true},
+    {"semanticKey": "person:front", "file": "人物-正面.png", "sha256": "f36c293aaa0064daab3a82bb1ddf05e4f019ffb3441f0470708f0bf8cad5632f", "group": "person", "displayName": "人物正面", "role": "identity", "recommendedDefault": false},
+    {"semanticKey": "person:side", "file": "人物-侧面.png", "sha256": "c9a805d09b9084c0bc590cbc964fc4a37211b2a7095fa45009ce4376ce617f35", "group": "person", "displayName": "人物侧面", "role": "identity", "recommendedDefault": false},
+    {"semanticKey": "person:back", "file": "人物-背面.png", "sha256": "a4ce70f8ccb4ed0cb3a33cf2e10a98ead91b658aca6cd02e70e79a6cfbc5c7db", "group": "person", "displayName": "人物背面", "role": "identity", "recommendedDefault": false},
+    {"semanticKey": "cat:front", "file": "猫咪-正面.png", "sha256": "5ed774d134b92a83d4227b57708b0602197da0cbc1a0a7cccc0a167bb6a99ca6", "group": "cat", "displayName": "猫咪正面", "role": "identity", "recommendedDefault": true},
+    {"semanticKey": "cat:side", "file": "猫咪-侧面.png", "sha256": "ba9ff0c48cc38cc125e9e8fcf18eba0c8ccd398bb5d7497afb6550963660dd4c", "group": "cat", "displayName": "猫咪侧面", "role": "identity", "recommendedDefault": true},
+    {"semanticKey": "cat:back", "file": "猫咪-背面.png", "sha256": "6659602248c82a5194e7245213fd8fcfc73b2d250df6639e520fdfaa51553693", "group": "cat", "displayName": "猫咪背面", "role": "identity", "recommendedDefault": false},
+    {"semanticKey": "style:line_texture", "file": "画风-线条材质.png", "sha256": "6f45a4ce0bbcdb7821adab5080b130ae62c4abd0a0418d007233586ee3895e69", "group": "style", "displayName": "线条与材质", "role": "style", "recommendedDefault": true},
+    {"semanticKey": "style:outdoor", "file": "画风-户外.png", "sha256": "f079eea8cbf5e62c0a53d84ce5a2f7a893efde481e06184b7a5eaba508be252b", "group": "style", "displayName": "户外画风", "role": "style", "recommendedDefault": false},
+    {"semanticKey": "style:indoor", "file": "画风-室内.png", "sha256": "5c7ca40e5fa6f83c67c84eacf10031820eee51182a12d189c160bc4a428e4797", "group": "style", "displayName": "室内画风", "role": "style", "recommendedDefault": false}
+  ]
+}
