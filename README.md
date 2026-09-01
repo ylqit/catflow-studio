@@ -1,73 +1,145 @@
-# Cat Video Generator
+# CatFlow Web Studio
 
-面向原创“一人一猫”治愈短视频的本地导演生产系统。产品采用 Toonflow 式任务结构：项目内只有剧本、角色资产和生产画布三个入口；视频生成、版本审核、局部编辑、时间线、合成与导出统一收敛到生产画布中的近全屏 Workbench。
+CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界面只有浏览器 Web 页面；FastAPI 在 `127.0.0.1:8765` 同源提供 Vue SPA、REST、SSE 和媒体内容，PostgreSQL 是唯一业务状态源，Python Worker 负责 durable planning、fake 媒体和 FFmpeg 成片。
+
+首版产品边界固定为：
+
+- 一个项目对应一条独立的 8–15 秒生活短片。
+- 9:16、720×1280、无对白或极少对白。
+- 固定同一位 8–9 岁齐下颌短发儿童和同一只灰白虎斑猫。
+- Canon v4 柔和数字插画；`style_source` 永不进入图片或视频 Provider 输入。
+- 不使用 Electron、Toonflow-app、Express、SQLite、Socket.IO、Nginx 或第二业务状态源。
+- 不复制 Sowii 的具体角色、画面、台词、故事或品牌元素，只采用“日常微事件、低对白、人猫互动、温暖结尾”的原创内容语法。
+
+## 五步工作流
 
 ```text
-项目
-├─ 剧本：完整故事候选、正文编辑、Revision 与当前剧情
-├─ 角色资产：儿童 Canon、猫咪 Canon、本集设计、同框比例、环境与画风板
-└─ 生产画布
-   ├─ 剧本
-   ├─ 导演计划
-   ├─ 角色与素材
-   ├─ 分镜表
-   ├─ 分镜画面
-   └─ 视频工作台
-      ├─ 预览
-      ├─ 视频生成
-      └─ 剪辑与交付
+生活灵感
+  → 角色与画风（五个固定槽位）
+  → 分镜画布（1–4 个镜头）
+  → 生成与选择（冻结输入、幂等 Job）
+  → 剪辑与导出（WebAV 决策、FFmpeg 正式 MP4）
 ```
 
-## 生产安全内核
+浏览器只保存当前项目、查询缓存、面板与 SSE 连接状态。故事、Canon、选择、分镜、Job、Provider task ID、剪辑版本和正式成片全部从 PostgreSQL 投影。
 
-- PostgreSQL 是唯一工作流状态源；Vue Flow 位置只是展示布局，不替代业务关系。
-- Story、Canon、Storyboard、媒体、视频和成片均使用不可变 Revision 与血缘。
-- 剧情、Canon、分镜或参考变化会按正式依赖传播 stale，历史产物不会被覆盖。
-- 人物与猫咪分别只有一个 Provider 权威身份来源；Canon v4 固定 8–9 岁短发儿童与灰白虎斑猫。
-- `style_source` 只保留画风提炼血缘，不能提交日常 Provider；只有净化后的 `style_board` 可以进入人物、猫咪、环境和视频请求。
-- 费用确认前冻结 Provider、模型、参数、有序参考、Prompt、Revision 与输入哈希。
-- durable task、worker lease、幂等键和 Provider task ID 防止重复付费提交。
-- 任务中心严格区分本地排队、正在提交、Provider 排队、Provider 运行和未知状态；`submission_unknown` 与 `cancellation_unknown` 只能对账，不能重试。
-- 图片和视频由人工审核；艺术质量诊断只产生 warning，不代替真实安全策略或执行校验。
+## 项目结构
 
-## 本地启动
+```text
+apps/web/                 Vue/Vite 唯一正式前端
+services/api/             FastAPI 模块化单体与新 Alembic 基线
+services/worker/          Durable Worker、fake gateway 与 FFmpeg
+packages/contracts/       OpenAPI 生成的 TypeScript 契约
+scripts/                  本机配置、启动、停止及迁移脚本
+tests/catflow/            新领域、仓储、Worker、媒体测试
+tests/contract/           同源安全与 HTTP 契约测试
+var/                      媒体、工作文件、日志和备份（Git 忽略）
+```
+
+仓库根目录保留从 `cat-video-generator@43b1213` 复制来的旧 `src/`、`web/`、旧 Alembic 与历史测试，作为迁移参考。新构建、测试和运行入口只使用上面的 CatFlow 目录；旧 43 表 Schema 和旧 API 不会连接到 `catflow_studio`。
+
+## PostgreSQL 配置
+
+CatFlow 不启动 Docker PostgreSQL。它复用已经可用的 PostgreSQL 实例，但使用独立数据库：
+
+```text
+catflow_studio
+```
+
+从相邻旧项目安全提取现有连接参数：
+
+```powershell
+.\scripts\configure-existing-postgres.ps1
+```
+
+脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 已使用新 Alembic `0001_catflow_core` 建立 12 张业务表；`catflow.alembic_version` 是额外的迁移版本表。
+
+## 本机启动
+
+首次安装或依赖变化后：
 
 ```powershell
 uv sync --extra dev
-uv run cvg doctor
-
-# 终端一
-uv run cvg api
-
-# 终端二
-npm --prefix web install
-npm --prefix web run dev -- --host 0.0.0.0
+npm install
+npm run contracts
+npm run build
 ```
 
-浏览器打开 `http://localhost:5173/projects`。单服务模式：
+日常启动：
 
 ```powershell
-npm --prefix web run build
-uv run cvg api --static-dir web/dist
+.\scripts\start-local.ps1
 ```
 
-历史 `/canvas` 和 `/studio` 链接只负责规范化跳转到新页面，不再维护旧工作台。
+启动脚本不会检查或启动 Docker。它会：
 
-## Web 使用方式
+1. 检查 `.env` 和正式端口占用。
+2. 构建 Vue SPA。
+3. 对现有 PostgreSQL 执行待应用的 Alembic migration。
+4. 隐藏启动 FastAPI 与 Worker。
+5. 等待 `/api/v1/health`，成功后打开 `http://127.0.0.1:8765/projects`。
+6. 失败时停止本次启动的进程，并保留 PostgreSQL、媒体、配置和备份。
 
-1. 在项目页创建原创一人一猫项目，选择 Canon v4、目标时长、9:16 画幅和质量档。项目、Brief、两个主体、Canon 引用与初始 Recipe 在同一事务创建，创建本身不调用 Provider。
-2. 在剧本页生成 1–5 个完整故事候选，编辑长正文并设为当前剧情。正式修改创建新 Revision。
-3. 在角色资产页检查唯一身份权威、净化画风板和真实媒体，先预览三组角色设计输入与费用，再生成本集儿童、猫咪和同框比例图。
-4. 在生产画布编辑分镜标题、完整方向、时长、顺序和参考。完整分镜、角色档案与制作包不进入通用节点浮窗。
-5. 从“视频工作台”产物打开近全屏 Workbench，同屏核对有序参考、专业自然语言 Prompt、Provider 参数、任务、结果与历史版本。
-6. 在 Workbench 的“剪辑与交付”中完成局部编辑、时间线、转场、本地合成与导出。
-7. 全局任务与系统设置位于应用左侧导航轨；项目内容加载失败不会隐藏外壳或其他项目入口。
+停止：
 
-## Prompt 与参考职责
+```powershell
+.\scripts\stop-local.ps1
+```
 
-Provider 创作 Prompt 只包含专业自然语言、职责清晰的有序参考和执行参数。数据库 ID、Revision、Hash、任务 ID 与原始 Schema 留在审计信息中，不拼入创作正文。
+如果端口 `8765` 仍被旧项目占用，启动脚本会报告 PID 并停止，不会擅自终止旧服务。
 
-默认视频参考顺序：
+## 备份、恢复与旧资产导入
+
+创建包含 12 张业务表和 `var/media` 的本机备份：
+
+```powershell
+.\scripts\backup-local.ps1
+```
+
+恢复默认拒绝写入非空数据库；只有用户明确确认归档后才使用 `-Replace`：
+
+```powershell
+.\scripts\restore-local.ps1 -Archive .\var\backups\catflow-YYYYMMDD-HHMMSS.zip
+.\scripts\restore-local.ps1 -Archive .\var\backups\catflow-YYYYMMDD-HHMMSS.zip -Replace
+```
+
+旧数据导入器默认只做只读 dry-run：
+
+```powershell
+.\scripts\import-legacy-assets.ps1
+.\scripts\import-legacy-assets.ps1 -Apply
+```
+
+导入器只读取旧库中 `approved` 的 Canon、已选角色设计、环境、视频和成片，按 SHA256 校验及去重后复制媒体。它不导入 Scene、ShotCard、Generation Plan、Production Recipe、Canvas、Review、Workflow Step 或 Provider 任务历史。`style_source` 即使被归档导入也会带 `providerEligible=false`，不会进入新生成请求。
+
+## 安全与付费边界
+
+- API 代码没有 `0.0.0.0` 启动选项，只绑定数值 loopback 地址。
+- Host 只允许 `127.0.0.1` 和 `localhost`；正式环境不启用 CORS。
+- 浏览器写请求必须同源、使用 `application/json`（上传除外）并携带启动期 CSRF Token。
+- Provider Key、数据库凭据、磁盘路径和进程环境不进入 Renderer。
+- 相同幂等键与输入返回同一个 Job；输入变化返回 `409`。
+- Provider task ID 持久化后，Worker 重启只能继续轮询、存储、取消或对账。
+- 当前 `CATFLOW_PROVIDER=fake`、`CATFLOW_PAID_CALLS_ENABLED=false`；本实现不会发起真实付费调用。
+- 上传图片会校验扩展名、MIME、文件头和 Pillow 解码结果，媒体磁盘路径不直接暴露。
+
+## 质量门槛
+
+```powershell
+.\.venv\Scripts\pytest.exe tests\catflow tests\contract -q
+.\.venv\Scripts\ruff.exe check services\api\src services\worker\src tests\catflow tests\contract
+npm run contracts
+npm --workspace apps/web run test
+npm --workspace apps/web run typecheck
+npm --workspace apps/web run build
+git diff --check
+```
+
+媒体测试使用当前 `.env` 中已配置的 FFmpeg/ffprobe，并在临时媒体目录生成 720×1280、8–15 秒 MP4。所有测试都固定连接数据库名 `catflow_studio`，并只清理自己创建的精确项目 ID。
+
+## 关键不变量
+
+默认视频参考顺序不可由前端重排：
 
 ```text
 本集儿童设计
@@ -77,29 +149,4 @@ Provider 创作 Prompt 只包含专业自然语言、职责清晰的有序参考
 → Canon v4 净化画风板
 ```
 
-基础 Canon 用于生成和审核本集权威设计，不与本集设计重复提交视频 Provider。叶片材质来源图永远不能出现在普通人物、猫咪、环境或视频请求中。
-
-## 质量门槛
-
-```powershell
-.\.venv\Scripts\pytest.exe -q
-.\.venv\Scripts\ruff.exe check .
-npm --prefix web run test -- --run
-npm --prefix web exec vue-tsc -- --noEmit
-npm --prefix web run build
-git diff --check
-```
-
-## 文档
-
-- [架构决策](docs/architecture/ADR-001-explicit-workflow.md)
-- [完整生产流程](docs/workflows/complete-production.md)
-- [设计脚本教程适配说明](docs/workflows/tutorial-adaptation.md)
-- [Windows 手册](docs/workflows/windows-runbook.md)
-- [Docker Compose 部署](docs/workflows/docker-deployment.md)
-- [HTTP API](docs/http-api.md)
-- [架构收敛 Checklist](docs/checklists/v5-architecture-convergence.md)
-- [专业视觉资产 Checklist](docs/checklists/v5-professional-visual-assets.md)
-- [非阻塞媒体工作流 Checklist](docs/checklists/v5-nonblocking-media-workflow.md)
-
-`.env`、Ark Key、数据库密码、Authorization、Cookie、Base64 和完整签名 URL 不得进入 Git、日志或诊断 Manifest。
+Provider 上限不足时按上述优先级裁剪并记录 `omittedReason`。`style_source` 即使有空余名额也不会进入请求。AI 质量诊断只提供 warning；人工选择和最终批准才改变当前投影。

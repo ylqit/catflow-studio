@@ -1,0 +1,7 @@
+{
+  "name": "@catflow/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "types": "src/schema.d.ts",
+  "files": ["src/schema.d.ts", "openapi.json"]
+}

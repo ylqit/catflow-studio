@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cat-video-generator"
+name = "catflow-studio"
 version = "0.1.0"
-description = "Local scene and shot-card AIGC video production system"
+description = "Local-first web studio for original child-and-cat life clips"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.14,<2",
@@ -14,12 +14,12 @@ dependencies = [
   "pillow>=11,<13",
   "psycopg[binary]>=3.2,<4",
   "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
   "python-dotenv>=1.1,<2",
   "python-multipart>=0.0.20,<1",
   "sqlalchemy>=2.0.36,<3",
   "typer>=0.15,<1",
   "uvicorn>=0.34,<1",
-  "volcengine-python-sdk[ark]>=5.0,<6",
 ]
 
 [project.optional-dependencies]
@@ -28,21 +28,29 @@ dev = [
   "ruff>=0.12,<1",
 ]
 
+[project.scripts]
+catflow = "catflow.interfaces.cli:app"
+catflow-worker = "catflow_worker.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "services/api/src/catflow",
+  "services/worker/src/catflow_worker",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "services/api/src",
+  "services/worker/src",
+]
+testpaths = ["tests/catflow", "tests/contract", "tests/e2e", "tests/consistency"]
+addopts = "-ra"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+src = ["services/api/src", "services/worker/src", "tests/catflow", "tests/contract"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "SIM"]
 ignore = ["B008"]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-
-[project.scripts]
-cvg = "cat_video_generator.interfaces.cli:main"
-cvg-media-worker = "cat_video_generator.media_worker:main"
-cvg-worker = "cat_video_generator.media_worker:main"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/cat_video_generator"]

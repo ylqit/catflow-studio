@@ -1,0 +1,18 @@
+{
+  "name": "catflow-studio-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "contracts": ".\\.venv\\Scripts\\python.exe scripts/export_openapi.py && openapi-typescript packages/contracts/openapi.json -o packages/contracts/src/schema.d.ts",
+    "test": "npm --workspace apps/web run test",
+    "typecheck": "npm --workspace apps/web run typecheck",
+    "build": "npm run contracts && npm --workspace apps/web run build"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.9.1"
+  }
+}

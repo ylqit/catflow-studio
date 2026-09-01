@@ -43,7 +43,9 @@ docs/LibTV
 # Web frontend
 /node_modules/
 web/node_modules/
+apps/web/node_modules/
 web/dist/
+apps/web/dist/
 
 # Docker persistent media
 docker-data/
