@@ -56,7 +56,7 @@ onMounted(() => {
   <main class="page projects-page">
     <section class="page-heading">
       <div>
-        <p class="eyebrow">Original life clips</p>
+        <p class="eyebrow">生活短片</p>
         <h1>生活短片项目</h1>
         <p class="subtitle">一个项目，只讲清一个 8–15 秒的一人一猫生活微事件。</p>
       </div>
@@ -64,7 +64,7 @@ onMounted(() => {
     </section>
 
     <p v-if="error" class="notice error">{{ error }}</p>
-    <section v-if="loading" class="card empty">正在从 PostgreSQL 恢复项目…</section>
+    <section v-if="loading" class="card empty">正在加载项目…</section>
     <section v-else-if="projects.length" class="project-grid">
       <RouterLink
         v-for="(project, index) in projects"
@@ -83,7 +83,7 @@ onMounted(() => {
           </div>
           <div class="project-meta">
             <span>9:16</span>
-            <span>Canon v4</span>
+            <span>固定角色与画风</span>
             <time>{{ new Date(project.updatedAt).toLocaleDateString("zh-CN") }}</time>
           </div>
         </div>
@@ -99,7 +99,7 @@ onMounted(() => {
     <div v-if="showCreate" class="modal-backdrop" @click.self="showCreate = false">
       <form class="create-modal card" @submit.prevent="createProject">
         <div class="modal-head">
-          <div><p class="eyebrow">New clip</p><h2>新建生活短片</h2></div>
+          <div><p class="eyebrow">新短片</p><h2>新建生活短片</h2></div>
           <button type="button" class="modal-close" @click="showCreate = false">×</button>
         </div>
         <div class="field">
@@ -114,7 +114,7 @@ onMounted(() => {
           <label for="project-duration">目标时长：{{ draft.targetDurationSeconds }} 秒</label>
           <input id="project-duration" v-model.number="draft.targetDurationSeconds" type="range" min="8" max="15" />
         </div>
-        <p class="notice">固定 9:16，采用 Canon v4 的同一位短发儿童、同一只灰白虎斑猫与柔和数字插画画风。</p>
+        <p class="notice">固定 9:16，使用同一位短发儿童、同一只灰白虎斑猫与柔和数字插画画风。</p>
         <button class="primary modal-submit" :disabled="creating || !draft.title || !draft.theme">
           <span v-if="creating" class="spinner" />{{ creating ? "正在创建" : "进入生活灵感" }}
         </button>

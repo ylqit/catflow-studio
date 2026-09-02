@@ -406,7 +406,7 @@ def test_fake_director_worker_creates_a_professional_plan_without_provider_submi
         assert worker.run_once() is True
 
         plan = service.list_shot_plans(project.id)[0]
-        assert plan.director_prompt_revision == "catflow-director-v1"
+        assert plan.director_prompt_revision == "catflow-director-v2"
         assert plan.shots[0].lens is not None
         assert plan.shots[0].child_blocking is not None
         assert plan.shots[-1].continuity is not None

@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import type { AssetDto, EditDecisionListDto, EditVersionDto, JobDto, WorkspaceDto } from "../../api/types";
 import { validateEditDecisionList } from "../../editing";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
+import { errorPresentation, jobPresentation } from "../../presentation";
 import { mountWebAvPreview, type WebAvPreviewController } from "../../webavPreview";
 import VideoRepairWorkspace from "./VideoRepairWorkspace.vue";
 
@@ -16,11 +17,13 @@ const savedEdit = ref<EditVersionDto | null>(null);
 const exportJob = ref<JobDto | null>(null);
 const saving = ref(false);
 const error = ref("");
+const errorDetail = ref("");
 const webavHost = ref<HTMLElement | null>(null);
 const webavController = ref<WebAvPreviewController | null>(null);
 const webavReady = ref(false);
 const durationMs = computed(() => props.workspace.project.targetDurationSeconds * 1000);
 const controls = reactive({ startMs: 0, endMs: durationMs.value, audioPolicy: "native_fades" as const, transition: "fade" as const, transitionMs: 250 });
+const exportJobPresentation = computed(() => exportJob.value ? jobPresentation(exportJob.value.status) : null);
 
 function edl(): EditDecisionListDto | null {
   const video = props.workspace.selections.video;
@@ -68,7 +71,9 @@ async function saveEdit() {
     savedEdit.value = await api.createEdit(props.projectId, decision);
     await load();
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "剪辑决策保存失败";
+    const failure = errorPresentation(reason, "剪辑版本没有成功保存");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     saving.value = false;
   }
@@ -101,7 +106,9 @@ async function startWebAv() {
     webavReady.value = true;
     webavController.value.play();
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "WebAV 预览不可用";
+    const failure = errorPresentation(reason, "剪辑预览暂时不可用");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
     webavReady.value = false;
   }
 }
@@ -112,13 +119,12 @@ onBeforeUnmount(() => webavController.value?.destroy());
 </script>
 
 <template>
-  <section v-if="!workspace.selections.video" class="card empty missing-video"><div>▶</div><h2>先选择一个视频版本</h2><p>正式剪辑只引用已选择视频的 Asset ID 与 SHA256。</p><RouterLink class="primary" :to="`/projects/${projectId}/generation`">前往生成与选择</RouterLink></section>
+  <section v-if="!workspace.selections.video" class="card empty missing-video"><div>▶</div><h2>先选择一个视频</h2><p>选择后即可裁切、预览并导出成片。</p><RouterLink class="primary" :to="`/projects/${projectId}/generation`">前往选择视频</RouterLink></section>
   <section v-else class="delivery-layout">
     <div class="editor card">
-      <header><div><p class="eyebrow">WebAV decision preview</p><h2>裁切、顺序与简单转场</h2></div><span class="pill">720 × 1280 MP4</span></header>
-      <div class="edit-stage"><div v-show="webavReady" ref="webavHost" class="webav-host" /><video v-show="!webavReady" controls :src="`/api/v1/assets/${workspace.selections.video.id}/content`" /><button class="webav-button" @click="startWebAv">{{ webavReady ? "重载 WebAV" : "启用 WebAV 预览" }}</button></div>
+      <header><div><p class="eyebrow">剪辑</p><h2>裁切与转场</h2></div><span class="pill">720 × 1280</span></header>
+      <div class="edit-stage"><div v-show="webavReady" ref="webavHost" class="webav-host" /><video v-show="!webavReady" controls :src="`/api/v1/assets/${workspace.selections.video.id}/content`" /><button class="webav-button" @click="startWebAv">{{ webavReady ? "重新加载预览" : "打开剪辑预览" }}</button></div>
       <div class="timeline">
-        <div class="timeline-head"><span>源视频 SHA256</span><code>{{ workspace.selections.video.sha256 }}</code></div>
         <div class="clip-track"><span class="clip-block">当前视频 · {{ ((controls.endMs - controls.startMs) / 1000).toFixed(1) }}s</span></div>
         <div class="trim-controls">
           <div class="field"><label>起点（毫秒）</label><input v-model.number="controls.startMs" type="number" min="0" :max="controls.endMs - 100" /></div>
@@ -126,13 +132,14 @@ onBeforeUnmount(() => webavController.value?.destroy());
           <div class="field"><label>转场</label><select v-model="controls.transition"><option value="none">无</option><option value="fade">淡入淡出</option><option value="crossfade">交叉淡化</option></select></div>
           <div class="field"><label>音频</label><select v-model="controls.audioPolicy"><option value="native">原声</option><option value="mute">静音</option><option value="native_fades">原声淡入淡出</option></select></div>
         </div>
+        <details class="editor-technical"><summary>技术详情</summary><p>源视频校验值</p><code>{{ workspace.selections.video.sha256 }}</code><p>预览由浏览器完成，正式视频在后台渲染并保存。</p></details>
       </div>
-      <p v-if="error" class="notice error">{{ error }}</p>
-      <footer><span>WebAV 只做交互预览；正式媒体由 Worker 使用 FFmpeg 渲染。</span><button class="secondary" :disabled="saving" @click="saveEdit">{{ saving ? "保存中" : "保存 Edit Version" }}</button><button class="primary" :disabled="!savedEdit" @click="exportVideo">提交正式导出</button></footer>
+      <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
+      <footer><span>保存后会保留当前版本，导出不会覆盖原视频。</span><button class="secondary" :disabled="saving" @click="saveEdit">{{ saving ? "保存中" : "保存剪辑版本" }}</button><button class="primary" :disabled="!savedEdit" @click="exportVideo">导出视频</button></footer>
     </div>
     <aside class="delivery-side">
-      <div class="card version-card"><p class="eyebrow">Edit versions</p><h2>不可变剪辑版本</h2><div v-if="!edits.length" class="empty">保存后产生第一个版本。</div><article v-for="edit in edits" :key="edit.id"><b>Revision {{ edit.revision }}</b><span class="pill" :class="{ good: edit.status === 'approved' }">{{ edit.status }}</span><small>{{ new Date(edit.createdAt).toLocaleString("zh-CN") }}</small></article></div>
-      <div class="card export-card"><p class="eyebrow">Final exports</p><h2>正式成片</h2><p v-if="exportJob" class="notice">导出任务：{{ exportJob.status }}。浏览器关闭后 Worker 仍会继续。</p><div v-if="!finalAssets.length" class="empty">还没有 FFmpeg 成片。</div><article v-for="asset in finalAssets" :key="asset.id"><video controls :src="`/api/v1/assets/${asset.id}/content`" /><dl class="technical-proof"><div><dt>Asset SHA256</dt><dd><code>{{ asset.sha256 }}</code></dd></div><div><dt>画幅</dt><dd>{{ metadataNumber(asset, "width") }} × {{ metadataNumber(asset, "height") }}</dd></div><div><dt>帧与时长</dt><dd>{{ metadataNumber(asset, "durationFrames") }} 帧 · {{ ((metadataNumber(asset, "durationMs") ?? 0) / 1000).toFixed(3) }} 秒</dd></div><div><dt>视频编码</dt><dd>{{ asset.metadata.codec ?? "未知" }}</dd></div><div><dt>音轨</dt><dd>{{ asset.metadata.audioPolicy === "preserve_original" && asset.metadata.candidateAudioUsed === false ? "根视频原音轨" : "按 EDL 输出" }}<span v-if="asset.metadata.audioCodec"> · {{ asset.metadata.audioCodec }}</span></dd></div></dl><button v-if="workspace.selections.final?.id !== asset.id" class="primary" @click="approve(asset.id)">批准为最终成片</button><span v-else class="pill good">已批准</span></article></div>
+      <div class="card version-card"><p class="eyebrow">视频版本</p><h2>剪辑记录</h2><div v-if="!edits.length" class="empty">保存后会产生第一个版本。</div><article v-for="edit in edits" :key="edit.id"><b>版本 {{ edit.revision }}</b><span class="pill" :class="{ good: edit.status === 'approved' }">{{ edit.status === "approved" ? "已采用" : edit.status === "rendered" ? "已导出" : "草稿" }}</span><small>{{ new Date(edit.createdAt).toLocaleString("zh-CN") }}</small></article></div>
+      <div class="card export-card"><p class="eyebrow">导出结果</p><h2>正式成片</h2><p v-if="exportJob && exportJobPresentation" class="notice" :class="{ error: ['warn', 'danger'].includes(exportJobPresentation.tone) }">导出进度：{{ exportJobPresentation.label }}。{{ exportJob.error?.message || exportJobPresentation.description }}</p><div v-if="!finalAssets.length" class="empty">还没有导出成片。</div><article v-for="asset in finalAssets" :key="asset.id"><video controls :src="`/api/v1/assets/${asset.id}/content`" /><details><summary>查看技术信息</summary><dl class="technical-proof"><div><dt>文件校验值</dt><dd><code>{{ asset.sha256 }}</code></dd></div><div><dt>画幅</dt><dd>{{ metadataNumber(asset, "width") }} × {{ metadataNumber(asset, "height") }}</dd></div><div><dt>帧与时长</dt><dd>{{ metadataNumber(asset, "durationFrames") }} 帧 · {{ ((metadataNumber(asset, "durationMs") ?? 0) / 1000).toFixed(3) }} 秒</dd></div><div><dt>视频编码</dt><dd>{{ asset.metadata.codec ?? "未知" }}</dd></div><div><dt>音轨</dt><dd>{{ asset.metadata.audioPolicy === "preserve_original" && asset.metadata.candidateAudioUsed === false ? "根视频原音轨" : "按剪辑设置输出" }}<span v-if="asset.metadata.audioCodec"> · {{ asset.metadata.audioCodec }}</span></dd></div></dl></details><button v-if="workspace.selections.final?.id !== asset.id" class="primary" @click="approve(asset.id)">设为最终成片</button><span v-else class="pill good">最终成片</span></article></div>
     </aside>
   </section>
   <VideoRepairWorkspace v-if="workspace.selections.video" :project-id="projectId" :workspace="workspace" @changed="handleRepairChanged" />
@@ -159,6 +166,7 @@ onBeforeUnmount(() => webavController.value?.destroy());
 .clip-block { width: 100%; height: 100%; display: flex; align-items: center; padding: 0 13px; border-radius: 7px; color: #fff; background: linear-gradient(90deg, #c5755d, #d99172); font-size: 11px; }
 .trim-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .trim-controls input, .trim-controls select { padding: 8px; font-size: 11px; }
+.editor-technical { margin-top: 14px; color: var(--muted); font-size: 10px; }.editor-technical summary, .export-card details summary { cursor: pointer; font-weight: 700; }.editor-technical p { margin: 7px 0 3px; }.editor-technical code { overflow-wrap: anywhere; }
 .editor > .notice { margin: 0 24px 15px; }
 .editor > footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; padding: 15px 24px; border-top: 1px solid var(--line); }
 .editor > footer > span { margin-right: auto; color: var(--muted); font-size: 10px; }

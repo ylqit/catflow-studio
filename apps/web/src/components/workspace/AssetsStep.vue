@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api } from "../../api/client";
 import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, JobDto, RuntimeBootstrapDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
+import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
 import { projectJobEvent } from "../../projectJobEvents";
 import { useUiStore } from "../../stores/ui";
 
@@ -13,6 +14,7 @@ const store = useUiStore();
 const assets = ref<AssetDto[]>([]);
 const busySlot = ref<AssetSlot | null>(null);
 const error = ref("");
+const errorDetail = ref("");
 const runtime = ref<RuntimeBootstrapDto | null>(null);
 const generationPreview = ref<AssetGenerationPreviewDto | null>(null);
 const currentJob = ref<JobDto | null>(null);
@@ -23,11 +25,21 @@ const slots: Array<{ id: AssetGenerationKind; order: string; title: string; resp
   { id: "episode_cat", order: "02", title: "本集猫咪设计", responsibility: "锁定灰白分区、虎斑、眼鼻口、环纹尾巴与四足" },
   { id: "pair_scale", order: "03", title: "人猫同框比例", responsibility: "只负责可信的人猫尺寸与站位关系" },
   { id: "environment", order: "04", title: "当前环境参考", responsibility: "只控制空间与光线，不改变角色身份" },
-  { id: "style_board", order: "05", title: "Canon v4 净化画风板", responsibility: "只控制线条、材质、色彩与柔和暖光" },
+  { id: "style_board", order: "05", title: "固定画风板", responsibility: "只控制线条、材质、色彩与柔和暖光" },
 ];
 
 const grouped = computed(() => Object.fromEntries(slots.map((slot) => [slot.id, assets.value.filter((asset) => asset.role === slot.id)])) as Record<AssetSlot, AssetDto[]>);
 const currentJobLabel = computed(() => currentJob.value?.kind === "diagnose_image" ? "图片质量诊断" : "共享环境生成");
+const currentJobPresentation = computed(() => currentJob.value ? jobPresentation(currentJob.value.status) : null);
+const currentBillingPresentation = computed(() => currentJob.value
+  ? billingPresentation(currentJob.value.billingStatus, currentJob.value.actualCostMicros, currentJob.value.provider)
+  : null);
+
+function inheritedLabel(slot: AssetGenerationKind) {
+  if (slot === "episode_child" || slot === "episode_cat") return "已使用固定角色";
+  if (slot === "pair_scale") return "已使用固定比例";
+  return "已使用固定画风";
+}
 
 async function load() {
   try {
@@ -36,7 +48,9 @@ async function load() {
       api.runtime(),
     ]);
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "资产读取失败";
+    const failure = errorPresentation(reason, "角色与画风暂时无法读取");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   }
 }
 
@@ -50,7 +64,9 @@ async function upload(slot: AssetSlot, event: Event) {
     await api.uploadAsset(props.projectId, slot, file);
     await load();
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "上传失败";
+    const failure = errorPresentation(reason, "图片没有成功上传");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     busySlot.value = null;
     input.value = "";
@@ -63,7 +79,9 @@ async function select(slot: AssetSlot, assetId: string) {
     await api.selectAsset(props.projectId, slot, assetId);
     emit("changed");
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "选择失败";
+    const failure = errorPresentation(reason, "图片没有成功选用");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     busySlot.value = null;
   }
@@ -84,7 +102,9 @@ async function generateEnvironment() {
     });
     settleIdempotencyKey(scope, prepared.inputHash);
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "候选生成失败";
+    const failure = errorPresentation(reason, "环境图片没有成功开始生成");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     busySlot.value = null;
   }
@@ -103,7 +123,9 @@ async function diagnose(asset: AssetDto) {
     );
     settleIdempotencyKey(scope, asset.sha256);
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "诊断失败";
+    const failure = errorPresentation(reason, "画面检查没有成功开始");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     busySlot.value = null;
   }
@@ -136,28 +158,26 @@ onBeforeUnmount(() => events?.close());
 <template>
   <section class="assets-layout">
     <div class="asset-intro card">
-      <p class="eyebrow">Canon v4</p>
-      <h2>身份优先，画风分责</h2>
-      <p>四个 Canon 槽位全局只读继承；项目只生成、诊断并选择当前环境参考。</p>
+      <p class="eyebrow">固定角色与画风</p>
+      <h2>保持每条视频中的角色一致</h2>
+      <p>儿童、猫咪、同框比例与画风已固定；这里只需为本条视频选择环境。</p>
       <div class="canon-portrait"><span class="child">⌒◡⌒</span><span class="cat">= ᵔᴗᵔ =</span></div>
       <ul>
         <li><b>儿童</b><span>同一位 6–7 岁、约 1.2 米短发儿童</span></li>
         <li><b>猫咪</b><span>同一只灰白虎斑猫</span></li>
         <li><b>画风</b><span>二维柔和数字插画</span></li>
-        <li><b>隔离</b><span>style_source 永不进入 Provider</span></li>
+        <li><b>来源</b><span>只使用已经确认的画风板</span></li>
       </ul>
-      <p class="notice">AI 身份、画风和结构诊断只提供建议；只有损坏、无法解码或格式错误会阻止选择。</p>
+      <p class="notice">画面检查只提供建议；只有文件损坏、无法解码或格式错误会阻止选择。</p>
     </div>
 
     <div class="slot-list">
-      <p v-if="error" class="notice error">{{ error }}</p>
-      <p v-if="currentJob" class="notice" :class="{ error: ['failed', 'submission_unknown'].includes(currentJob.status) }">
-        {{ currentJobLabel }} · {{ currentJob.status }}（状态由 SSE 恢复）
-        <span v-if="currentJob.error"> · {{ currentJob.error.code }}：{{ currentJob.error.message }}</span>
-        <span v-if="currentJob.actualUsage"> · 实际 usage {{ JSON.stringify(currentJob.actualUsage) }}</span>
-        <span v-if="currentJob.billingStatus === 'unpriced'"> · 费用待核价</span>
-        <span v-else-if="currentJob.actualCostMicros != null"> · ¥{{ (currentJob.actualCostMicros / 1_000_000).toFixed(4) }}</span>
-      </p>
+      <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
+      <section v-if="currentJob && currentJobPresentation" class="notice job-notice" :class="{ error: currentJobPresentation.tone === 'danger' || currentJobPresentation.tone === 'warn' }">
+        <b>{{ currentJobLabel }}：{{ currentJobPresentation.label }}</b>
+        <span>{{ currentJob.error?.message || currentJobPresentation.description }}</span>
+        <details><summary>查看生成记录</summary><p>任务编号：<code>{{ currentJob.id }}</code></p><p>模型服务：{{ currentJob.provider || "旧任务未记录" }} · {{ currentJob.model || "旧任务未记录" }}</p><p>原始状态：{{ currentJob.status }}</p><p v-if="currentJob.actualUsage">实际用量：{{ JSON.stringify(currentJob.actualUsage) }}</p><p v-if="currentBillingPresentation">费用：{{ currentBillingPresentation.label }} · {{ currentBillingPresentation.detail }}</p><p v-if="currentJob.error?.code">错误代码：{{ currentJob.error.code }}</p></details>
+      </section>
       <article v-for="slot in slots" :key="slot.id" class="asset-slot card">
         <div class="slot-order">{{ slot.order }}</div>
         <div class="slot-main">
@@ -165,14 +185,14 @@ onBeforeUnmount(() => events?.close());
           <div v-if="slot.id !== 'environment'" class="candidates inherited">
             <div v-if="workspace.selections[slot.id]" class="candidate selected">
               <img :src="`/api/v1/assets/${workspace.selections[slot.id]!.id}/content`" :alt="`${slot.title}全局继承`" />
-              <span class="current-badge">全局 Canon · 只读继承</span>
+              <span class="current-badge">{{ inheritedLabel(slot.id) }}</span>
             </div>
-            <p v-else class="notice warn">请先到“模型与运行设置”上传并发布 Canon v4。</p>
+            <p v-else class="notice warn">请先到运行设置完成固定角色与画风。</p>
           </div>
           <div v-else class="candidates">
             <div v-if="workspace.selections[slot.id]" class="candidate selected">
               <img :src="`/api/v1/assets/${workspace.selections[slot.id]!.id}/content`" :alt="`${slot.title}当前选择`" />
-              <span class="current-badge">共享环境 · 全局继承</span>
+              <span class="current-badge">已选择当前环境</span>
             </div>
             <div v-for="asset in grouped[slot.id].filter((candidate) => candidate.id !== workspace.selections[slot.id]?.id)" :key="asset.id" class="candidate">
               <img :src="`/api/v1/assets/${asset.id}/content`" :alt="slot.title" />
@@ -184,12 +204,12 @@ onBeforeUnmount(() => events?.close());
               <input type="file" accept="image/png,image/jpeg,image/webp" @change="upload(slot.id, $event)" />
               <b>{{ busySlot === slot.id ? "处理中…" : "＋" }}</b><span>上传候选</span>
             </label>
-            <button class="generate-candidate" :disabled="busySlot === slot.id" @click="generateEnvironment"><b>✦</b><span>生成新的共享环境候选</span></button>
+            <button class="generate-candidate" :disabled="busySlot === slot.id" @click="generateEnvironment"><b>✦</b><span>生成环境候选</span></button>
           </div>
           <section v-if="slot.id === 'environment'" class="paid-model-note">
-            <b>{{ runtime?.provider.name ?? "Ark" }} · {{ runtime?.provider.imageModel ?? "图片模型" }} · Ark 付费模型</b>
-            <span>点击生成或诊断会直接创建一个任务；完成后显示实际 usage，未配置费率时标记为待核价。</span>
-            <details v-if="generationPreview"><summary>查看最近一次冻结输入</summary><p>{{ generationPreview.prompt }}</p><code>{{ generationPreview.inputHash }}</code></details>
+            <b>{{ runtime?.provider.name === "ark" ? "本次会使用付费模型，完成后显示实际用量。" : "测试模式，不会产生模型费用。" }}</b>
+            <span>生成或检查只会创建一次任务，离开页面后仍会继续。</span>
+            <details v-if="generationPreview"><summary>查看完整生成指令</summary><p>{{ generationPreview.prompt }}</p><p><b>需要避免的问题</b><br>{{ generationPreview.negativePrompt }}</p><details class="technical-details"><summary>技术详情</summary><p>{{ generationPreview.provider }} · {{ generationPreview.model }} · {{ generationPreview.capabilityRevision }}</p><code>{{ generationPreview.inputHash }}</code></details></details>
           </section>
         </div>
       </article>
@@ -232,4 +252,5 @@ onBeforeUnmount(() => events?.close());
 .candidates.inherited { overflow: visible; }
 .paid-model-note { display: grid; gap: 5px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: #fff7ef; color: var(--muted); font-size: 10px; }
 .paid-model-note b { color: var(--ink); }.paid-model-note details { margin-top: 5px; }.paid-model-note p { line-height: 1.6; }.paid-model-note code { overflow-wrap: anywhere; }
+.job-notice { display: grid; gap: 6px; }.job-notice details summary, .technical-details summary { cursor: pointer; font-weight: 700; }.job-notice details p { margin: 6px 0 0; overflow-wrap: anywhere; }
 </style>

@@ -89,7 +89,7 @@ describe("RuntimeSettingsView", () => {
     });
     await flushPromises();
 
-    expect(wrapper.text()).toContain("片段修复Blocked");
+    expect(wrapper.text()).toContain("片段修改需要检查");
     expect(wrapper.text()).toContain(blockedReason);
   });
 
@@ -104,7 +104,7 @@ describe("RuntimeSettingsView", () => {
     await flushPromises();
 
     expect(checkObjectPublisher).toHaveBeenCalledOnce();
-    expect(wrapper.get('[data-testid="object-publisher-status"]').text()).toContain("Ready");
+    expect(wrapper.get('[data-testid="object-publisher-status"]').text()).toContain("可用");
     expect(wrapper.text()).not.toContain("X-Amz-Signature");
   });
 

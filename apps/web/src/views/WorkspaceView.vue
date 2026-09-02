@@ -25,8 +25,8 @@ const steps = [
   { id: "planner", number: "01", label: "生活灵感", hint: "一个微事件" },
   { id: "assets", number: "02", label: "角色与画风", hint: "五个固定槽位" },
   { id: "storyboard", number: "03", label: "分镜画布", hint: "1–4 个镜头" },
-  { id: "generation", number: "04", label: "生成与选择", hint: "冻结输入" },
-  { id: "delivery", number: "05", label: "剪辑与导出", hint: "FFmpeg 成片" },
+  { id: "generation", number: "04", label: "生成与选择", hint: "准备生成" },
+  { id: "delivery", number: "05", label: "剪辑与导出", hint: "完成剪辑" },
 ] as const;
 
 async function loadWorkspace() {
@@ -64,12 +64,12 @@ onBeforeUnmount(() => { eventSource?.close(); store.sseConnected = false; });
 
 <template>
   <main class="workspace-page">
-    <section v-if="loading" class="page"><div class="card empty">正在从 PostgreSQL 恢复工作区…</div></section>
+    <section v-if="loading" class="page"><div class="card empty">正在加载工作区…</div></section>
     <section v-else-if="error || !workspace" class="page"><div class="card empty"><h2>工作区暂时不可用</h2><p class="notice error">{{ error }}</p><button class="secondary" @click="loadWorkspace">重新检查</button></div></section>
     <template v-else>
       <header class="workspace-heading">
         <div class="workspace-title"><RouterLink to="/projects">←</RouterLink><div><p class="eyebrow">{{ workspace.project.theme }}</p><h1>{{ workspace.project.title }}</h1></div></div>
-        <div class="workspace-status"><span><i :class="{ live: store.sseConnected }" />{{ store.sseConnected ? "事件已连接" : "正在重连" }}</span><b>{{ workspace.project.targetDurationSeconds }}s</b><b>9:16</b></div>
+        <div class="workspace-status"><span v-if="!store.sseConnected" class="connection-warning"><i />正在恢复连接</span><b>{{ workspace.project.targetDurationSeconds }}s</b><b>9:16</b></div>
       </header>
       <nav class="step-nav" aria-label="五步创作流程">
         <RouterLink v-for="item in steps" :key="item.id" :to="`/projects/${projectId}/${item.id}`" :class="{ current: step === item.id, ready: workspace.steps.find((state) => state.id === item.id)?.ready }">

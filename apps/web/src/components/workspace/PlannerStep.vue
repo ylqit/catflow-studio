@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 import { api } from "../../api/client";
-import type { PlannerSnapshotDto, RuntimeBootstrapDto } from "../../api/types";
+import type { LifeStoryProposalDto, PlannerSnapshotDto, RuntimeBootstrapDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
+import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
 
 const props = defineProps<{ projectId: string }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -12,20 +13,41 @@ const message = ref("");
 const sending = ref(false);
 const adopting = ref<string | null>(null);
 const error = ref("");
+const errorDetail = ref("");
 const runtime = ref<RuntimeBootstrapDto | null>(null);
 
-function formatCost(micros: number) {
-  return `¥${(micros / 1_000_000).toFixed(4)}`;
+const latestJobPresentation = computed(() => snapshot.value?.latestJob
+  ? jobPresentation(snapshot.value.latestJob.status)
+  : null);
+const latestBillingPresentation = computed(() => snapshot.value?.latestJob
+  ? billingPresentation(snapshot.value.latestJob.billingStatus, snapshot.value.latestJob.actualCostMicros, snapshot.value.latestJob.provider)
+  : null);
+
+function proposalStatus(status: "draft" | "adopted" | "outdated") {
+  return { draft: "待采用", adopted: "已采用", outdated: "已过期" }[status];
+}
+
+function compactTitle(title: string) {
+  return title.length > 16 ? `${title.slice(0, 14)}…` : title;
+}
+
+function isRedundantSummary(proposal: LifeStoryProposalDto) {
+  const normalized = proposal.summary.replace(/[“”"'，。；：、\s]/g, "");
+  const title = proposal.title.replace(/[“”"'，。；：、\s]/g, "");
+  return normalized === title || (normalized.includes(title) && /^(围绕|通过|以)/.test(proposal.summary));
 }
 
 async function load() {
+  error.value = "";
   try {
     [snapshot.value, runtime.value] = await Promise.all([
       api.planner(props.projectId),
       api.runtime(),
     ]);
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "生活灵感读取失败";
+    const failure = errorPresentation(reason, "故事灵感暂时无法读取");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   }
 }
 
@@ -46,7 +68,9 @@ async function sendMessage() {
     message.value = "";
     await load();
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "规划任务提交失败";
+    const failure = errorPresentation(reason, "故事没有成功开始生成");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     sending.value = false;
   }
@@ -59,7 +83,9 @@ async function adopt(proposalId: string) {
     await load();
     emit("changed");
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "提案采用失败";
+    const failure = errorPresentation(reason, "故事没有成功采用");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     adopting.value = null;
   }
@@ -73,26 +99,26 @@ onMounted(load);
   <section class="planner-layout">
     <div class="conversation card">
       <header class="panel-head">
-        <div><p class="eyebrow">Life planner</p><h2>和生活灵感导演聊一聊</h2></div>
+        <div><p class="eyebrow">故事灵感</p><h2>聊聊这个小故事</h2></div>
         <button class="ghost" @click="load">刷新</button>
       </header>
-      <section v-if="snapshot?.latestJob" class="job-status" :class="snapshot.latestJob.status">
-        <div>
-          <b>最近规划任务</b>
-          <code>{{ snapshot.latestJob.id }}</code>
+      <section v-if="snapshot?.latestJob && latestJobPresentation" class="job-status" :class="latestJobPresentation.tone">
+        <div data-testid="planner-job-summary" class="job-summary">
+          <b>{{ latestJobPresentation.label }}</b>
+          <span>{{ snapshot.latestJob.error?.message || latestJobPresentation.description }}</span>
         </div>
-        <span class="pill">{{ snapshot.latestJob.status }}</span>
-        <p v-if="snapshot.latestJob.error">
-          {{ snapshot.latestJob.error.code || "provider_error" }}：{{ snapshot.latestJob.error.message || "规划任务失败" }}
-          <small v-if="snapshot.latestJob.error.requestId">Request ID: {{ snapshot.latestJob.error.requestId }}</small>
-        </p>
-        <p v-else-if="!['succeeded', 'failed', 'cancelled', 'submission_unknown'].includes(snapshot.latestJob.status)">任务正在 Worker 中执行；刷新或重新打开页面不会重复提交。</p>
-        <p v-else-if="snapshot.latestJob.status === 'succeeded' && snapshot.latestJob.actualUsage">
-          实际 Provider usage：{{ JSON.stringify(snapshot.latestJob.actualUsage) }}；
-          <template v-if="snapshot.latestJob.billingStatus === 'calculated' && snapshot.latestJob.actualCostMicros != null">按费率表计算 {{ formatCost(snapshot.latestJob.actualCostMicros) }}</template>
-          <template v-else-if="snapshot.latestJob.billingStatus === 'provider_adjusted' && snapshot.latestJob.actualCostMicros != null">Provider 费用 {{ formatCost(snapshot.latestJob.actualCostMicros) }}</template>
-          <template v-else>费用待核价</template>
-        </p>
+        <details data-testid="planner-job-details" class="job-record">
+          <summary>查看生成记录</summary>
+          <dl>
+            <div><dt>任务编号</dt><dd><code>{{ snapshot.latestJob.id }}</code></dd></div>
+            <div><dt>模型服务</dt><dd>{{ snapshot.latestJob.provider || "旧任务未记录" }} · {{ snapshot.latestJob.model || "旧任务未记录" }}</dd></div>
+            <div><dt>原始状态</dt><dd>{{ snapshot.latestJob.status }}</dd></div>
+            <div v-if="snapshot.latestJob.actualUsage"><dt>实际用量</dt><dd>{{ JSON.stringify(snapshot.latestJob.actualUsage) }}</dd></div>
+            <div v-if="latestBillingPresentation"><dt>费用</dt><dd>{{ latestBillingPresentation.label }} · {{ latestBillingPresentation.detail }}</dd></div>
+            <div v-if="snapshot.latestJob.error?.code"><dt>错误代码</dt><dd>{{ snapshot.latestJob.error.code }}</dd></div>
+            <div v-if="snapshot.latestJob.error?.requestId"><dt>请求编号</dt><dd>{{ snapshot.latestJob.error.requestId }}</dd></div>
+          </dl>
+        </details>
       </section>
       <div class="messages">
         <div v-if="!snapshot?.messages.length" class="welcome-message">
@@ -105,24 +131,22 @@ onMounted(load);
             </div>
           </div>
         </div>
-        <article v-for="item in snapshot?.messages" :key="item.id" class="message" :class="item.role">
-          <span>{{ item.role === "assistant" ? "导" : "我" }}</span>
-          <p>{{ item.content }}</p>
-        </article>
+        <details v-if="snapshot?.messages.length && snapshot.proposals.length" data-testid="planner-conversation-history" class="conversation-history"><summary>查看历史对话（{{ snapshot.messages.length }} 条）</summary><article v-for="item in snapshot.messages" :key="item.id" class="message" :class="item.role"><span>{{ item.role === "assistant" ? "导" : "我" }}</span><p>{{ item.content }}</p></article></details>
+        <template v-else><article v-for="item in snapshot?.messages" :key="item.id" class="message" :class="item.role"><span>{{ item.role === "assistant" ? "导" : "我" }}</span><p>{{ item.content }}</p></article></template>
       </div>
       <form class="composer" @submit.prevent="sendMessage">
         <textarea v-model="message" rows="3" maxlength="4000" placeholder="例如：雨停后，孩子发现猫咪在门口留下一串湿脚印……" @keydown.ctrl.enter="sendMessage" />
-        <div><small>Ctrl + Enter · {{ runtime?.provider.name === "ark" ? `${runtime.provider.planningModel} · Ark 付费模型，完成后显示实际用量` : "本机 fake planner" }}</small><button class="primary" :disabled="sending || !message.trim()"><span v-if="sending" class="spinner" />生成提案</button></div>
+        <div><small>Ctrl + Enter · {{ runtime?.provider.name === "ark" ? "本次会使用付费模型，完成后显示实际用量。" : "测试模式，不会产生模型费用。" }}</small><button class="primary" :disabled="sending || !message.trim()"><span v-if="sending" class="spinner" />生成提案</button></div>
       </form>
     </div>
 
     <aside class="proposal-panel card">
-      <header class="panel-head"><div><p class="eyebrow">Structured proposals</p><h2>生活微事件提案</h2></div><span class="pill">{{ snapshot?.proposals.length ?? 0 }} 个</span></header>
-      <p v-if="error" class="notice error">{{ error }}</p>
-      <div v-if="!snapshot?.proposals.length" class="empty">Worker 完成规划任务后，结构化提案会出现在这里。</div>
+      <header class="panel-head"><div><p class="eyebrow">故事候选</p><h2>选择一个故事</h2></div><span class="pill">{{ snapshot?.proposals.length ?? 0 }} 个</span></header>
+      <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
+      <div v-if="!snapshot?.proposals.length" class="empty">故事生成后会出现在这里。</div>
       <article v-for="proposal in snapshot?.proposals" :key="proposal.id" class="proposal">
-        <div class="proposal-title"><h3>{{ proposal.title }}</h3><span class="pill" :class="{ good: proposal.status === 'adopted', warn: proposal.status === 'outdated' }">{{ proposal.status }}</span></div>
-        <p class="proposal-summary">{{ proposal.summary }}</p>
+        <div class="proposal-title"><h3 :title="proposal.title">{{ compactTitle(proposal.title) }}</h3><span class="pill" :class="{ good: proposal.status === 'adopted', warn: proposal.status === 'outdated' }">{{ proposalStatus(proposal.status) }}</span></div>
+        <p v-if="!isRedundantSummary(proposal)" class="proposal-summary">{{ proposal.summary }}</p><details v-else class="legacy-summary"><summary>查看原摘要</summary><p class="proposal-summary">{{ proposal.summary }}</p></details>
         <ol class="micro-chain">
           <li><b>触发</b><span>{{ proposal.microEvent.trigger }}</span></li>
           <li><b>孩子</b><span>{{ proposal.microEvent.childAction }}</span></li>
@@ -141,13 +165,18 @@ onMounted(load);
 .conversation, .proposal-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 17px; border-bottom: 1px solid var(--line); }
 .panel-head h2 { margin: 0; font-size: 20px; }
-.job-status { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 14px 20px 0; padding: 12px 14px; border: 1px solid #d9cdbf; border-radius: 12px; background: #faf7f2; font-size: 11px; }
-.job-status > div { display: grid; gap: 3px; min-width: 0; }
+.job-status { display: grid; gap: 9px; margin: 14px 20px 0; padding: 12px 14px; border: 1px solid #d9cdbf; border-radius: 12px; background: #faf7f2; font-size: 11px; }
+.job-summary { display: grid; grid-template-columns: auto 1fr; gap: 10px; min-width: 0; }
+.job-summary span { color: var(--muted); }
 .job-status code { overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
-.job-status p { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.5; }
-.job-status p small { display: block; margin-top: 4px; }
-.job-status.failed, .job-status.submission_unknown { border-color: #d8aaa2; background: #fff3f1; }
+.job-status.warn, .job-status.danger { border-color: #d8aaa2; background: #fff3f1; }
+.job-status.good { border-color: #bed0c1; background: var(--sage-soft); }
+.job-record summary { cursor: pointer; color: #7d6d62; font-weight: 700; }
+.job-record dl { display: grid; gap: 6px; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.job-record dl div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; }
+.job-record dt { color: var(--muted); }.job-record dd { margin: 0; overflow-wrap: anywhere; }
 .messages { flex: 1; min-height: 300px; padding: 24px; overflow-y: auto; }
+.conversation-history { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: #faf7f2; }.conversation-history > summary, .legacy-summary > summary { cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 700; }.legacy-summary { margin: 9px 0 12px; }.legacy-summary .proposal-summary { margin-bottom: 0; }
 .welcome-message { display: flex; gap: 15px; padding: 18px; border-radius: 16px; background: #f8f1e7; line-height: 1.65; }
 .welcome-message p { color: var(--muted); margin: 6px 0 13px; font-size: 13px; }
 .director-avatar, .message > span { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: white; background: #7c917e; font-size: 12px; }

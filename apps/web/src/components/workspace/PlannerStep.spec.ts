@@ -80,4 +80,30 @@ describe("PlannerStep", () => {
     expect(wrapper.get('[data-testid="planner-job-details"]').text()).toContain("费用待核价");
     expect(wrapper.text()).not.toContain("¥0");
   });
+
+  it("keeps completed conversation history collapsed once a story candidate exists", async () => {
+    client.planner.mockResolvedValue({
+      sessionId: "session-1",
+      projectId: "project-1",
+      contextRevision: 1,
+      messages: [
+        { id: "message-1", role: "user", content: "雨天擦爪", ordinal: 1, createdAt: "2026-09-01T00:00:00Z" },
+        { id: "message-2", role: "assistant", content: "旧版重复回复", ordinal: 2, createdAt: "2026-09-01T00:00:01Z" },
+      ],
+      proposals: [{
+        id: "proposal-1", projectId: "project-1", status: "adopted", title: "擦干小猫爪",
+        summary: "门边的湿爪被逐只擦干。", body: "孩子替猫咪擦干爪子。",
+        microEvent: { trigger: "猫咪留下湿爪印", childAction: "用毛巾擦爪", catResponse: "逐只抬爪", visibleChange: "水印减少", warmEnding: "猫咪走进屋内" },
+        targetDurationSeconds: 12, dialoguePolicy: "none", environmentIntent: "雨天门廊", contextHash: "hash", warnings: [],
+      }],
+    });
+
+    const wrapper = mount(PlannerStep, { props: { projectId: "project-1" } });
+    await flushPromises();
+
+    const history = wrapper.get('[data-testid="planner-conversation-history"]');
+    expect(history.attributes("open")).toBeUndefined();
+    expect(history.get("summary").text()).toContain("查看历史对话");
+    expect(wrapper.text()).toContain("擦干小猫爪");
+  });
 });

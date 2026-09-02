@@ -27,6 +27,7 @@ import {
   type RepairVerdict,
 } from "../../videoRepair";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
+import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -51,6 +52,7 @@ const busy = ref(false);
 const previewing = ref(false);
 const submitting = ref(false);
 const error = ref("");
+const errorDetail = ref("");
 const candidateCore = reactive<FrameRangeDto>({ startFrame: 0, endFrame: 1 });
 const transitionFrames = ref<0 | 2 | 4 | 6>(0);
 const basePlayer = ref<HTMLVideoElement | null>(null);
@@ -83,9 +85,13 @@ const activeRepair = computed(() => repairs.value.find((item) => ["generating", 
 const candidate = computed(() => assets.value.find((item) => item.id === activeRepair.value?.candidateAssetId) ?? null);
 const isArkProvider = computed(() => runtime.value?.provider.name === "ark");
 const providerNotice = computed(() => isArkProvider.value
-  ? `${runtime.value?.provider.name ?? "ark"} · ${runtime.value?.provider.videoModel ?? ""} · Ark 付费模型`
-  : `${runtime.value?.provider.name ?? "Fake"} · ${runtime.value?.provider.videoModel ?? ""} · Fake Provider · 不产生 Ark 费用`);
-const generateButtonLabel = computed(() => isArkProvider.value ? "生成修改候选（Ark 付费）" : "生成修改候选（Fake）");
+  ? "本次操作会产生模型费用，完成后显示实际用量。"
+  : "测试模式，不会产生模型费用。");
+const generateButtonLabel = computed(() => isArkProvider.value ? "生成修改结果" : "生成测试候选");
+const currentJobPresentation = computed(() => currentJob.value ? jobPresentation(currentJob.value.status) : null);
+const currentBillingPresentation = computed(() => currentJob.value
+  ? billingPresentation(currentJob.value.billingStatus, currentJob.value.actualCostMicros, currentJob.value.provider)
+  : null);
 const candidateFrames = computed(() => {
   const value = candidate.value?.metadata.durationFrames;
   return typeof value === "number" ? value : activeRepair.value?.providerDurationSeconds ? activeRepair.value.providerDurationSeconds * 24 : 0;
@@ -156,6 +162,19 @@ const candidateRequestId = computed(() => {
 });
 const requiresReferencePublisher = computed(() => preview.value?.provider === "ark");
 const referencePublisherReady = computed(() => runtime.value?.objectPublisher.ready === true);
+
+function repairStatus(status: VideoRepairDto["status"]) {
+  return {
+    draft: "草稿",
+    generating: "正在生成",
+    candidate_ready: "可以检查",
+    approved: "已采用",
+    rejected: "未采用",
+    outdated: "已过期",
+    cancelled: "已取消",
+    failed: "生成失败",
+  }[status];
+}
 
 async function load() {
   [repairs.value, assets.value, edits.value, runtime.value] = await Promise.all([
@@ -270,7 +289,9 @@ async function createPreview(): Promise<SegmentRepairPreviewDto | null> {
     Object.assign(candidateCore, preview.value.candidateCoreRange);
     return prepared;
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "片段修复预览失败";
+    const failure = errorPresentation(reason, "修改预览暂时无法准备");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     previewing.value = false;
   }
@@ -295,7 +316,9 @@ async function submitOneCandidate(prepared: SegmentRepairPreviewDto | null = pre
     sessionStorage.removeItem(draftStorageKey.value);
     await load();
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "候选提交失败";
+    const failure = errorPresentation(reason, "修改结果没有成功开始生成");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     submitting.value = false;
   }
@@ -369,7 +392,9 @@ async function approve() {
     await load();
     emit("changed");
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "批准合并失败";
+    const failure = errorPresentation(reason, "修改结果没有成功采用");
+    error.value = failure.message;
+    errorDetail.value = failure.technicalMessage;
   } finally {
     busy.value = false;
   }
@@ -405,8 +430,8 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
 <template>
   <section class="repair card" data-testid="video-repair-workspace">
     <header>
-      <div><p class="eyebrow">AI video edit</p><h2>AI 修改片段</h2><p>选择一段画面，描述要修改的内容；采用前不会改变当前视频。</p></div>
-      <div class="repair-state"><span class="pill">非破坏性版本</span><span v-if="activeRepair" class="pill" :class="{ good: activeRepair.status === 'approved' }">{{ activeRepair.status }}</span></div>
+      <div><p class="eyebrow">片段修改</p><h2>修改片段</h2><p>选择一段画面，写下希望发生的变化；采用前不会改变当前视频。</p></div>
+      <div class="repair-state"><span class="pill">不会覆盖原视频</span><span v-if="activeRepair" class="pill" :class="{ good: activeRepair.status === 'approved' }">{{ repairStatus(activeRepair.status) }}</span></div>
     </header>
 
     <div class="creator-player">
@@ -429,28 +454,28 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
 
     <div class="repair-command">
       <label>修改要求<textarea v-model="prompt" data-testid="edit-instruction" rows="3" placeholder="例如：猫咪自然抬起前爪，孩子用软毛巾擦拭，湿爪印逐渐减少。" /><small>可以同时描述多个相互关联的修改，请按重要程度写清初始状态、变化过程和结束状态。不同时间区间请分别创建修改。</small></label>
-      <div class="direct-submit"><span>{{ providerNotice }}<br><small>{{ isArkProvider ? "本次费用将在任务完成后根据 Provider usage 计算" : "用于本机流程验证，不会提交真实 Provider" }}</small></span><button class="primary" :disabled="busy || submitting || Boolean(submitDisabledReason)" @click="generateCandidate"><span v-if="submitting" class="spinner" />{{ generateButtonLabel }}</button></div>
+      <div class="direct-submit"><span>{{ providerNotice }}<br><small>每次只生成一个结果，离开页面后仍会继续。</small></span><button class="primary" :disabled="busy || submitting || Boolean(submitDisabledReason)" @click="generateCandidate"><span v-if="submitting" class="spinner" />{{ generateButtonLabel }}</button></div>
       <p v-if="submitDisabledReason" class="submit-disabled-reason" role="status">{{ submitDisabledReason }}</p>
     </div>
 
     <section class="prompt-preview" data-testid="repair-prompt-preview">
-      <header><div><p class="eyebrow">Ark input preview</p><h3>当前输入预览，尚未提交</h3></div><span class="pill">Preview 不调用 Ark</span></header>
-      <p v-if="previewing" class="notice">正在更新当前输入预览……</p>
-      <p v-else-if="!preview" class="notice">{{ error || "选择合法区间并填写修改要求后自动编译 Prompt。" }}</p>
+      <header><div><p class="eyebrow">修改预览</p><h3>本次修改效果</h3></div><span class="pill">预览不产生费用</span></header>
+      <p v-if="previewing" class="notice">正在更新修改预览……</p>
+      <p v-else-if="!preview" class="notice">{{ error || "选择至少 4 秒的区间并填写修改要求后，会自动准备修改预览。" }}</p>
       <template v-else>
-        <div class="prompt-summary"><b>{{ preview.provider }} · {{ preview.model }} · {{ preview.providerDurationSeconds }} 秒上下文</b><p>{{ promptSummary }}</p></div>
+        <div class="prompt-summary"><b>将使用 {{ preview.providerDurationSeconds }} 秒上下文</b><p>{{ promptSummary }}</p></div>
         <details>
-          <summary>展开完整生成输入</summary>
-          <div class="prompt-actions"><button class="secondary" @click="copyText(preview.prompt)">复制 Prompt</button><button class="secondary" @click="copyText(preview.negativePrompt)">复制 Negative Prompt</button></div>
-          <h4>Prompt</h4><p>{{ preview.prompt }}</p>
-          <h4>Negative Prompt</h4><p>{{ preview.negativePrompt }}</p>
-          <div class="references"><article><b>reference_video</b><span>{{ preview.videoReference.range.startFrame }}–{{ preview.videoReference.range.endFrame }}</span></article><article v-for="item in preview.imageReferences" :key="item.role"><b>{{ item.role }}</b><code>{{ item.sha256.slice(0, 12) }}</code></article></div>
+          <summary>查看完整修改指令</summary>
+          <div class="prompt-actions"><button class="secondary" @click="copyText(preview.prompt)">复制修改指令</button><button class="secondary" @click="copyText(preview.negativePrompt)">复制需要避免的问题</button></div>
+          <h4>修改指令</h4><p>{{ preview.prompt }}</p>
+          <h4>需要避免的问题</h4><p>{{ preview.negativePrompt }}</p>
+          <details class="technical-details"><summary>技术详情</summary><p>模型服务：{{ preview.provider }} · {{ preview.model }} · {{ preview.capabilityRevision }}</p><div class="references"><article><b>参考视频</b><span>{{ preview.videoReference.range.startFrame }}–{{ preview.videoReference.range.endFrame }}</span></article><article v-for="item in preview.imageReferences" :key="item.role"><b>{{ item.role }}</b><code>{{ item.sha256.slice(0, 12) }}</code></article></div><code>{{ preview.inputHash }}</code></details>
         </details>
       </template>
     </section>
 
     <details class="advanced-editor">
-      <summary>高级编辑 · 逐帧、锚帧、上下文与接缝</summary>
+      <summary>高级编辑</summary>
     <div class="repair-grid">
       <div class="player-stack">
         <div class="anchor-placeholder">入点 / 出点锚帧由 Worker 按当前选区精确提取</div>
@@ -481,7 +506,7 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
     </div>
 
     <section v-if="preview" class="paid-preview" data-testid="repair-technical-preview">
-      <header><div><p class="eyebrow">Technical preview</p><h3>本次提交的冻结技术输入</h3></div><span class="pill">一次点击只生成一个候选</span></header>
+      <header><div><p class="eyebrow">技术详情</p><h3>本次提交的完整记录</h3></div><span class="pill">一次点击只生成一个候选</span></header>
       <dl>
         <div><dt>基础视频</dt><dd>{{ preview.baseVideoAssetId }}<br><code>{{ preview.videoReference.sha256 }}</code></dd></div>
         <div><dt>用户区间</dt><dd>[{{ preview.issueRange.startFrame }}, {{ preview.issueRange.endFrame }}) · {{ issueDuration }} 帧</dd></div>
@@ -494,19 +519,20 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
     </section>
     </details>
 
-    <p v-if="currentJob" class="notice">修改任务 {{ currentJob.id }} · {{ currentJob.status }}<span v-if="currentJob.providerTaskId"> · Task {{ currentJob.providerTaskId }}</span><span v-if="jobRequestId"> · Request {{ jobRequestId }}</span><span v-if="publicationId"> · Publication {{ publicationId }}</span><span v-if="publicationDeleteAfter"> · Delete after {{ publicationDeleteAfter }}</span><span v-if="currentJob.actualUsage"> · Usage {{ JSON.stringify(currentJob.actualUsage) }}</span><span v-if="currentJob.billingStatus === 'unpriced'"> · 费用待核价</span><span v-else-if="currentJob.actualCostMicros != null"> · ¥{{ (currentJob.actualCostMicros / 1_000_000).toFixed(4) }}</span></p>
-    <p v-if="error" class="notice error">{{ error }}</p>
+    <section v-if="currentJob && currentJobPresentation" class="notice repair-job" :class="{ error: ['warn', 'danger'].includes(currentJobPresentation.tone) }"><div data-testid="repair-job-summary"><b>修改进度：{{ currentJobPresentation.label }}</b><span>{{ currentJob.error?.message || currentJobPresentation.description }}</span><span v-if="currentBillingPresentation">{{ currentBillingPresentation.label }}</span></div><details data-testid="repair-job-details"><summary>查看生成记录</summary><p>任务编号：<code>{{ currentJob.id }}</code></p><p>原始状态：{{ currentJob.status }}</p><p v-if="currentJob.providerTaskId">模型任务：<code>{{ currentJob.providerTaskId }}</code></p><p v-if="jobRequestId">请求编号：<code>{{ jobRequestId }}</code></p><p v-if="publicationId">临时发布编号：<code>{{ publicationId }}</code></p><p v-if="publicationDeleteAfter">临时文件到期：{{ publicationDeleteAfter }}</p><p v-if="currentJob.actualUsage">实际用量：{{ JSON.stringify(currentJob.actualUsage) }}</p><p v-if="currentBillingPresentation">费用：{{ currentBillingPresentation.detail }}</p><p>输入标识：<code>{{ currentJob.inputHash }}</code></p></details></section>
+    <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
 
     <section v-if="candidate && activeRepair" class="candidate-review" data-testid="repair-candidate-review">
-      <header><div><p class="eyebrow">Candidate review</p><h3>A/B、接缝循环与等长核心窗口</h3><code>{{ candidate.sha256 }}</code><small v-if="candidateRequestId">Provider request {{ candidateRequestId }}</small></div><span class="pill">{{ candidate.sha256.slice(0, 12) }}</span></header>
+      <header><div><p class="eyebrow">修改结果</p><h3>比较原片与修改结果</h3></div><span class="pill">待检查</span></header>
       <section class="submitted-prompt">
-        <b>该候选实际使用的 Prompt · 已提交输入</b>
+        <b>该候选实际使用的修改指令</b>
         <p>{{ currentJob?.inputSnapshot?.prompt ?? activeRepair.prompt }}</p>
         <details>
-          <summary>查看 Negative Prompt 与版本来源</summary>
+          <summary>查看需要避免的问题与技术详情</summary>
           <p>{{ currentJob?.inputSnapshot?.negativePrompt ?? activeRepair.negativePrompt }}</p>
-          <small v-if="currentJob?.inputSnapshot">Compiler {{ currentJob.inputSnapshot.promptCompilerRevision ?? "旧任务未记录" }} · {{ currentJob.inputSnapshot.inputHash }}</small>
-          <small v-else>旧任务未记录完整类型化快照；以上内容来自不可变局部修改记录。</small>
+          <small>文件校验值：{{ candidate.sha256 }}</small><small v-if="candidateRequestId">请求编号：{{ candidateRequestId }}</small>
+          <small v-if="currentJob?.inputSnapshot">指令版本 {{ currentJob.inputSnapshot.promptCompilerRevision ?? "旧任务未记录" }} · {{ currentJob.inputSnapshot.inputHash }}</small>
+          <small v-else>旧任务未记录完整输入快照；以上内容来自不可变修改记录。</small>
         </details>
       </section>
       <div class="ab-grid"><article><b>原片 A</b><video controls :src="`/api/v1/assets/${baseVideo?.id}/content`" /></article><article><b>候选 B</b><video controls :src="`/api/v1/assets/${candidate.id}/content`" /></article></div>
@@ -515,14 +541,14 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
         <button class="secondary" @click="moveCore(-1)">核心窗口 ←1</button><code>[{{ candidateCore.startFrame }}, {{ candidateCore.endFrame }})</code><button class="secondary" @click="moveCore(1)">核心窗口 +1→</button>
       </div>
       <fieldset><legend>合并预览</legend><label v-for="frames in [0, 2, 4, 6]" :key="frames"><input v-model.number="transitionFrames" type="radio" :value="frames" />{{ frames ? `${frames} 帧叠化` : "硬切（默认）" }}</label></fieldset>
-      <div class="checks"><label v-for="(label, key) in qualityLabels" :key="key"><span>{{ label }}</span><select v-model="quality[key]"><option value="">未判断</option><option value="pass">pass</option><option value="warning">warning</option><option value="fail">fail</option></select></label></div>
-      <div class="checks seam"><label><span>入点无跳变/双影</span><select v-model="seams.in"><option value="">未判断</option><option value="pass">pass</option><option value="warning">warning</option><option value="fail">fail</option></select></label><label><span>出点无跳变/双影</span><select v-model="seams.out"><option value="">未判断</option><option value="pass">pass</option><option value="warning">warning</option><option value="fail">fail</option></select></label></div>
+      <div class="checks"><label v-for="(label, key) in qualityLabels" :key="key"><span>{{ label }}</span><select v-model="quality[key]"><option value="">未判断</option><option value="pass">通过</option><option value="warning">需留意</option><option value="fail">不通过</option></select></label></div>
+      <div class="checks seam"><label><span>入点无跳变/双影</span><select v-model="seams.in"><option value="">未判断</option><option value="pass">通过</option><option value="warning">需留意</option><option value="fail">不通过</option></select></label><label><span>出点无跳变/双影</span><select v-model="seams.out"><option value="">未判断</option><option value="pass">通过</option><option value="warning">需留意</option><option value="fail">不通过</option></select></label></div>
       <p class="seam-guide">同时检查手部、猫爪、尾巴双影，背景与光线突变，以及根视频原音轨同步。</p>
       <label>验收备注<textarea v-model="notes" rows="2" /></label>
       <footer><button class="secondary" @click="reject">保留候选并标记不通过</button><button class="primary" :disabled="busy || !canApprove" @click="approve">全部通过后批准并合并</button></footer>
     </section>
 
-    <section class="repair-history"><h3>修复历史</h3><article v-for="repair in repairs" :key="repair.id"><code>{{ repair.id }}</code><span>[{{ repair.issueRange.startFrame }}, {{ repair.issueRange.endFrame }})<small v-if="repair.selectionPolicyVersion === 1 && repair.issueRange.endFrame - repair.issueRange.startFrame < 96">旧规则记录 · 不足 4 秒</small></span><span class="pill">{{ repair.status }}</span><span v-if="repair.approvedEditVersionId">Edit {{ repair.approvedEditVersionId }}</span><details><summary>查看实际 Prompt</summary><p>{{ repair.prompt }}</p><small v-if="repair.legacyEditIntent">旧版类型：{{ repair.legacyEditIntent }}</small></details></article></section>
+    <section class="repair-history"><h3>修改记录</h3><article v-for="repair in repairs" :key="repair.id"><span>{{ (repair.issueRange.startFrame / 24).toFixed(2) }}–{{ (repair.issueRange.endFrame / 24).toFixed(2) }} 秒<small v-if="repair.selectionPolicyVersion === 1 && repair.issueRange.endFrame - repair.issueRange.startFrame < 96">旧规则记录 · 不足 4 秒</small></span><span class="pill">{{ repairStatus(repair.status) }}</span><span v-if="repair.approvedEditVersionId">已创建新视频版本</span><details><summary>查看实际修改指令</summary><p>{{ repair.prompt }}</p><details class="technical-details"><summary>技术详情</summary><p>修改编号：<code>{{ repair.id }}</code></p><p v-if="repair.approvedEditVersionId">视频版本：<code>{{ repair.approvedEditVersionId }}</code></p><small v-if="repair.legacyEditIntent">旧版类型：{{ repair.legacyEditIntent }}</small></details></details></article></section>
   </section>
 </template>
 
@@ -554,6 +580,7 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
 .prompt-preview { margin: 0 24px 20px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
 .prompt-preview > header { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
 .prompt-preview h3 { margin: 0; }.prompt-summary { margin-top: 14px; padding: 13px; border-radius: 10px; background: #f5eee6; }.prompt-summary p, .prompt-preview details p { color: #615a54; line-height: 1.65; white-space: pre-wrap; }.prompt-preview details { margin-top: 12px; }.prompt-preview summary { cursor: pointer; font-weight: 700; }.prompt-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
+.technical-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }.technical-details code { overflow-wrap: anywhere; }
 .advanced-editor { margin: 0 24px 20px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .advanced-editor > summary { padding: 14px 18px; cursor: pointer; color: var(--muted); font-weight: 700; background: #f4ede5; }
 .repair-grid { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 18px; padding: 20px 24px; background: #292622; color: white; }
@@ -571,6 +598,7 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer));
 .paid-preview, .candidate-review { margin: 0 24px 22px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }.paid-preview { padding-bottom: 20px; }.paid-preview dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 0 20px; }.paid-preview dl div { padding: 10px; border-radius: 9px; background: #f5eee6; }.paid-preview dt { color: var(--muted); font-size: 9px; }.paid-preview dd { margin: 5px 0 0; overflow-wrap: anywhere; font-size: 10px; }.references { display: flex; gap: 7px; padding: 0 20px; overflow-x: auto; }.references article { min-width: 120px; display: grid; gap: 5px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; font-size: 9px; }.references small { overflow-wrap: anywhere; color: var(--muted); line-height: 1.4; }.references .publisher-ready { color: #54735a; }.references .publisher-blocked { color: #a05042; }.paid-preview details { margin: 14px 20px; }.paid-preview > button { margin-left: 20px; }
 .candidate-review { padding-bottom: 20px; }.ab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 18px 20px; }.ab-grid article { display: grid; gap: 8px; }.ab-grid video { width: 100%; max-height: 300px; background: #111; }.candidate-controls, .candidate-review fieldset, .checks, .candidate-review > label, .candidate-review footer, .seam-guide { margin: 0 20px 14px; }.candidate-review fieldset { display: flex; gap: 16px; border: 1px solid var(--line); border-radius: 10px; }.checks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }.checks label { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; background: #f5eee6; font-size: 10px; }.checks select { width: 92px; }.checks.seam { grid-template-columns: 1fr 1fr; }.seam-guide { color: var(--muted); font-size: 10px; }.candidate-review footer { display: flex; justify-content: flex-end; gap: 8px; }
 .submitted-prompt { margin: 14px 20px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }.submitted-prompt p { color: #615a54; line-height: 1.6; white-space: pre-wrap; }.submitted-prompt summary { cursor: pointer; font-weight: 700; }.submitted-prompt small { display: block; margin-top: 8px; overflow-wrap: anywhere; color: var(--muted); }
-.repair-history { padding: 0 24px 22px; }.repair-history article { display: grid; grid-template-columns: 90px minmax(140px, 1fr) auto minmax(100px, 1fr); gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 10px; }.repair-history article > details { grid-column: 1 / -1; }.repair-history article > details p { white-space: pre-wrap; }.repair-history span small { display: block; color: #a05042; }
+.repair-job { display: grid; gap: 7px; margin: 0 24px 20px; }.repair-job > div { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }.repair-job > div span { color: var(--muted); }.repair-job details summary { cursor: pointer; font-weight: 700; }.repair-job details p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.repair-history { padding: 0 24px 22px; }.repair-history article { display: grid; grid-template-columns: minmax(140px, 1fr) auto minmax(100px, 1fr); gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 10px; }.repair-history article > details { grid-column: 1 / -1; }.repair-history article > details p { white-space: pre-wrap; }.repair-history span small { display: block; color: #a05042; }
 @media (max-width: 900px) { .repair-grid, .repair-command { grid-template-columns: 1fr; }.paid-preview dl, .checks { grid-template-columns: 1fr; }.range-inputs { align-items: stretch; flex-direction: column; }.direct-submit { align-items: stretch; flex-direction: column; }.filmstrip { height: 72px; }.range-handle::-webkit-slider-thumb { height: 72px; } }
 </style>

@@ -1148,6 +1148,7 @@ class StudioService:
                 "capabilityRevision": self._provider_runtime.capability_revision,
                 "prompt": prompt,
                 "outputSchema": output_schema,
+                "plannerPromptRevision": "catflow-life-planner-v2",
             }
         )
         now = datetime.now(UTC)
@@ -1168,6 +1169,7 @@ class StudioService:
                 "targetDurationSeconds": project.target_duration_seconds,
                 "prompt": prompt,
                 "outputSchema": output_schema,
+                "plannerPromptRevision": "catflow-life-planner-v2",
                 "capabilityRevision": self._provider_runtime.capability_revision,
             },
             resultAssetIds=[],
@@ -1278,7 +1280,7 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v1",
+            "directorPromptRevision": "catflow-director-v2",
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.planning_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
@@ -2466,10 +2468,12 @@ def _planner_output_schema() -> dict[str, Any]:
         "required": required,
         "properties": {
             **{
-                field: {"type": "string"}
+                field: {"type": "string", "minLength": 1}
                 for field in required
                 if field not in {"targetDurationSeconds", "dialoguePolicy"}
             },
+            "title": {"type": "string", "minLength": 4, "maxLength": 12},
+            "summary": {"type": "string", "minLength": 1, "maxLength": 60},
             "targetDurationSeconds": {"type": "integer", "const": 12},
             "dialoguePolicy": {"type": "string", "enum": ["none", "minimal"]},
         },
@@ -2504,6 +2508,10 @@ def _planner_prompt(project: ProjectDto, user_text: str) -> str:
         "结尾必须继续发生清晰、"
         "自然、可观察的小动作；不得让儿童和猫咪原地互看，不得用静止停帧、"
         "重复呼吸、无意义慢镜头或循环动作填充时长。保持原创，不复制任何现有IP。"
+        "标题使用4至12个汉字，摘要不超过60个汉字；标题、摘要与触发字段不得整句重复，"
+        "不得复述用户原文。禁止使用‘围绕……展开’、‘通过……呈现’、‘营造……氛围’、"
+        "‘体现治愈感’等空泛套话；每个字段优先描述儿童、猫咪、道具或环境具体、可观察的"
+        "动作与状态变化。"
     )
 
 
@@ -2524,6 +2532,9 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
         "固定儿童为6至7岁、约1.2米、约4.5至5头身、齐下颌短发；动作符合低龄儿童"
         "能力，禁止8岁以上修长比例、青少年脸型、成人化身体或成人化表情。"
         "固定同一只灰白虎斑猫，保持正确四足、尾巴、毛色分区和可信人猫比例。"
+        "不得复述故事原文，不使用‘围绕……展开’、‘通过……呈现’、‘营造……氛围’、"
+        "‘电影感’、‘高级感’等没有对应可见动作的套话。每句话优先说明角色或物件的"
+        "初始状态、变化过程和结束状态。"
         "只返回符合Schema的JSON，不生成多冲突、多转折或依赖对白解释的长剧结构。"
     )
 

@@ -49,7 +49,7 @@ describe("AssetsStep", () => {
     });
     await flushPromises();
 
-    await wrapper.findAll("button").find((item) => item.text().includes("生成新的共享环境候选"))!.trigger("click");
+    await wrapper.findAll("button").find((item) => item.text().includes("生成环境候选"))!.trigger("click");
     await flushPromises();
 
     expect(client.previewAssetGeneration).toHaveBeenCalledWith("project-1", "environment");

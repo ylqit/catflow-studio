@@ -319,7 +319,7 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert job.kind == "plan_shots"
     assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
     assert job.frozen_input["storyVersionId"] == str(story.id)
-    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v1"
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v2"
     assert job.frozen_input["referenceRoles"] == [
         "episode_child",
         "episode_cat",
@@ -328,6 +328,8 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
         "style_board",
     ]
     assert "初始状态—运动路径—结束状态" in str(job.frozen_input["prompt"])
+    assert "不得复述故事原文" in str(job.frozen_input["prompt"])
+    assert "围绕……展开" in str(job.frozen_input["prompt"])
     schema = job.frozen_input["outputSchema"]
     assert isinstance(schema, dict)
     assert "directorTreatment" in str(schema)

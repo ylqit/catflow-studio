@@ -253,7 +253,7 @@ describe("VideoRepairWorkspace", () => {
     expect(wrapper.text()).toContain("生成测试候选");
     expect(wrapper.find('[data-testid="repair-candidate-review"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("repair-approved");
-    expect(wrapper.text()).toContain("视频版本 edit-2");
+    expect(wrapper.text()).toContain("已创建新视频版本");
     wrapper.unmount();
   });
 
