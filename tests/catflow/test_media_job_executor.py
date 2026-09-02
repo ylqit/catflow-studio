@@ -116,7 +116,6 @@ def test_fake_image_result_is_a_decodable_candidate_for_the_requested_slot(
             AssetGenerationCommand(
                 kind="episode_cat",
                 expectedInputHash=preview.input_hash,
-                expectedCostMicros=0,
                 idempotencyKey=f"fake-image-{project.id}",
             ),
         )
@@ -282,17 +281,17 @@ def test_fake_segment_job_creates_one_candidate_without_changing_the_active_edit
             SegmentRepairPreviewCommand(
                 baseVideoAssetId=base.id,
                 issueRange={"startFrame": 96, "endFrame": 192},
-                prompt="只重拍擦爪动作。",
+                instruction="只重拍擦爪动作。",
             ),
         )
         repair_job = service.create_video_repair_job(
             project.id,
             SegmentRepairCreateCommand(
-                repairId=preview.repair_id,
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                instruction="只重拍擦爪动作。",
                 expectedInputHash=preview.input_hash,
-                expectedCostMicros=0,
                 idempotencyKey=f"fake-repair-candidate-{project.id}",
-                paidConfirmation=True,
             ),
         )
 
@@ -332,16 +331,52 @@ def test_fake_segment_job_creates_one_candidate_without_changing_the_active_edit
             asset for asset in service.list_assets(project.id) if asset.role == "repair_candidate"
         ]
         assert len(candidates) == 1
-        assert candidates[0].producing_job_id == repair_job.id
-        assert candidates[0].metadata["durationFrames"] == 144
-        assert service.get_video_repair(preview.repair_id).status == "candidate_ready"
+        first_candidate = candidates[0]
+        assert first_candidate.producing_job_id == repair_job.id
+        assert first_candidate.metadata["durationFrames"] == 144
+        assert repair_job.video_repair_id is not None
+        repair_id = repair_job.video_repair_id
+        assert service.get_video_repair(repair_id).status == "candidate_ready"
         assert service.list_edits(project.id) == []
+
+        repeated_preview = service.preview_video_repair(
+            project.id,
+            SegmentRepairPreviewCommand(
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                instruction="只重拍擦爪动作。",
+            ),
+        )
+        repeated_job = service.create_video_repair_job(
+            project.id,
+            SegmentRepairCreateCommand(
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                instruction="只重拍擦爪动作。",
+                expectedInputHash=repeated_preview.input_hash,
+                idempotencyKey=f"fake-repair-repeated-content-{project.id}",
+            ),
+        )
+
+        executor.store_result(repeated_job.id)
+
+        candidates_by_job = {
+            asset.producing_job_id: asset
+            for asset in service.list_assets(project.id)
+            if asset.role == "repair_candidate"
+        }
+        assert set(candidates_by_job) == {repair_job.id, repeated_job.id}
+        assert candidates_by_job[repair_job.id].sha256 == candidates_by_job[repeated_job.id].sha256
+        assert repeated_job.video_repair_id is not None
+        assert (
+            service.get_video_repair(repeated_job.video_repair_id).status == "candidate_ready"
+        )
 
         edit = service.approve_video_repair(
             project.id,
-            preview.repair_id,
+            repair_id,
             SegmentRepairApproveCommand(
-                candidateAssetId=candidates[0].id,
+                candidateAssetId=first_candidate.id,
                 candidateSourceRange={"startFrame": 24, "endFrame": 120},
                 transition={"type": "dissolve", "durationFrames": 4},
                 expectedBaseTimelineHash=preview.base_timeline_hash,

@@ -111,6 +111,12 @@ class ArkProviderJobGateway:
                 output_schema=_required_dict(frozen_input, "outputSchema"),
             )
             return _structured_submission(result)
+        if kind == "plan_shots":
+            result = self._gateway.plan_shots(
+                prompt=_required_string(frozen_input, "prompt"),
+                output_schema=_required_dict(frozen_input, "outputSchema"),
+            )
+            return _structured_submission(result)
         if kind == "generate_image":
             reference_ids = _uuid_tuple(frozen_input.get("referenceAssetIds", []))
             result = self._gateway.generate_image(
@@ -122,7 +128,8 @@ class ArkProviderJobGateway:
                     "url": result.url,
                     "responseId": result.response_id,
                     "model": result.model,
-                }
+                },
+                usage=result.usage,
             )
         if kind == "diagnose_image":
             candidate_id = uuid.UUID(_required_string(frozen_input, "candidateAssetId"))
@@ -190,9 +197,12 @@ class ArkProviderJobGateway:
                 raise ValueError("segment repair requires exactly five stored references")
             result = self._gateway.submit_segment_video(
                 SegmentVideoGenerationRequest(
+                    instruction=_required_string(frozen_input, "instruction"),
                     prompt=_required_string(frozen_input, "prompt"),
                     negative_prompt=_required_string(frozen_input, "negativePrompt"),
                     context_video_url=published.url,
+                    issue_start_seconds=_required_frame_range(frozen_input, "issueRange")[0] / 24,
+                    issue_end_seconds=_required_frame_range(frozen_input, "issueRange")[1] / 24,
                     anchor_in_path=anchor_in,
                     anchor_out_path=anchor_out,
                     canon_reference_paths=self._resolve_asset_paths(canon_ids),
@@ -224,6 +234,7 @@ class ArkProviderJobGateway:
                 "ratio": result.ratio,
                 "resolution": result.resolution,
             },
+            usage=result.usage,
         )
 
     def cancel(self, provider_task_id: str) -> bool:

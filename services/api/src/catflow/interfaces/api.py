@@ -32,22 +32,29 @@ from catflow.application.service import (
     GenerationPreviewDto,
     ImageDiagnosisCommand,
     JobDto,
+    JobUsageDto,
     PlannerMessageCommand,
     PlannerSnapshotDto,
     ProjectCreate,
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
+    ProjectUsageSummaryDto,
+    RateCardRevisionCreateCommand,
+    RateCardRevisionDto,
     SegmentRepairApproveCommand,
     SegmentRepairCreateCommand,
     SegmentRepairPreviewCommand,
     SegmentRepairPreviewDto,
+    ShotPlanGenerationCommand,
     ShotPlanVersionDto,
     StoryCreateCommand,
     StoryVersionDto,
     StudioConflictError,
+    StudioInputChangedError,
     StudioNotFoundError,
     StudioService,
+    StudioValidationError,
     ValidationRunCreateCommand,
     ValidationRunDto,
     ValidationRunPreviewDto,
@@ -130,6 +137,18 @@ def create_app(
                 )
         return await call_next(request)
 
+    @app.exception_handler(StudioInputChangedError)
+    async def handle_input_changed(
+        _request: Request, exc: StudioInputChangedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "latestPreview": exc.latest_preview.model_dump(mode="json", by_alias=True),
+            },
+        )
+
     @app.exception_handler(StudioConflictError)
     async def handle_conflict(_request: Request, exc: StudioConflictError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
@@ -138,6 +157,10 @@ def create_app(
     async def handle_not_found(_request: Request, exc: StudioNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
+    @app.exception_handler(StudioValidationError)
+    async def handle_validation(_request: Request, exc: StudioValidationError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
     @app.exception_handler(InvalidMediaError)
     async def handle_invalid_media(_request: Request, exc: InvalidMediaError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -145,6 +168,20 @@ def create_app(
     @app.get("/api/v1/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/v1/runtime/rate-cards", response_model=list[RateCardRevisionDto])
+    def rate_cards() -> list[RateCardRevisionDto]:
+        return service.list_rate_cards()
+
+    @app.post(
+        "/api/v1/runtime/rate-cards",
+        response_model=RateCardRevisionDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def publish_rate_card(
+        command: RateCardRevisionCreateCommand,
+    ) -> RateCardRevisionDto:
+        return service.publish_rate_card(command)
 
     @app.get("/api/v1/runtime/bootstrap")
     def runtime_bootstrap() -> dict[str, object]:
@@ -358,6 +395,16 @@ def create_app(
         return service.list_shot_plans(project_id)
 
     @app.post(
+        "/api/v1/projects/{project_id}/shot-plans/generations",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def generate_shot_plan(
+        project_id: uuid.UUID, command: ShotPlanGenerationCommand
+    ) -> JobDto:
+        return service.create_shot_plan_generation_job(project_id, command)
+
+    @app.post(
         "/api/v1/projects/{project_id}/shot-plans",
         response_model=ShotPlanVersionDto,
         status_code=status.HTTP_201_CREATED,
@@ -486,8 +533,66 @@ def create_app(
         return service.create_video_diagnosis_job(project_id, command)
 
     @app.post(
+        "/api/v1/projects/{project_id}/video-edits/preview",
+        response_model=SegmentRepairPreviewDto,
+    )
+    def preview_video_edit(
+        project_id: uuid.UUID, command: SegmentRepairPreviewCommand
+    ) -> SegmentRepairPreviewDto:
+        return service.preview_video_repair(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edits",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def create_video_edit(project_id: uuid.UUID, command: SegmentRepairCreateCommand) -> JobDto:
+        return service.create_video_repair_job(project_id, command)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-edits",
+        response_model=list[VideoRepairDto],
+    )
+    def video_edits(project_id: uuid.UUID) -> list[VideoRepairDto]:
+        return service.list_video_repairs(project_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-edits/{edit_id}",
+        response_model=VideoRepairDto,
+    )
+    def video_edit(project_id: uuid.UUID, edit_id: uuid.UUID) -> VideoRepairDto:
+        repair = service.get_video_repair(edit_id)
+        if repair.project_id != project_id:
+            raise StudioNotFoundError("video edit not found")
+        return repair
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edits/{edit_id}/approve",
+        response_model=EditVersionDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def approve_video_edit(
+        project_id: uuid.UUID,
+        edit_id: uuid.UUID,
+        command: SegmentRepairApproveCommand,
+    ) -> EditVersionDto:
+        return service.approve_video_repair(project_id, edit_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edits/{edit_id}/reject",
+        response_model=VideoRepairDto,
+    )
+    def reject_video_edit(
+        project_id: uuid.UUID,
+        edit_id: uuid.UUID,
+        _payload: dict[str, Any] = Body(default={}),
+    ) -> VideoRepairDto:
+        return service.reject_video_repair(project_id, edit_id)
+
+    @app.post(
         "/api/v1/projects/{project_id}/video-repairs/preview",
         response_model=SegmentRepairPreviewDto,
+        deprecated=True,
     )
     def preview_video_repair(
         project_id: uuid.UUID, command: SegmentRepairPreviewCommand
@@ -498,6 +603,7 @@ def create_app(
         "/api/v1/projects/{project_id}/video-repairs",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        deprecated=True,
     )
     def create_video_repair(project_id: uuid.UUID, command: SegmentRepairCreateCommand) -> JobDto:
         return service.create_video_repair_job(project_id, command)
@@ -523,6 +629,7 @@ def create_app(
         "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve",
         response_model=EditVersionDto,
         status_code=status.HTTP_201_CREATED,
+        deprecated=True,
     )
     def approve_video_repair(
         project_id: uuid.UUID,
@@ -534,6 +641,7 @@ def create_app(
     @app.post(
         "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject",
         response_model=VideoRepairDto,
+        deprecated=True,
     )
     def reject_video_repair(
         project_id: uuid.UUID,
@@ -545,6 +653,17 @@ def create_app(
     @app.get("/api/v1/jobs/{job_id}", response_model=JobDto)
     def job(job_id: uuid.UUID) -> JobDto:
         return service.get_job(job_id)
+
+    @app.get("/api/v1/jobs/{job_id}/usage", response_model=JobUsageDto)
+    def job_usage(job_id: uuid.UUID) -> JobUsageDto:
+        return service.get_job_usage(job_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/usage-summary",
+        response_model=ProjectUsageSummaryDto,
+    )
+    def project_usage_summary(project_id: uuid.UUID) -> ProjectUsageSummaryDto:
+        return service.project_usage_summary(project_id)
 
     @app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobDto)
     def cancel_job(job_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})) -> JobDto:

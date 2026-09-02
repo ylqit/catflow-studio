@@ -30,6 +30,17 @@ class TypedGatewayStub:
             request_hash="a" * 64,
         )
 
+    def plan_shots(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return StructuredProviderResult(
+            payload={"targetDurationSeconds": 12, "directorTreatment": {}, "shots": []},
+            response_id="director-response",
+            model="planning-model",
+            usage={"inputTokens": 600, "outputTokens": 900},
+            request_hash="c" * 64,
+        )
+
     def generate_image(
         self, *, prompt: str, reference_paths: tuple[Path, ...]
     ) -> ImageProviderResult:
@@ -37,6 +48,7 @@ class TypedGatewayStub:
             url="https://ark.example/environment.png",
             response_id="image-response",
             model="image-model",
+            usage={"generatedImages": 1, "totalTokens": 320},
         )
 
     def diagnose(
@@ -69,6 +81,7 @@ class TypedGatewayStub:
             duration_seconds=12,
             ratio="9:16",
             resolution="480p",
+            usage={"completionTokens": 9600, "totalTokens": 9600},
         )
 
     def cancel_video(self, task_id: str) -> bool:
@@ -152,6 +165,45 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
     ]
 
 
+def test_ark_job_gateway_uses_the_professional_director_planning_boundary() -> None:
+    gateway = ArkProviderJobGateway(
+        TypedGatewayStub(),
+        resolve_asset_paths=lambda _ids: (),
+        extract_video_frames=lambda _asset_id, _seconds: (),
+    )
+
+    submission = gateway.submit(
+        job_id=uuid.uuid4(),
+        kind="plan_shots",
+        frozen_input={
+            "prompt": "生成专业导演执行单",
+            "outputSchema": {"type": "object"},
+        },
+    )
+
+    assert submission.result is not None
+    assert submission.result["responseId"] == "director-response"
+    assert submission.usage == {"inputTokens": 600, "outputTokens": 900}
+
+
+def test_ark_job_gateway_preserves_image_usage_and_request_id() -> None:
+    gateway = ArkProviderJobGateway(
+        TypedGatewayStub(),
+        resolve_asset_paths=lambda _ids: (),
+        extract_video_frames=lambda _asset_id, _seconds: (),
+    )
+
+    submission = gateway.submit(
+        job_id=uuid.uuid4(),
+        kind="generate_image",
+        frozen_input={"prompt": "共享环境", "referenceAssetIds": []},
+    )
+
+    assert submission.usage == {"generatedImages": 1, "totalTokens": 320}
+    assert submission.result is not None
+    assert submission.result["responseId"] == "image-response"
+
+
 def test_ark_job_gateway_poll_returns_downloadable_provider_result() -> None:
     gateway = ArkProviderJobGateway(
         TypedGatewayStub(),
@@ -170,6 +222,7 @@ def test_ark_job_gateway_poll_returns_downloadable_provider_result() -> None:
         "ratio": "9:16",
         "resolution": "480p",
     }
+    assert poll.usage == {"completionTokens": 9600, "totalTokens": 9600}
 
 
 def test_ark_job_gateway_prepares_and_submits_frozen_segment_repair(
@@ -223,6 +276,7 @@ def test_ark_job_gateway_prepares_and_submits_frozen_segment_repair(
             "baseVideoAssetId": str(base_id),
             "issueRange": {"startFrame": 96, "endFrame": 192},
             "generationRange": {"startFrame": 72, "endFrame": 216},
+            "instruction": "让孩子逐只擦干猫爪。",
             "prompt": "只修复擦爪动作。",
             "negativePrompt": "禁止身份漂移。",
             "referenceAssetIds": [str(item) for item in canon_ids],
@@ -252,6 +306,9 @@ def test_ark_job_gateway_prepares_and_submits_frozen_segment_repair(
     assert request.context_video_url == (
         "https://media.example.test/context.mp4?X-Amz-Signature=secret"
     )
+    assert request.instruction == "让孩子逐只擦干猫爪。"
+    assert request.issue_start_seconds == 4.0
+    assert request.issue_end_seconds == 8.0
     assert request.anchor_in_path == anchor_in
     assert request.anchor_out_path == anchor_out
     assert request.canon_reference_paths == canon_paths

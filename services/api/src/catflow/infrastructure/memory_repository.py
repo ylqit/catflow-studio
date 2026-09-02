@@ -27,6 +27,8 @@ from catflow.application.service import (
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
+    RateCardRevisionCreateCommand,
+    RateCardRevisionDto,
     ShotPlanVersionDto,
     StoredAssetDto,
     StoryCreateCommand,
@@ -38,6 +40,7 @@ from catflow.application.service import (
     VideoRepairDto,
     VideoRepairStatus,
 )
+from catflow.domain.billing import rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
 from catflow.domain.validation import (
     ValidationCallKind,
@@ -54,6 +57,7 @@ class MemoryStudioRepository:
         self._canon_profile_id = uuid.uuid4()
         now = datetime.now(UTC)
         self._assets: dict[uuid.UUID, StoredAssetDto] = {}
+        self._rate_cards: list[RateCardRevisionDto] = []
         fixed_assets: dict[FixedCanonRole, StoredAssetDto] = {}
         for index, role in enumerate(FIXED_CANON_ROLES, start=1):
             asset = StoredAssetDto(
@@ -115,6 +119,56 @@ class MemoryStudioRepository:
         self._repair_approvals_by_idempotency: dict[str, uuid.UUID] = {}
         self._validation_runs: dict[uuid.UUID, ValidationRunDto] = {}
         self._environment_presets: list[EnvironmentPresetDto] = []
+
+    def publish_rate_card(
+        self, command: RateCardRevisionCreateCommand
+    ) -> RateCardRevisionDto:
+        existing = next(
+            (
+                item
+                for item in self._rate_cards
+                if item.provider == command.provider
+                and item.model == command.model
+                and item.revision == command.revision
+            ),
+            None,
+        )
+        if existing is not None:
+            expected = rate_card_revision_signature(
+                provider=command.provider,
+                model=command.model,
+                revision=command.revision,
+                source_url=command.source_url,
+                effective_from=command.effective_from,
+                rates=command.rates,
+            )
+            actual = rate_card_revision_signature(
+                provider=existing.provider,
+                model=existing.model,
+                revision=existing.revision,
+                source_url=existing.source_url,
+                effective_from=existing.effective_from,
+                rates=existing.rates,
+            )
+            if actual != expected:
+                raise StudioConflictError("rate-card revision already exists with different rates")
+            return existing
+        self._rate_cards = [
+            item.model_copy(update={"active": False})
+            if item.provider == command.provider and item.model == command.model
+            else item
+            for item in self._rate_cards
+        ]
+        created = RateCardRevisionDto(
+            **command.model_dump(mode="python", by_alias=True),
+            active=True,
+            createdAt=datetime.now(UTC),
+        )
+        self._rate_cards.append(created)
+        return created
+
+    def list_rate_cards(self) -> list[RateCardRevisionDto]:
+        return sorted(self._rate_cards, key=lambda item: item.created_at, reverse=True)
 
     def active_canon_profile_id(self) -> uuid.UUID:
         return self._canon_profile_id
@@ -315,6 +369,11 @@ class MemoryStudioRepository:
                     provider=latest_job.provider,
                     model=latest_job.model,
                     providerTaskId=latest_job.provider_task_id,
+                    actualUsage=latest_job.actual_usage,
+                    actualCostMicros=latest_job.actual_cost_micros,
+                    currency=latest_job.currency,
+                    billingStatus=latest_job.billing_status,
+                    rateCardRevision=latest_job.rate_card_revision,
                     error=latest_job.error,
                     createdAt=latest_job.created_at,
                     updatedAt=latest_job.updated_at,
@@ -473,6 +532,10 @@ class MemoryStudioRepository:
             clip=draft.clip.model_dump(mode="json", by_alias=True),
             shots=draft.shots,
             totalDurationSeconds=draft.total_duration_seconds,
+            directorTreatment=draft.director_treatment,
+            directorPromptRevision=draft.director_prompt_revision,
+            directorModel=draft.director_model,
+            directorInputHash=draft.director_input_hash,
             active=True,
             outdated=False,
             createdAt=datetime.now(UTC),
@@ -638,6 +701,13 @@ class MemoryStudioRepository:
     def get_job(self, job_id: uuid.UUID) -> JobDto | None:
         return self._jobs.get(job_id)
 
+    def list_project_jobs(self, project_id: uuid.UUID) -> list[JobDto]:
+        return sorted(
+            (job for job in self._jobs.values() if job.project_id == project_id),
+            key=lambda job: (job.created_at, job.id.hex),
+            reverse=True,
+        )
+
     def latest_job(self, project_id: uuid.UUID, *, kind: str) -> JobDto | None:
         return max(
             (
@@ -749,6 +819,17 @@ class MemoryStudioRepository:
     def create_video_repair(self, repair: VideoRepairDto) -> VideoRepairDto:
         self._video_repairs[repair.id] = repair
         return repair
+
+    def create_video_repair_job(self, repair: VideoRepairDto, job: JobDto) -> JobDto:
+        existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
+        if existing is not None:
+            return existing
+        self._video_repairs[repair.id] = repair
+        try:
+            return self.create_job(job)
+        except Exception:
+            self._video_repairs.pop(repair.id, None)
+            raise
 
     def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None:
         return self._video_repairs.get(repair_id)

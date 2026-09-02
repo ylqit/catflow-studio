@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { api } from "../../api/client";
 import type { AssetDto, EditDecisionListDto, EditVersionDto, JobDto, WorkspaceDto } from "../../api/types";
 import { validateEditDecisionList } from "../../editing";
+import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { mountWebAvPreview, type WebAvPreviewController } from "../../webavPreview";
 import VideoRepairWorkspace from "./VideoRepairWorkspace.vue";
 
@@ -75,7 +76,12 @@ async function saveEdit() {
 
 async function exportVideo() {
   if (!savedEdit.value) return;
-  exportJob.value = await api.createExport(props.projectId, { editVersionId: savedEdit.value.id, idempotencyKey: crypto.randomUUID() });
+  const scope = `export:${props.projectId}`;
+  exportJob.value = await api.createExport(props.projectId, {
+    editVersionId: savedEdit.value.id,
+    idempotencyKey: pendingIdempotencyKey(scope, savedEdit.value.id),
+  });
+  settleIdempotencyKey(scope, savedEdit.value.id);
 }
 
 async function approve(assetId: string) {

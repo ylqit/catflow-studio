@@ -21,3 +21,4 @@ def test_backup_covers_paid_authorization_and_shared_environment_state() -> None
     assert "environment_presets" in table_order
     assert table_order.index("validation_runs") < table_order.index("jobs")
     assert table_order.index("assets") < table_order.index("environment_presets")
+    assert "provider_rate_cards" in table_order

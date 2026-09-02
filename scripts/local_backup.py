@@ -21,6 +21,7 @@ from catflow.infrastructure.models import Base
 
 TABLE_ORDER = (
     "canon_profiles",
+    "provider_rate_cards",
     "projects",
     "validation_runs",
     "life_planner_sessions",

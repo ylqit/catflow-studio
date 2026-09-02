@@ -8,12 +8,12 @@ const client = vi.hoisted(() => ({
   videoRepairs: vi.fn(),
   assets: vi.fn(),
   edits: vi.fn(),
-  currentValidationRun: vi.fn(),
   runtime: vi.fn(),
   previewVideoRepair: vi.fn(),
   createVideoRepair: vi.fn(),
   approveVideoRepair: vi.fn(),
   rejectVideoRepair: vi.fn(),
+  job: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: client }));
@@ -49,29 +49,29 @@ const workspace: WorkspaceDto = {
 };
 
 const preview: SegmentRepairPreviewDto = {
-  repairId: "repair-1",
   projectId: "project-1",
   baseVideoAssetId: "video-1",
   baseTimelineHash: "b".repeat(64),
   frameRate: { numerator: 24, denominator: 1 },
-  issueRange: { startFrame: 100, endFrame: 192 },
-  generationRange: { startFrame: 76, endFrame: 216 },
-  candidateCoreRange: { startFrame: 24, endFrame: 116 },
-  providerDurationSeconds: 6,
+  issueRange: { startFrame: 0, endFrame: 96 },
+  generationRange: { startFrame: 0, endFrame: 120 },
+  candidateCoreRange: { startFrame: 0, endFrame: 96 },
+  providerDurationSeconds: 5,
+  instruction: "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。",
   provider: "ark",
   model: "doubao-seedance-2-0-260128",
   capabilityRevision: "ark-seedance-2.0-v1",
   prompt: "重拍擦爪动作",
   negativePrompt: "禁止身份漂移",
   imageReferences: [
-    { role: "anchor_in", sha256: "1".repeat(64), frameNumber: 100, derived: true },
-    { role: "anchor_out", sha256: "2".repeat(64), frameNumber: 191, derived: true },
+    { role: "anchor_in", sha256: "1".repeat(64), frameNumber: 0, derived: true },
+    { role: "anchor_out", sha256: "2".repeat(64), frameNumber: 95, derived: true },
   ],
   videoReference: {
     role: "reference_video",
     assetId: "video-1",
     sha256: "a".repeat(64),
-    range: { startFrame: 76, endFrame: 216 },
+    range: { startFrame: 0, endFrame: 120 },
   },
   expectedCostMicros: 0,
   costEstimateStatus: "priced",
@@ -102,10 +102,10 @@ const recoveredRepairJob: JobDto = {
 
 describe("VideoRepairWorkspace", () => {
   beforeEach(() => {
+    sessionStorage.clear();
     client.videoRepairs.mockResolvedValue([]);
     client.assets.mockResolvedValue([]);
     client.edits.mockResolvedValue([]);
-    client.currentValidationRun.mockResolvedValue(null);
     client.runtime.mockResolvedValue({
       provider: { name: "ark" },
       objectPublisher: {
@@ -122,28 +122,81 @@ describe("VideoRepairWorkspace", () => {
       },
     });
     client.previewVideoRepair.mockResolvedValue(preview);
+    client.createVideoRepair.mockResolvedValue(recoveredRepairJob);
   });
 
-  it("supports frame clicks, I/O shortcuts, and an explicit non-paying preview", async () => {
+  it("auto-previews one free-text instruction and exposes a four-second accessible range", async () => {
     const wrapper = mount(VideoRepairWorkspace, {
       props: { projectId: "project-1", workspace },
     });
     await flushPromises();
 
-    await wrapper.get('[title="100 · 00:00:04:04"]').trigger("click");
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "i", altKey: true }));
-    await wrapper.findAll("button").find((item) => item.text().includes("查看正式预览"))!.trigger("click");
+    expect(wrapper.find('[data-testid="edit-intent"]').exists()).toBe(false);
+    expect(client.previewVideoRepair).toHaveBeenCalledWith("project-1", expect.objectContaining({
+      issueRange: { startFrame: 0, endFrame: 96 },
+      instruction: expect.any(String),
+    }));
+    expect(wrapper.text()).toContain("最短修改区间为 4.00 秒");
+    expect(wrapper.text()).toContain("本次修改效果");
+    expect(wrapper.text()).toContain("预览不产生费用");
+    const start = wrapper.get('[aria-label="修改区间起点"]');
+    const end = wrapper.get('[aria-label="修改区间终点"]');
+    expect(start.attributes("max")).toBe("0");
+    expect(end.attributes("min")).toBe("96");
+    wrapper.unmount();
+  });
+
+  it("submits the current free-text preview in one click", async () => {
+    const wrapper = mount(VideoRepairWorkspace, {
+      props: { projectId: "project-1", workspace },
+    });
+    await flushPromises();
+
+    await wrapper.findAll("button").find((item) => item.text().includes("生成修改结果"))!.trigger("click");
     await flushPromises();
 
     expect(client.previewVideoRepair).toHaveBeenCalledWith("project-1", expect.objectContaining({
-      issueRange: { startFrame: 100, endFrame: 192 },
+      issueRange: { startFrame: 0, endFrame: 96 },
+      instruction: "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。",
     }));
-    expect(wrapper.get('[data-testid="repair-paid-preview"]').text()).toContain("[76, 216)");
-    expect(wrapper.text()).toContain("实际 6 秒");
-    expect(wrapper.text()).toContain("HTTPS 已验证");
-    expect(wrapper.text()).toContain("test-vedio-ylq.tos-s3-cn-beijing.volces.com");
+    expect(client.createVideoRepair).toHaveBeenCalledWith("project-1", {
+      baseVideoAssetId: "video-1",
+      baseEditVersionId: undefined,
+      issueRange: { startFrame: 0, endFrame: 96 },
+      instruction: "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。",
+      expectedInputHash: "c".repeat(64),
+      idempotencyKey: expect.any(String),
+    });
+    expect(wrapper.text()).toContain("本次操作会产生模型费用，完成后显示实际用量");
+    expect(wrapper.text()).not.toContain("剩余额度");
+    expect(wrapper.text()).not.toContain("确认并生成");
+    expect(wrapper.get("details").attributes("open")).toBeUndefined();
     expect(wrapper.text()).not.toContain("AccessKeyId");
     wrapper.unmount();
+  });
+
+  it("clamps number input to the four-second boundary and restores the draft", async () => {
+    const wrapper = mount(VideoRepairWorkspace, {
+      props: { projectId: "project-1", workspace },
+    });
+    await flushPromises();
+
+    const numberInputs = wrapper.findAll('input[type="number"]');
+    await numberInputs[1].setValue("95");
+    await numberInputs[1].trigger("change");
+    await wrapper.get('[data-testid="edit-instruction"]').setValue("同时修正动作、毛巾和地面光线。");
+
+    expect((numberInputs[1].element as HTMLInputElement).value).toBe("96");
+    expect(wrapper.text()).toContain("96 帧 · 4.000 秒");
+    wrapper.unmount();
+
+    const reopened = mount(VideoRepairWorkspace, {
+      props: { projectId: "project-1", workspace },
+    });
+    await flushPromises();
+    expect((reopened.get('[data-testid="edit-instruction"]').element as HTMLTextAreaElement).value)
+      .toBe("同时修正动作、毛巾和地面光线。");
+    reopened.unmount();
   });
 
   it("restores the durable repair job and provider task id after reopening the page", async () => {
@@ -156,11 +209,51 @@ describe("VideoRepairWorkspace", () => {
     });
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Repair Job repair-job-1 · polling");
-    expect(wrapper.text()).toContain("Task cgt-repair-task-1");
-    expect(wrapper.text()).toContain("Publication publication-1");
-    expect(wrapper.text()).toContain("Request req-repair-1");
-    expect(wrapper.text()).toContain("2026-09-09T12:20:00Z");
+    expect(wrapper.get('[data-testid="repair-job-summary"]').text()).toContain("正在生成");
+    expect(wrapper.get('[data-testid="repair-job-summary"]').text()).not.toContain("repair-job-1");
+    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("cgt-repair-task-1");
+    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("publication-1");
+    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("req-repair-1");
+    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("2026-09-09T12:20:00Z");
+    wrapper.unmount();
+  });
+
+  it("labels fake execution honestly and keeps approved repairs in history only", async () => {
+    client.runtime.mockResolvedValue({
+      provider: { name: "fake", videoModel: "catflow-fake-video-v1" },
+      objectPublisher: { configured: false, ready: false },
+    });
+    client.videoRepairs.mockResolvedValue([{
+      ...preview,
+      id: "repair-approved",
+      selectionPolicyVersion: 2,
+      legacyEditIntent: null,
+      status: "approved",
+      preview,
+      candidateAssetId: "candidate-1",
+      approvedEditVersionId: "edit-2",
+    }]);
+    client.assets.mockResolvedValue([{
+      id: "candidate-1",
+      projectId: "project-1",
+      role: "repair_candidate",
+      mediaType: "video",
+      sha256: "f".repeat(64),
+      byteSize: 1,
+      metadata: { durationFrames: 144 },
+      createdAt: "2026-09-01T00:00:00Z",
+    }]);
+
+    const wrapper = mount(VideoRepairWorkspace, {
+      props: { projectId: "project-1", workspace },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("测试模式，不会产生模型费用");
+    expect(wrapper.text()).toContain("生成测试候选");
+    expect(wrapper.find('[data-testid="repair-candidate-review"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("repair-approved");
+    expect(wrapper.text()).toContain("视频版本 edit-2");
     wrapper.unmount();
   });
 

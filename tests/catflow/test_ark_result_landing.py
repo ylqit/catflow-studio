@@ -301,17 +301,17 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
             SegmentRepairPreviewCommand(
                 baseVideoAssetId=base.id,
                 issueRange={"startFrame": 96, "endFrame": 192},
-                prompt="只重拍擦爪动作。",
+                instruction="只重拍擦爪动作。",
             ),
         )
         job = service.create_video_repair_job(
             project.id,
             SegmentRepairCreateCommand(
-                repairId=preview.repair_id,
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                instruction="只重拍擦爪动作。",
                 expectedInputHash=preview.input_hash,
-                expectedCostMicros=0,
                 idempotencyKey=f"ark-segment-landing-{project.id}",
-                paidConfirmation=True,
             ),
         )
         with sessions.begin() as session:
@@ -337,7 +337,8 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
 
         landing.store_result(job.id)
 
-        repair = service.get_video_repair(preview.repair_id)
+        assert job.video_repair_id is not None
+        repair = service.get_video_repair(job.video_repair_id)
         candidate = service.get_asset(repair.candidate_asset_id)  # type: ignore[arg-type]
         assert repair.status == "candidate_ready"
         assert candidate.role == "repair_candidate"

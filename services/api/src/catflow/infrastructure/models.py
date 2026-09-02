@@ -123,7 +123,7 @@ class JobRecord(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('plan_story','generate_image','diagnose_image',"
+            "kind IN ('plan_story','plan_shots','generate_image','diagnose_image',"
             "'generate_video','diagnose_video','probe_segment_video_data_url',"
             "'regenerate_video_segment','render_export')",
             name="ck_jobs_kind",
@@ -177,6 +177,12 @@ class JobRecord(Base):
     provider_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     actual_usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     expected_cost_micros: Mapped[int | None] = mapped_column(BigInteger)
+    actual_cost_micros: Mapped[int | None] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="CNY")
+    billing_status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    rate_card_revision: Mapped[str | None] = mapped_column(String(80))
+    pricing_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    provider_request_id: Mapped[str | None] = mapped_column(String(200))
     frozen_input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     supersedes_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="SET NULL")
@@ -196,7 +202,27 @@ class AssetRecord(Base):
     __tablename__ = "assets"
     __table_args__ = (
         CheckConstraint("media_type IN ('image','video','audio')", name="ck_assets_media_type"),
-        UniqueConstraint("project_id", "sha256", "role", name="uq_assets_project_sha_role"),
+        UniqueConstraint(
+            "producing_job_id",
+            "role",
+            "candidate_index",
+            name="uq_assets_job_role_candidate",
+        ),
+        Index(
+            "uq_assets_project_sha_role_unproduced",
+            "project_id",
+            "sha256",
+            "role",
+            unique=True,
+            postgresql_where=text("producing_job_id IS NULL AND project_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_assets_global_sha_role_unproduced",
+            "sha256",
+            "role",
+            unique=True,
+            postgresql_where=text("producing_job_id IS NULL AND project_id IS NULL"),
+        ),
         Index("ix_assets_project_role", "project_id", "role", "created_at"),
         {"schema": SCHEMA_NAME},
     )
@@ -453,6 +479,10 @@ class ShotPlanVersionRecord(Base):
     source_selection_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     clip_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     shots_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    director_treatment_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    director_prompt_revision: Mapped[str | None] = mapped_column(String(80))
+    director_model: Mapped[str | None] = mapped_column(String(120))
+    director_input_hash: Mapped[str | None] = mapped_column(String(64))
     total_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -525,13 +555,22 @@ class VideoRepairRecord(Base):
     __tablename__ = "video_repairs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('draft','generating','candidate_ready','approved','rejected',"
+            "status IN ('draft','generating','candidate_ready','failed','approved','rejected',"
             "'outdated','cancelled')",
             name="ck_video_repairs_status",
         ),
         CheckConstraint(
             "issue_start_frame >= 0 AND issue_end_frame > issue_start_frame",
             name="ck_video_repairs_issue_range",
+        ),
+        CheckConstraint(
+            "selection_policy_version IN (1, 2)",
+            name="ck_video_repairs_selection_policy",
+        ),
+        CheckConstraint(
+            "selection_policy_version = 1 OR "
+            "issue_end_frame - issue_start_frame BETWEEN 96 AND 360",
+            name="ck_video_repairs_v2_issue_duration",
         ),
         CheckConstraint(
             "generation_start_frame >= 0 AND generation_end_frame > generation_start_frame",
@@ -570,6 +609,11 @@ class VideoRepairRecord(Base):
     candidate_core_start_frame: Mapped[int] = mapped_column(Integer, nullable=False)
     candidate_core_end_frame: Mapped[int] = mapped_column(Integer, nullable=False)
     provider_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    selection_policy_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=2
+    )
+    edit_intent: Mapped[str | None] = mapped_column(String(24))
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     negative_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -590,3 +634,34 @@ class VideoRepairRecord(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderRateCardRecord(Base):
+    __tablename__ = "provider_rate_cards"
+    __table_args__ = (
+        CheckConstraint("unit_price_micros >= 0", name="ck_rate_cards_nonnegative_price"),
+        CheckConstraint("currency = 'CNY'", name="ck_rate_cards_currency"),
+        CheckConstraint(
+            "unit IN ('million_tokens','image','video_second')", name="ck_rate_cards_unit"
+        ),
+        UniqueConstraint(
+            "provider", "model", "metric", "revision", name="uq_provider_rate_card_revision"
+        ),
+        Index("ix_provider_rate_cards_active", "provider", "model", "active"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    metric: Mapped[str] = mapped_column(String(40), nullable=False)
+    unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    unit_price_micros: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="CNY")
+    source_url: Mapped[str | None] = mapped_column(Text)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revision: Mapped[str] = mapped_column(String(80), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

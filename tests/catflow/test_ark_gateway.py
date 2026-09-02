@@ -92,6 +92,11 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
             data=[SimpleNamespace(url="https://ark.example/result.png")],
             model="image-model",
             id="image-response-1",
+            usage=SimpleNamespace(
+                generated_images=1,
+                output_tokens=320,
+                total_tokens=320,
+            ),
         )
     )
     video_tasks = Recorder(SimpleNamespace(id="video-task-1"))
@@ -121,6 +126,11 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
     )
 
     assert image_result.url == "https://ark.example/result.png"
+    assert image_result.usage == {
+        "generatedImages": 1,
+        "outputTokens": 320,
+        "totalTokens": 320,
+    }
     assert video_result.task_id == "video-task-1"
     image_request = image_recorder.calls[0]
     assert image_request["watermark"] is False
@@ -157,6 +167,7 @@ def test_ark_video_poll_maps_succeeded_media_urls() -> None:
         duration=12,
         ratio="9:16",
         resolution="480p",
+        usage=SimpleNamespace(completion_tokens=9600, total_tokens=9600),
     )
     tasks = Recorder(task)
     gateway = ArkTypedGateway(
@@ -168,6 +179,25 @@ def test_ark_video_poll_maps_succeeded_media_urls() -> None:
     assert result.status == "succeeded"
     assert result.video_url == "https://ark.example/video.mp4"
     assert result.duration_seconds == 12
+    assert result.usage == {"completionTokens": 9600, "totalTokens": 9600}
+    assert "inputTokens" not in result.usage
+
+
+def test_ark_usage_does_not_invent_zero_values_for_missing_provider_fields() -> None:
+    responses = Recorder(
+        SimpleNamespace(
+            id="response-usage",
+            model="planning-model",
+            status="completed",
+            output_text=json.dumps({"title": "擦爪"}),
+            usage=SimpleNamespace(output_tokens=42),
+        )
+    )
+    gateway = ArkTypedGateway(_settings(), client=SimpleNamespace(responses=responses))
+
+    result = gateway.plan_story(prompt="生成提案", output_schema={"type": "object"})
+
+    assert result.usage == {"outputTokens": 42}
 
 
 def test_ark_segment_gateway_submits_one_video_and_seven_ordered_images(
@@ -187,11 +217,14 @@ def test_ark_segment_gateway_submits_one_video_and_seven_ordered_images(
 
     result = gateway.submit_segment_video(
         SegmentVideoGenerationRequest(
+            instruction="只修复擦爪动作。",
             prompt="只修复擦爪动作并锁定首尾衔接。",
             negative_prompt="禁止身份漂移和接缝双影。",
             context_video_url=(
                 "https://media.example.test/catflow/context.mp4?signature=temporary"
             ),
+            issue_start_seconds=4.0,
+            issue_end_seconds=8.0,
             anchor_in_path=images[0],
             anchor_out_path=images[1],
             canon_reference_paths=images[2:],
@@ -238,6 +271,8 @@ def test_ark_segment_gateway_submits_one_video_and_seven_ordered_images(
     assert request["duration"] == 6
     assert request["generate_audio"] is False
     assert request["watermark"] is False
+    assert "本区间修改目标" in content[0]["text"]  # type: ignore[index]
+    assert "编辑类型" not in content[0]["text"]  # type: ignore[index]
 
 
 def test_ark_segment_request_rejects_a_non_https_reference_url_before_submission(
@@ -253,9 +288,12 @@ def test_ark_segment_request_rejects_a_non_https_reference_url_before_submission
     with pytest.raises(ValueError, match="HTTPS"):
         gateway.submit_segment_video(
             SegmentVideoGenerationRequest(
+                instruction="只修复擦爪动作。",
                 prompt="只修复擦爪动作。",
                 negative_prompt="禁止身份漂移。",
                 context_video_url="http://127.0.0.1/context.mp4",
+                issue_start_seconds=4.0,
+                issue_end_seconds=8.0,
                 anchor_in_path=images[0],
                 anchor_out_path=images[1],
                 canon_reference_paths=images[2:],

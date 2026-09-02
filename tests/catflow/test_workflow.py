@@ -14,10 +14,28 @@ from catflow.application.service import (
     PlannerMessageCommand,
     ProjectCreate,
     ProjectPatch,
+    ShotPlanGenerationCommand,
     StudioConflictError,
     StudioService,
 )
-from catflow.domain.models import LifeClipSpec, LifeStoryProposalDraft, ShotPlanDraft, ShotSpec
+from catflow.domain.models import (
+    BlockingDesign,
+    CompositionDesign,
+    ContinuityDesign,
+    DirectorMicroEvent,
+    DirectorPlanPayload,
+    DirectorStoryTreatment,
+    EmotionalArc,
+    LensDesign,
+    LifeClipSpec,
+    LifeStoryProposalDraft,
+    LightingDesign,
+    PhysicalChangeDesign,
+    PropStateChange,
+    ShotPlanDraft,
+    ShotSoundDesign,
+    ShotSpec,
+)
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
 
 
@@ -66,6 +84,11 @@ def test_planner_message_is_idempotent_and_adoption_activates_one_story() -> Non
     assert first.id == second.id
     assert first.kind == "plan_story"
     assert first.frozen_input["targetDurationSeconds"] == project.target_duration_seconds
+    prompt = str(first.frozen_input["prompt"])
+    assert "标题使用4至12个汉字" in prompt
+    assert "摘要不超过60个汉字" in prompt
+    assert "不得复述用户原文" in prompt
+    assert "围绕……展开" in prompt
     pending_planner = service.get_planner(project.id)
     assert len(pending_planner.messages) == 1
     assert pending_planner.latest_job is not None
@@ -217,16 +240,21 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert story.body not in preview.prompt
     assert story.micro_event.trigger in preview.prompt
     assert story.micro_event.visible_change in preview.prompt
+    assert preview.input_snapshot is not None
+    assert preview.input_snapshot.state == "preview"
+    assert preview.input_snapshot.video.duration_seconds == 12
 
     command = GenerationCommand(
         expectedInputHash=preview.input_hash,
-        expectedCostMicros=preview.expected_cost_micros,
         idempotencyKey="video-rainy-paws-1",
     )
     first_video_job = service.create_video_job(project.id, command)
     same_video_job = service.create_video_job(project.id, command)
 
     assert first_video_job.id == same_video_job.id
+    assert first_video_job.input_snapshot is not None
+    assert first_video_job.input_snapshot.state == "submitted"
+    assert first_video_job.input_snapshot.prompt == preview.prompt
     workspace = service.workspace(project.id)
     assert workspace["latestVideoJob"]["id"] == str(first_video_job.id)
     assert workspace["eventCursor"] >= 1
@@ -258,10 +286,179 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
             project.id,
             GenerationCommand(
                 expectedInputHash="f" * 64,
-                expectedCostMicros=preview.expected_cost_micros,
                 idempotencyKey="video-stale",
             ),
         )
+
+
+def test_director_planner_job_freezes_story_canon_assets_and_professional_schema() -> None:
+    service = _service()
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="director-source-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    story = service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(
+        project.id,
+        role="environment",
+        sha256="7" * 64,
+    )
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+
+    job = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="professional-director-plan"),
+    )
+
+    assert job.kind == "plan_shots"
+    assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
+    assert job.frozen_input["storyVersionId"] == str(story.id)
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v1"
+    assert job.frozen_input["referenceRoles"] == [
+        "episode_child",
+        "episode_cat",
+        "pair_scale",
+        "environment",
+        "style_board",
+    ]
+    assert "初始状态—运动路径—结束状态" in str(job.frozen_input["prompt"])
+    schema = job.frozen_input["outputSchema"]
+    assert isinstance(schema, dict)
+    assert "directorTreatment" in str(schema)
+    assert "childBlocking" in str(schema)
+
+
+def test_video_prompt_compiles_professional_director_fields_in_execution_order() -> None:
+    service = _service()
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="professional-prompt-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(project.id, role="environment", sha256="7" * 64)
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    job = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="professional-prompt-plan"),
+    )
+    shot = ShotSpec(
+        id="shot-1",
+        order=1,
+        durationSeconds=12,
+        durationFrames=288,
+        framing="中景",
+        cameraMovement="缓慢跟随",
+        childAction="孩子逐只擦干猫爪",
+        catAction="猫咪抬爪后走上脚垫",
+        environmentChange="湿爪印明显减少",
+        transition="continuous",
+        lens=LensDesign(
+            focalLengthEquivalent="35mm",
+            cameraHeight="儿童腰部高度",
+            cameraAngle="轻微俯拍",
+            perspectiveIntent="同时看清手、猫爪和水印",
+        ),
+        composition=CompositionDesign(
+            subjectPlacement="孩子左侧，猫咪右侧",
+            foreground="软毛巾",
+            middleGround="孩子双手与猫爪",
+            background="暖光玄关",
+            screenDirection="从门口向室内",
+            eyeLine="孩子看向猫爪",
+        ),
+        childBlocking=BlockingDesign(
+            initialState="孩子站在脚垫旁",
+            movementPath="屈膝蹲下并逐只擦拭",
+            endState="孩子起身折好毛巾",
+            microMotions=["重新握紧毛巾"],
+        ),
+        catBlocking=BlockingDesign(
+            initialState="猫咪四足站在湿脚垫边缘",
+            movementPath="依次抬爪并转移重心",
+            endState="猫咪向室内迈出两步",
+            microMotions=["尾巴自然摆动"],
+        ),
+        physicalChange=PhysicalChangeDesign(
+            subject="猫爪和地面水印",
+            before="潮湿并留下连续水印",
+            after="猫爪擦干且水印减少",
+        ),
+        continuity=ContinuityDesign(
+            incoming="承接猫咪进门动作",
+            outgoing="猫咪继续走向室内",
+            sharedVisualElement="同一块毛巾和脚垫",
+            finalFrame="孩子折好毛巾，猫咪仍在向前迈步",
+        ),
+        lighting=LightingDesign(
+            direction="右上方室内暖光",
+            softness="柔和漫射",
+            colorIntent="雨天冷暖平衡",
+        ),
+        sound=ShotSoundDesign(
+            ambience=["轻雨声"],
+            objectEffects=["毛巾摩擦声"],
+            movementEffects=["猫爪轻落脚垫"],
+            musicIntent="极轻木琴点音",
+        ),
+        directorIntent="用动作和物理变化呈现照顾感",
+        generationRisks=[{"code": "paw_occlusion", "message": "避免手与猫爪融合"}],
+    )
+    payload = DirectorPlanPayload(
+        targetDurationSeconds=12,
+        directorTreatment=DirectorStoryTreatment(
+            logline="孩子在雨天门边为猫咪擦干爪子",
+            theme="温柔照顾",
+            emotionalTone=["安静", "温暖"],
+            visualMotif="湿爪印逐渐消失",
+            spatialSetting="雨天玄关",
+            emotionalArc=EmotionalArc(
+                opening="发现水印",
+                development="耐心擦拭",
+                resolution="一起走进室内",
+            ),
+            microEvent=DirectorMicroEvent(
+                trigger="猫咪湿爪进门",
+                childIntent="保持室内干净并照顾猫咪",
+                childAction="逐只擦干猫爪",
+                catResponse="抬爪配合并向前迈步",
+                visibleCauseAndEffect="水印明显减少",
+                warmEnding="孩子折毛巾，猫咪继续走向室内",
+            ),
+            propStateChange=PropStateChange(
+                initialState="毛巾展开且干燥",
+                changedState="毛巾折好并带有湿痕",
+            ),
+            soundIntent="用雨声和毛巾摩擦声表达安静日常",
+            endingImage="孩子折好毛巾，猫咪仍在迈步",
+        ),
+        shots=[shot],
+    )
+    service.complete_shot_plan_job(job.id, payload)
+
+    prompt = service.preview_video_generation(project.id).prompt
+
+    for expected in (
+        "35mm",
+        "孩子站在脚垫旁—屈膝蹲下并逐只擦拭—孩子起身折好毛巾",
+        "猫咪四足站在湿脚垫边缘—依次抬爪并转移重心—猫咪向室内迈出两步",
+        "潮湿并留下连续水印→猫爪擦干且水印减少",
+        "孩子折好毛巾，猫咪仍在向前迈步",
+        "轻雨声",
+        "paw_occlusion：避免手与猫爪融合",
+    ):
+        assert expected in prompt
 
 
 def test_selected_environment_preset_is_shared_by_every_project() -> None:
@@ -340,7 +537,6 @@ def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> 
         AssetGenerationCommand(
             kind="episode_cat",
             expectedInputHash=preview.input_hash,
-            expectedCostMicros=preview.expected_cost_micros,
             idempotencyKey="asset-cat-fake-1",
         ),
     )

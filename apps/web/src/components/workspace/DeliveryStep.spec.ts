@@ -93,7 +93,7 @@ describe("DeliveryStep", () => {
     await flushPromises();
 
     expect(client.edits).toHaveBeenCalledTimes(2);
-    expect(wrapper.text()).toContain("Revision 1");
+    expect(wrapper.text()).toContain("版本 1");
     expect(wrapper.get("button.primary").attributes("disabled")).toBeUndefined();
     expect(wrapper.emitted("changed")).toHaveLength(1);
   });
@@ -136,13 +136,13 @@ describe("DeliveryStep", () => {
     await flushPromises();
     await wrapper.get("button.primary").trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("导出任务：queued");
+    expect(wrapper.text()).toContain("导出进度：等待生成");
 
     await wrapper.setProps({ workspace: { ...workspace, eventCursor: 1 } });
     await flushPromises();
 
     expect(client.job).toHaveBeenCalledWith("job-1");
-    expect(wrapper.text()).toContain("导出任务：succeeded");
+    expect(wrapper.text()).toContain("导出进度：已完成");
     expect(wrapper.text()).toContain("288 帧");
     expect(wrapper.text()).toContain("12.000 秒");
     expect(wrapper.text()).toContain("720 × 1280");

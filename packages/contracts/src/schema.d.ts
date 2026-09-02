@@ -21,6 +21,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runtime/rate-cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rate Cards */
+        get: operations["rate_cards_api_v1_runtime_rate_cards_get"];
+        put?: never;
+        /** Publish Rate Card */
+        post: operations["publish_rate_card_api_v1_runtime_rate_cards_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runtime/bootstrap": {
         parameters: {
             query?: never;
@@ -366,6 +384,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shot-plans/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Shot Plan */
+        post: operations["generate_shot_plan_api_v1_projects__project_id__shot_plans_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/activate": {
         parameters: {
             query?: never;
@@ -570,6 +605,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-edits/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Video Edit */
+        post: operations["preview_video_edit_api_v1_projects__project_id__video_edits_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Edits */
+        get: operations["video_edits_api_v1_projects__project_id__video_edits_get"];
+        put?: never;
+        /** Create Video Edit */
+        post: operations["create_video_edit_api_v1_projects__project_id__video_edits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edits/{edit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Edit */
+        get: operations["video_edit_api_v1_projects__project_id__video_edits__edit_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edits/{edit_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Video Edit */
+        post: operations["approve_video_edit_api_v1_projects__project_id__video_edits__edit_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edits/{edit_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Video Edit */
+        post: operations["reject_video_edit_api_v1_projects__project_id__video_edits__edit_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/video-repairs/preview": {
         parameters: {
             query?: never;
@@ -579,7 +700,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Preview Video Repair */
+        /**
+         * Preview Video Repair
+         * @deprecated
+         */
         post: operations["preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post"];
         delete?: never;
         options?: never;
@@ -597,7 +721,10 @@ export interface paths {
         /** Video Repairs */
         get: operations["video_repairs_api_v1_projects__project_id__video_repairs_get"];
         put?: never;
-        /** Create Video Repair */
+        /**
+         * Create Video Repair
+         * @deprecated
+         */
         post: operations["create_video_repair_api_v1_projects__project_id__video_repairs_post"];
         delete?: never;
         options?: never;
@@ -631,7 +758,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Approve Video Repair */
+        /**
+         * Approve Video Repair
+         * @deprecated
+         */
         post: operations["approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post"];
         delete?: never;
         options?: never;
@@ -648,7 +778,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reject Video Repair */
+        /**
+         * Reject Video Repair
+         * @deprecated
+         */
         post: operations["reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post"];
         delete?: never;
         options?: never;
@@ -665,6 +798,40 @@ export interface paths {
         };
         /** Job */
         get: operations["job_api_v1_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Usage */
+        get: operations["job_usage_api_v1_jobs__job_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/usage-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Usage Summary */
+        get: operations["project_usage_summary_api_v1_projects__project_id__usage_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -837,17 +1004,8 @@ export interface components {
         AssetGenerationCommand: {
             /** Expectedinputhash */
             expectedInputHash: string;
-            /** Expectedcostmicros */
-            expectedCostMicros?: number | null;
             /** Idempotencykey */
             idempotencyKey: string;
-            /** Validationrunid */
-            validationRunId?: string | null;
-            /**
-             * Paidcallacknowledged
-             * @default false
-             */
-            paidCallAcknowledged: boolean;
             /**
              * Kind
              * @enum {string}
@@ -894,6 +1052,17 @@ export interface components {
             warnings?: {
                 [key: string]: string;
             }[];
+        };
+        /** BlockingDesign */
+        BlockingDesign: {
+            /** Initialstate */
+            initialState: string;
+            /** Movementpath */
+            movementPath: string;
+            /** Endstate */
+            endState: string;
+            /** Micromotions */
+            microMotions?: string[];
         };
         /** Body_upload_asset_api_v1_projects__project_id__assets_upload_post */
         Body_upload_asset_api_v1_projects__project_id__assets_upload_post: {
@@ -965,6 +1134,69 @@ export interface components {
             included: boolean;
             /** Omittedreason */
             omittedReason?: string | null;
+        };
+        /** CompositionDesign */
+        CompositionDesign: {
+            /** Subjectplacement */
+            subjectPlacement: string;
+            /** Foreground */
+            foreground: string;
+            /** Middleground */
+            middleGround: string;
+            /** Background */
+            background: string;
+            /** Screendirection */
+            screenDirection: string;
+            /** Eyeline */
+            eyeLine: string;
+        };
+        /** ContinuityDesign */
+        ContinuityDesign: {
+            /** Incoming */
+            incoming: string;
+            /** Outgoing */
+            outgoing: string;
+            /** Sharedvisualelement */
+            sharedVisualElement: string;
+            /** Finalframe */
+            finalFrame: string;
+        };
+        /** DirectorMicroEvent */
+        DirectorMicroEvent: {
+            /** Trigger */
+            trigger: string;
+            /** Childintent */
+            childIntent: string;
+            /** Childaction */
+            childAction: string;
+            /** Catresponse */
+            catResponse: string;
+            /** Visiblecauseandeffect */
+            visibleCauseAndEffect: string;
+            /** Warmending */
+            warmEnding: string;
+        };
+        /** DirectorStoryTreatment */
+        DirectorStoryTreatment: {
+            /** Logline */
+            logline: string;
+            /** Theme */
+            theme: string;
+            /** Emotionaltone */
+            emotionalTone: string[];
+            /** Visualmotif */
+            visualMotif: string;
+            /** Spatialsetting */
+            spatialSetting: string;
+            emotionalArc: components["schemas"]["EmotionalArc"];
+            microEvent: components["schemas"]["DirectorMicroEvent"];
+            propStateChange?: components["schemas"]["PropStateChange"] | null;
+            /** Soundintent */
+            soundIntent: string;
+            /** Endingimage */
+            endingImage: string;
+            /** Feasibilitywarnings */
+            feasibilityWarnings?: components["schemas"]["GenerationRisk"][];
         };
         /** EditAudioV2 */
         EditAudioV2: {
@@ -1179,6 +1411,15 @@ export interface components {
             /** Repairid */
             repairId?: string | null;
         };
+        /** EmotionalArc */
+        EmotionalArc: {
+            /** Opening */
+            opening: string;
+            /** Development */
+            development: string;
+            /** Resolution */
+            resolution: string;
+        };
         /** EnvironmentPresetDto */
         EnvironmentPresetDto: {
             /**
@@ -1229,17 +1470,86 @@ export interface components {
         GenerationCommand: {
             /** Expectedinputhash */
             expectedInputHash: string;
-            /** Expectedcostmicros */
-            expectedCostMicros?: number | null;
             /** Idempotencykey */
             idempotencyKey: string;
-            /** Validationrunid */
-            validationRunId?: string | null;
+        };
+        /** GenerationInputReferenceDto */
+        GenerationInputReferenceDto: {
+            /** Assetid */
+            assetId?: string | null;
+            /** Role */
+            role: string;
+            /** Priority */
+            priority: number;
             /**
-             * Paidcallacknowledged
+             * Included
+             * @default true
+             */
+            included: boolean;
+            /** Omittedreason */
+            omittedReason?: string | null;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Derived
              * @default false
              */
-            paidCallAcknowledged: boolean;
+            derived: boolean;
+        };
+        /** GenerationInputSnapshotDto */
+        GenerationInputSnapshotDto: {
+            /**
+             * Schemaversion
+             * @constant
+             */
+            schemaVersion: 1;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "whole_video" | "segment_edit";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "preview" | "submitted";
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /** Inputhash */
+            inputHash: string;
+            /** Prompt */
+            prompt: string;
+            /** Negativeprompt */
+            negativePrompt: string;
+            /** References */
+            references: components["schemas"]["GenerationInputReferenceDto"][];
+            video: components["schemas"]["GenerationVideoSpecDto"];
+            source: components["schemas"]["GenerationInputSourceDto"];
+            segmentEdit?: components["schemas"]["SegmentEditInputDto"] | null;
+            /** Promptcompilerrevision */
+            promptCompilerRevision?: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** GenerationInputSourceDto */
+        GenerationInputSourceDto: {
+            /** Storyversionid */
+            storyVersionId?: string | null;
+            /** Shotplanversionid */
+            shotPlanVersionId?: string | null;
+            /** Selectionhash */
+            selectionHash?: string | null;
+            /** Basevideoassetid */
+            baseVideoAssetId?: string | null;
+            /** Basetimelinehash */
+            baseTimelineHash?: string | null;
         };
         /** GenerationPreviewDto */
         GenerationPreviewDto: {
@@ -1282,10 +1592,40 @@ export interface components {
             shotPlanVersionId: string;
             /** Selectionhash */
             selectionHash: string;
+            /** Durationseconds */
+            durationSeconds: number;
+            inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
             /** Warnings */
             warnings?: {
                 [key: string]: string;
             }[];
+        };
+        /** GenerationRisk */
+        GenerationRisk: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /** GenerationVideoSpecDto */
+        GenerationVideoSpecDto: {
+            /** Durationseconds */
+            durationSeconds: number;
+            /**
+             * Resolution
+             * @constant
+             */
+            resolution: "480p";
+            /**
+             * Aspectratio
+             * @constant
+             */
+            aspectRatio: "9:16";
+            /**
+             * Framerate
+             * @constant
+             */
+            frameRate: 24;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1301,15 +1641,6 @@ export interface components {
             assetId: string;
             /** Idempotencykey */
             idempotencyKey: string;
-            /** Expectedcostmicros */
-            expectedCostMicros?: number | null;
-            /** Validationrunid */
-            validationRunId?: string | null;
-            /**
-             * Paidcallacknowledged
-             * @default false
-             */
-            paidCallAcknowledged: boolean;
         };
         /** JobDto */
         JobDto: {
@@ -1327,7 +1658,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
+            kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
             /**
              * Status
              * @enum {string}
@@ -1362,6 +1693,29 @@ export interface components {
             } | null;
             /** Expectedcostmicros */
             expectedCostMicros?: number | null;
+            /** Actualcostmicros */
+            actualCostMicros?: number | null;
+            /**
+             * Currency
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
+            /**
+             * Billingstatus
+             * @default pending
+             * @enum {string}
+             */
+            billingStatus: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+            /** Ratecardrevision */
+            rateCardRevision?: string | null;
+            /** Pricingsnapshot */
+            pricingSnapshot?: {
+                [key: string]: unknown;
+            } | null;
+            /** Providerrequestid */
+            providerRequestId?: string | null;
+            inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
             /** Frozeninput */
             frozenInput: {
                 [key: string]: unknown;
@@ -1406,6 +1760,62 @@ export interface components {
              * Format: date-time
              */
             deleteAfter: string;
+        };
+        /** JobUsageDto */
+        JobUsageDto: {
+            /**
+             * Jobid
+             * Format: uuid
+             */
+            jobId: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Inputtokens */
+            inputTokens?: number | null;
+            /** Outputtokens */
+            outputTokens?: number | null;
+            /** Completiontokens */
+            completionTokens?: number | null;
+            /** Totaltokens */
+            totalTokens?: number | null;
+            /** Generatedimages */
+            generatedImages?: number | null;
+            /** Generatedvideoseconds */
+            generatedVideoSeconds?: number | null;
+            /** Providerusage */
+            providerUsage: {
+                [key: string]: number;
+            };
+            /**
+             * Billingstatus
+             * @enum {string}
+             */
+            billingStatus: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+            /** Calculatedcostmicros */
+            calculatedCostMicros?: number | null;
+            /**
+             * Currency
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
+            /** Ratecardrevision */
+            rateCardRevision?: string | null;
+            /** Pricesource */
+            priceSource?: string | null;
+        };
+        /** LensDesign */
+        LensDesign: {
+            /** Focallengthequivalent */
+            focalLengthEquivalent: string;
+            /** Cameraheight */
+            cameraHeight: string;
+            /** Cameraangle */
+            cameraAngle: string;
+            /** Perspectiveintent */
+            perspectiveIntent: string;
         };
         /** LifeClipSpec */
         LifeClipSpec: {
@@ -1478,6 +1888,15 @@ export interface components {
                 [key: string]: string;
             }[];
         };
+        /** LightingDesign */
+        LightingDesign: {
+            /** Direction */
+            direction: string;
+            /** Softness */
+            softness: string;
+            /** Colorintent */
+            colorIntent: string;
+        };
         /** MicroEvent */
         MicroEvent: {
             /** Trigger */
@@ -1490,6 +1909,15 @@ export interface components {
             visibleChange: string;
             /** Warmending */
             warmEnding: string;
+        };
+        /** PhysicalChangeDesign */
+        PhysicalChangeDesign: {
+            /** Subject */
+            subject: string;
+            /** Before */
+            before: string;
+            /** After */
+            after: string;
         };
         /** PlannerJobDto */
         PlannerJobDto: {
@@ -1509,6 +1937,26 @@ export interface components {
             model?: string | null;
             /** Providertaskid */
             providerTaskId?: string | null;
+            /** Actualusage */
+            actualUsage?: {
+                [key: string]: unknown;
+            } | null;
+            /** Actualcostmicros */
+            actualCostMicros?: number | null;
+            /**
+             * Currency
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
+            /**
+             * Billingstatus
+             * @default pending
+             * @enum {string}
+             */
+            billingStatus: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+            /** Ratecardrevision */
+            rateCardRevision?: string | null;
             /** Error */
             error?: {
                 [key: string]: unknown;
@@ -1532,13 +1980,6 @@ export interface components {
             expectedContextRevision: number;
             /** Idempotencykey */
             idempotencyKey: string;
-            /** Validationrunid */
-            validationRunId?: string | null;
-            /**
-             * Paidcallacknowledged
-             * @default false
-             */
-            paidCallAcknowledged: boolean;
         };
         /** PlannerMessageDto */
         PlannerMessageDto: {
@@ -1663,12 +2104,112 @@ export interface components {
              */
             createdAt: string;
         };
+        /** ProjectUsageSummaryDto */
+        ProjectUsageSummaryDto: {
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /** Jobs */
+            jobs: components["schemas"]["JobUsageDto"][];
+            /** Totals */
+            totals: {
+                [key: string]: number;
+            };
+            /** Calculatedcostmicros */
+            calculatedCostMicros: number;
+            /** Unpricedjobcount */
+            unpricedJobCount: number;
+            /**
+             * Currency
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
+        };
+        /** PropStateChange */
+        PropStateChange: {
+            /** Initialstate */
+            initialState: string;
+            /** Changedstate */
+            changedState: string;
+        };
+        /** RateCardItem */
+        RateCardItem: {
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "inputTokens" | "outputTokens" | "completionTokens" | "totalTokens" | "generatedImages" | "generatedVideoSeconds";
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "million_tokens" | "image" | "video_second";
+            /** Unitpricemicros */
+            unitPriceMicros: number;
+        };
+        /** RateCardRevisionCreateCommand */
+        RateCardRevisionCreateCommand: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Revision */
+            revision: string;
+            /** Sourceurl */
+            sourceUrl?: string | null;
+            /**
+             * Effectivefrom
+             * Format: date-time
+             */
+            effectiveFrom: string;
+            /** Rates */
+            rates: components["schemas"]["RateCardItem"][];
+        };
+        /** RateCardRevisionDto */
+        RateCardRevisionDto: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Revision */
+            revision: string;
+            /** Sourceurl */
+            sourceUrl?: string | null;
+            /**
+             * Effectivefrom
+             * Format: date-time
+             */
+            effectiveFrom: string;
+            /** Rates */
+            rates: components["schemas"]["RateCardItem"][];
+            /**
+             * Active
+             * @default true
+             */
+            active: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
         /** RationalFrameRate */
         RationalFrameRate: {
             /** Numerator */
             numerator: number;
             /** Denominator */
             denominator: number;
+        };
+        /** SegmentEditInputDto */
+        SegmentEditInputDto: {
+            /** Instruction */
+            instruction: string;
+            issueRange: components["schemas"]["FrameRange"];
+            generationRange: components["schemas"]["FrameRange"];
+            candidateCoreRange: components["schemas"]["FrameRange"];
         };
         /** SegmentRepairApproveCommand */
         SegmentRepairApproveCommand: {
@@ -1695,23 +2236,19 @@ export interface components {
         /** SegmentRepairCreateCommand */
         SegmentRepairCreateCommand: {
             /**
-             * Repairid
+             * Basevideoassetid
              * Format: uuid
              */
-            repairId: string;
+            baseVideoAssetId: string;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
+            issueRange: components["schemas"]["FrameRange"];
+            /** Instruction */
+            instruction: string;
             /** Expectedinputhash */
             expectedInputHash: string;
-            /** Expectedcostmicros */
-            expectedCostMicros?: number | null;
             /** Idempotencykey */
             idempotencyKey: string;
-            /** Validationrunid */
-            validationRunId?: string | null;
-            /**
-             * Paidconfirmation
-             * @constant
-             */
-            paidConfirmation: true;
         };
         /** SegmentRepairImageReferenceDto */
         SegmentRepairImageReferenceDto: {
@@ -1742,18 +2279,11 @@ export interface components {
             /** Baseeditversionid */
             baseEditVersionId?: string | null;
             issueRange: components["schemas"]["FrameRange"];
-            /** Prompt */
-            prompt: string;
-            /** Validationrunid */
-            validationRunId?: string | null;
+            /** Instruction */
+            instruction: string;
         };
         /** SegmentRepairPreviewDto */
         SegmentRepairPreviewDto: {
-            /**
-             * Repairid
-             * Format: uuid
-             */
-            repairId: string;
             /**
              * Projectid
              * Format: uuid
@@ -1780,6 +2310,8 @@ export interface components {
             model: string;
             /** Capabilityrevision */
             capabilityRevision: string;
+            /** Instruction */
+            instruction: string;
             /** Prompt */
             prompt: string;
             /** Negativeprompt */
@@ -1796,6 +2328,7 @@ export interface components {
             costEstimateStatus: "priced" | "unmetered_paid";
             /** Inputhash */
             inputHash: string;
+            inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
         };
         /** SegmentRepairTransitionCommand */
         SegmentRepairTransitionCommand: {
@@ -1848,6 +2381,18 @@ export interface components {
             clip: components["schemas"]["LifeClipSpec"];
             /** Shots */
             shots: components["schemas"]["ShotSpec"][];
+            directorTreatment?: components["schemas"]["DirectorStoryTreatment"] | null;
+            /** Directorpromptrevision */
+            directorPromptRevision?: string | null;
+            /** Directormodel */
+            directorModel?: string | null;
+            /** Directorinputhash */
+            directorInputHash?: string | null;
+        };
+        /** ShotPlanGenerationCommand */
+        ShotPlanGenerationCommand: {
+            /** Idempotencykey */
+            idempotencyKey: string;
         };
         /** ShotPlanVersionDto */
         ShotPlanVersionDto: {
@@ -1878,6 +2423,13 @@ export interface components {
             shots: components["schemas"]["ShotSpec"][];
             /** Totaldurationseconds */
             totalDurationSeconds: number;
+            directorTreatment?: components["schemas"]["DirectorStoryTreatment"] | null;
+            /** Directorpromptrevision */
+            directorPromptRevision?: string | null;
+            /** Directormodel */
+            directorModel?: string | null;
+            /** Directorinputhash */
+            directorInputHash?: string | null;
             /** Active */
             active: boolean;
             /**
@@ -1891,6 +2443,19 @@ export interface components {
              */
             createdAt: string;
         };
+        /** ShotSoundDesign */
+        ShotSoundDesign: {
+            /** Ambience */
+            ambience?: string[];
+            /** Objecteffects */
+            objectEffects?: string[];
+            /** Movementeffects */
+            movementEffects?: string[];
+            /** Musicintent */
+            musicIntent: string;
+            /** Dialogue */
+            dialogue?: string | null;
+        };
         /** ShotSpec */
         ShotSpec: {
             /** Id */
@@ -1899,6 +2464,8 @@ export interface components {
             order: number;
             /** Durationseconds */
             durationSeconds: number;
+            /** Durationframes */
+            durationFrames?: number | null;
             /** Framing */
             framing: string;
             /** Cameramovement */
@@ -1914,6 +2481,18 @@ export interface components {
              * @enum {string}
              */
             transition: "continuous" | "soft_cut" | "hard_cut";
+            lens?: components["schemas"]["LensDesign"] | null;
+            composition?: components["schemas"]["CompositionDesign"] | null;
+            childBlocking?: components["schemas"]["BlockingDesign"] | null;
+            catBlocking?: components["schemas"]["BlockingDesign"] | null;
+            physicalChange?: components["schemas"]["PhysicalChangeDesign"] | null;
+            continuity?: components["schemas"]["ContinuityDesign"] | null;
+            lighting?: components["schemas"]["LightingDesign"] | null;
+            sound?: components["schemas"]["ShotSoundDesign"] | null;
+            /** Directorintent */
+            directorIntent?: string | null;
+            /** Generationrisks */
+            generationRisks?: components["schemas"]["GenerationRisk"][];
         };
         /** StoryCreateCommand */
         StoryCreateCommand: {
@@ -2174,15 +2753,6 @@ export interface components {
             assetId: string;
             /** Idempotencykey */
             idempotencyKey: string;
-            /** Expectedcostmicros */
-            expectedCostMicros?: number | null;
-            /** Validationrunid */
-            validationRunId?: string | null;
-            /**
-             * Paidcallacknowledged
-             * @default false
-             */
-            paidCallAcknowledged: boolean;
         };
         /** VideoRepairDto */
         VideoRepairDto: {
@@ -2211,6 +2781,15 @@ export interface components {
             candidateCoreRange: components["schemas"]["FrameRange"];
             /** Providerdurationseconds */
             providerDurationSeconds: number;
+            /**
+             * Selectionpolicyversion
+             * @default 2
+             */
+            selectionPolicyVersion: number;
+            /** Legacyeditintent */
+            legacyEditIntent?: ("action" | "character" | "object" | "environment" | "style") | null;
+            /** Instruction */
+            instruction: string;
             /** Prompt */
             prompt: string;
             /** Negativeprompt */
@@ -2221,7 +2800,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "draft" | "generating" | "candidate_ready" | "approved" | "rejected" | "outdated" | "cancelled";
+            status: "draft" | "generating" | "candidate_ready" | "failed" | "approved" | "rejected" | "outdated" | "cancelled";
             /** Candidateassetid */
             candidateAssetId?: string | null;
             /** Approvedcandidateassetid */
@@ -2266,6 +2845,59 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    rate_cards_api_v1_runtime_rate_cards_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateCardRevisionDto"][];
+                };
+            };
+        };
+    };
+    publish_rate_card_api_v1_runtime_rate_cards_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RateCardRevisionCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateCardRevisionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3043,6 +3675,41 @@ export interface operations {
             };
         };
     };
+    generate_shot_plan_api_v1_projects__project_id__shot_plans_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotPlanGenerationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     activate_shot_plan_api_v1_projects__project_id__shot_plans__shot_plan_version_id__activate_post: {
         parameters: {
             query?: never;
@@ -3448,6 +4115,213 @@ export interface operations {
             };
         };
     };
+    preview_video_edit_api_v1_projects__project_id__video_edits_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentRepairPreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SegmentRepairPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_edits_api_v1_projects__project_id__video_edits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoRepairDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_video_edit_api_v1_projects__project_id__video_edits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentRepairCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_edit_api_v1_projects__project_id__video_edits__edit_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoRepairDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_video_edit_api_v1_projects__project_id__video_edits__edit_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentRepairApproveCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_video_edit_api_v1_projects__project_id__video_edits__edit_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoRepairDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post: {
         parameters: {
             query?: never;
@@ -3673,6 +4547,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_usage_api_v1_jobs__job_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobUsageDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_usage_summary_api_v1_projects__project_id__usage_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectUsageSummaryDto"];
                 };
             };
             /** @description Validation Error */

@@ -27,6 +27,64 @@
         }
       }
     },
+    "/api/v1/runtime/rate-cards": {
+      "get": {
+        "summary": "Rate Cards",
+        "operationId": "rate_cards_api_v1_runtime_rate_cards_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RateCardRevisionDto"
+                  },
+                  "type": "array",
+                  "title": "Response Rate Cards Api V1 Runtime Rate Cards Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Publish Rate Card",
+        "operationId": "publish_rate_card_api_v1_runtime_rate_cards_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateCardRevisionCreateCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateCardRevisionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runtime/bootstrap": {
       "get": {
         "summary": "Runtime Bootstrap",
@@ -1020,6 +1078,56 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/shot-plans/generations": {
+      "post": {
+        "summary": "Generate Shot Plan",
+        "operationId": "generate_shot_plan_api_v1_projects__project_id__shot_plans_generations_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotPlanGenerationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/activate": {
       "post": {
         "summary": "Activate Shot Plan",
@@ -1609,10 +1717,325 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/video-edits/preview": {
+      "post": {
+        "summary": "Preview Video Edit",
+        "operationId": "preview_video_edit_api_v1_projects__project_id__video_edits_preview_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRepairPreviewCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentRepairPreviewDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-edits": {
+      "post": {
+        "summary": "Create Video Edit",
+        "operationId": "create_video_edit_api_v1_projects__project_id__video_edits_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRepairCreateCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Video Edits",
+        "operationId": "video_edits_api_v1_projects__project_id__video_edits_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VideoRepairDto"
+                  },
+                  "title": "Response Video Edits Api V1 Projects  Project Id  Video Edits Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-edits/{edit_id}": {
+      "get": {
+        "summary": "Video Edit",
+        "operationId": "video_edit_api_v1_projects__project_id__video_edits__edit_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Edit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoRepairDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-edits/{edit_id}/approve": {
+      "post": {
+        "summary": "Approve Video Edit",
+        "operationId": "approve_video_edit_api_v1_projects__project_id__video_edits__edit_id__approve_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Edit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRepairApproveCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-edits/{edit_id}/reject": {
+      "post": {
+        "summary": "Reject Video Edit",
+        "operationId": "reject_video_edit_api_v1_projects__project_id__video_edits__edit_id__reject_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Edit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoRepairDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/video-repairs/preview": {
       "post": {
         "summary": "Preview Video Repair",
         "operationId": "preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post",
+        "deprecated": true,
         "parameters": [
           {
             "name": "project_id",
@@ -1663,6 +2086,7 @@
       "post": {
         "summary": "Create Video Repair",
         "operationId": "create_video_repair_api_v1_projects__project_id__video_repairs_post",
+        "deprecated": true,
         "parameters": [
           {
             "name": "project_id",
@@ -1805,6 +2229,7 @@
       "post": {
         "summary": "Approve Video Repair",
         "operationId": "approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post",
+        "deprecated": true,
         "parameters": [
           {
             "name": "project_id",
@@ -1865,6 +2290,7 @@
       "post": {
         "summary": "Reject Video Repair",
         "operationId": "reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post",
+        "deprecated": true,
         "parameters": [
           {
             "name": "project_id",
@@ -1946,6 +2372,86 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/usage": {
+      "get": {
+        "summary": "Job Usage",
+        "operationId": "job_usage_api_v1_jobs__job_id__usage_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobUsageDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/usage-summary": {
+      "get": {
+        "summary": "Project Usage Summary",
+        "operationId": "project_usage_summary_api_v1_projects__project_id__usage_summary_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectUsageSummaryDto"
                 }
               }
             }
@@ -2443,40 +2949,11 @@
             "pattern": "^[a-f0-9]{64}$",
             "title": "Expectedinputhash"
           },
-          "expectedCostMicros": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expectedcostmicros"
-          },
           "idempotencyKey": {
             "type": "string",
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
-          },
-          "validationRunId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationrunid"
-          },
-          "paidCallAcknowledged": {
-            "type": "boolean",
-            "title": "Paidcallacknowledged",
-            "default": false
           },
           "kind": {
             "type": "string",
@@ -2608,6 +3085,44 @@
           "costEstimateStatus"
         ],
         "title": "AssetGenerationPreviewDto"
+      },
+      "BlockingDesign": {
+        "properties": {
+          "initialState": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Initialstate"
+          },
+          "movementPath": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Movementpath"
+          },
+          "endState": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Endstate"
+          },
+          "microMotions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Micromotions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "initialState",
+          "movementPath",
+          "endState"
+        ],
+        "title": "BlockingDesign"
       },
       "Body_upload_asset_api_v1_projects__project_id__assets_upload_post": {
         "properties": {
@@ -2781,6 +3296,232 @@
           "included"
         ],
         "title": "CompiledReference"
+      },
+      "CompositionDesign": {
+        "properties": {
+          "subjectPlacement": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Subjectplacement"
+          },
+          "foreground": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Foreground"
+          },
+          "middleGround": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Middleground"
+          },
+          "background": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Background"
+          },
+          "screenDirection": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Screendirection"
+          },
+          "eyeLine": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Eyeline"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "subjectPlacement",
+          "foreground",
+          "middleGround",
+          "background",
+          "screenDirection",
+          "eyeLine"
+        ],
+        "title": "CompositionDesign"
+      },
+      "ContinuityDesign": {
+        "properties": {
+          "incoming": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Incoming"
+          },
+          "outgoing": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Outgoing"
+          },
+          "sharedVisualElement": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Sharedvisualelement"
+          },
+          "finalFrame": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Finalframe"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "incoming",
+          "outgoing",
+          "sharedVisualElement",
+          "finalFrame"
+        ],
+        "title": "ContinuityDesign"
+      },
+      "DirectorMicroEvent": {
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Trigger"
+          },
+          "childIntent": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Childintent"
+          },
+          "childAction": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Childaction"
+          },
+          "catResponse": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Catresponse"
+          },
+          "visibleCauseAndEffect": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Visiblecauseandeffect"
+          },
+          "warmEnding": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Warmending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trigger",
+          "childIntent",
+          "childAction",
+          "catResponse",
+          "visibleCauseAndEffect",
+          "warmEnding"
+        ],
+        "title": "DirectorMicroEvent"
+      },
+      "DirectorStoryTreatment": {
+        "properties": {
+          "logline": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Logline"
+          },
+          "theme": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Theme"
+          },
+          "emotionalTone": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Emotionaltone"
+          },
+          "visualMotif": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Visualmotif"
+          },
+          "spatialSetting": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Spatialsetting"
+          },
+          "emotionalArc": {
+            "$ref": "#/components/schemas/EmotionalArc"
+          },
+          "microEvent": {
+            "$ref": "#/components/schemas/DirectorMicroEvent"
+          },
+          "propStateChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PropStateChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "soundIntent": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Soundintent"
+          },
+          "endingImage": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Endingimage"
+          },
+          "feasibilityWarnings": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationRisk"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Feasibilitywarnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "logline",
+          "theme",
+          "emotionalTone",
+          "visualMotif",
+          "spatialSetting",
+          "emotionalArc",
+          "microEvent",
+          "soundIntent",
+          "endingImage"
+        ],
+        "title": "DirectorStoryTreatment"
       },
       "EditAudioV2": {
         "properties": {
@@ -3251,6 +3992,36 @@
         ],
         "title": "EditVideoSegment"
       },
+      "EmotionalArc": {
+        "properties": {
+          "opening": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Opening"
+          },
+          "development": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Development"
+          },
+          "resolution": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Resolution"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "opening",
+          "development",
+          "resolution"
+        ],
+        "title": "EmotionalArc"
+      },
       "EnvironmentPresetDto": {
         "properties": {
           "id": {
@@ -3352,40 +4123,11 @@
             "pattern": "^[a-f0-9]{64}$",
             "title": "Expectedinputhash"
           },
-          "expectedCostMicros": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expectedcostmicros"
-          },
           "idempotencyKey": {
             "type": "string",
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
-          },
-          "validationRunId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationrunid"
-          },
-          "paidCallAcknowledged": {
-            "type": "boolean",
-            "title": "Paidcallacknowledged",
-            "default": false
           }
         },
         "additionalProperties": false,
@@ -3395,6 +4137,237 @@
           "idempotencyKey"
         ],
         "title": "GenerationCommand"
+      },
+      "GenerationInputReferenceDto": {
+        "properties": {
+          "assetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assetid"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Priority"
+          },
+          "included": {
+            "type": "boolean",
+            "title": "Included",
+            "default": true
+          },
+          "omittedReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omittedreason"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "derived": {
+            "type": "boolean",
+            "title": "Derived",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "priority",
+          "sha256"
+        ],
+        "title": "GenerationInputReferenceDto"
+      },
+      "GenerationInputSnapshotDto": {
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schemaversion"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "whole_video",
+              "segment_edit"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "preview",
+              "submitted"
+            ],
+            "title": "State"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "type": "string",
+            "title": "Negativeprompt"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationInputReferenceDto"
+            },
+            "type": "array",
+            "title": "References"
+          },
+          "video": {
+            "$ref": "#/components/schemas/GenerationVideoSpecDto"
+          },
+          "source": {
+            "$ref": "#/components/schemas/GenerationInputSourceDto"
+          },
+          "segmentEdit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SegmentEditInputDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "promptCompilerRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promptcompilerrevision"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "kind",
+          "state",
+          "provider",
+          "model",
+          "capabilityRevision",
+          "inputHash",
+          "prompt",
+          "negativePrompt",
+          "references",
+          "video",
+          "source",
+          "createdAt"
+        ],
+        "title": "GenerationInputSnapshotDto"
+      },
+      "GenerationInputSourceDto": {
+        "properties": {
+          "storyVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storyversionid"
+          },
+          "shotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shotplanversionid"
+          },
+          "selectionHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectionhash"
+          },
+          "baseVideoAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basevideoassetid"
+          },
+          "baseTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basetimelinehash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GenerationInputSourceDto"
       },
       "GenerationPreviewDto": {
         "properties": {
@@ -3468,6 +4441,22 @@
             "type": "string",
             "title": "Selectionhash"
           },
+          "durationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 4.0,
+            "title": "Durationseconds"
+          },
+          "inputSnapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GenerationInputSnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "warnings": {
             "items": {
               "additionalProperties": {
@@ -3492,9 +4481,67 @@
           "costEstimateStatus",
           "storyVersionId",
           "shotPlanVersionId",
-          "selectionHash"
+          "selectionHash",
+          "durationSeconds"
         ],
         "title": "GenerationPreviewDto"
+      },
+      "GenerationRisk": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "GenerationRisk"
+      },
+      "GenerationVideoSpecDto": {
+        "properties": {
+          "durationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 4.0,
+            "title": "Durationseconds"
+          },
+          "resolution": {
+            "type": "string",
+            "const": "480p",
+            "title": "Resolution"
+          },
+          "aspectRatio": {
+            "type": "string",
+            "const": "9:16",
+            "title": "Aspectratio"
+          },
+          "frameRate": {
+            "type": "integer",
+            "const": 24,
+            "title": "Framerate"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "durationSeconds",
+          "resolution",
+          "aspectRatio",
+          "frameRate"
+        ],
+        "title": "GenerationVideoSpecDto"
       },
       "HTTPValidationError": {
         "properties": {
@@ -3521,35 +4568,6 @@
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
-          },
-          "expectedCostMicros": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expectedcostmicros"
-          },
-          "validationRunId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationrunid"
-          },
-          "paidCallAcknowledged": {
-            "type": "boolean",
-            "title": "Paidcallacknowledged",
-            "default": false
           }
         },
         "additionalProperties": false,
@@ -3576,6 +4594,7 @@
             "type": "string",
             "enum": [
               "plan_story",
+              "plan_shots",
               "generate_image",
               "diagnose_image",
               "generate_video",
@@ -3736,6 +4755,79 @@
             ],
             "title": "Expectedcostmicros"
           },
+          "actualCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualcostmicros"
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY",
+            "title": "Currency",
+            "default": "CNY"
+          },
+          "billingStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "usage_reported",
+              "calculated",
+              "unpriced",
+              "provider_adjusted"
+            ],
+            "title": "Billingstatus",
+            "default": "pending"
+          },
+          "rateCardRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratecardrevision"
+          },
+          "pricingSnapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricingsnapshot"
+          },
+          "providerRequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerrequestid"
+          },
+          "inputSnapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GenerationInputSnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "frozenInput": {
             "additionalProperties": true,
             "type": "object",
@@ -3848,6 +4940,193 @@
           "deleteAfter"
         ],
         "title": "JobPublicationDto"
+      },
+      "JobUsageDto": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Jobid"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "inputTokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputtokens"
+          },
+          "outputTokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputtokens"
+          },
+          "completionTokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completiontokens"
+          },
+          "totalTokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totaltokens"
+          },
+          "generatedImages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generatedimages"
+          },
+          "generatedVideoSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generatedvideoseconds"
+          },
+          "providerUsage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Providerusage"
+          },
+          "billingStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "usage_reported",
+              "calculated",
+              "unpriced",
+              "provider_adjusted"
+            ],
+            "title": "Billingstatus"
+          },
+          "calculatedCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculatedcostmicros"
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY",
+            "title": "Currency",
+            "default": "CNY"
+          },
+          "rateCardRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratecardrevision"
+          },
+          "priceSource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricesource"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "jobId",
+          "provider",
+          "model",
+          "providerUsage",
+          "billingStatus"
+        ],
+        "title": "JobUsageDto"
+      },
+      "LensDesign": {
+        "properties": {
+          "focalLengthEquivalent": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Focallengthequivalent"
+          },
+          "cameraHeight": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Cameraheight"
+          },
+          "cameraAngle": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Cameraangle"
+          },
+          "perspectiveIntent": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Perspectiveintent"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "focalLengthEquivalent",
+          "cameraHeight",
+          "cameraAngle",
+          "perspectiveIntent"
+        ],
+        "title": "LensDesign"
       },
       "LifeClipSpec": {
         "properties": {
@@ -4029,6 +5308,36 @@
         ],
         "title": "LifeStoryProposalDto"
       },
+      "LightingDesign": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Direction"
+          },
+          "softness": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Softness"
+          },
+          "colorIntent": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Colorintent"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "softness",
+          "colorIntent"
+        ],
+        "title": "LightingDesign"
+      },
       "MicroEvent": {
         "properties": {
           "trigger": {
@@ -4072,6 +5381,36 @@
           "warmEnding"
         ],
         "title": "MicroEvent"
+      },
+      "PhysicalChangeDesign": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Subject"
+          },
+          "before": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Before"
+          },
+          "after": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "After"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "subject",
+          "before",
+          "after"
+        ],
+        "title": "PhysicalChangeDesign"
       },
       "PlannerJobDto": {
         "properties": {
@@ -4129,6 +5468,58 @@
             ],
             "title": "Providertaskid"
           },
+          "actualUsage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualusage"
+          },
+          "actualCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualcostmicros"
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY",
+            "title": "Currency",
+            "default": "CNY"
+          },
+          "billingStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "usage_reported",
+              "calculated",
+              "unpriced",
+              "provider_adjusted"
+            ],
+            "title": "Billingstatus",
+            "default": "pending"
+          },
+          "rateCardRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratecardrevision"
+          },
           "error": {
             "anyOf": [
               {
@@ -4180,23 +5571,6 @@
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
-          },
-          "validationRunId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationrunid"
-          },
-          "paidCallAcknowledged": {
-            "type": "boolean",
-            "title": "Paidcallacknowledged",
-            "default": false
           }
         },
         "additionalProperties": false,
@@ -4482,6 +5856,239 @@
         ],
         "title": "ProjectSelectionDto"
       },
+      "ProjectUsageSummaryDto": {
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobUsageDto"
+            },
+            "type": "array",
+            "title": "Jobs"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Totals"
+          },
+          "calculatedCostMicros": {
+            "type": "integer",
+            "title": "Calculatedcostmicros"
+          },
+          "unpricedJobCount": {
+            "type": "integer",
+            "title": "Unpricedjobcount"
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY",
+            "title": "Currency",
+            "default": "CNY"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projectId",
+          "jobs",
+          "totals",
+          "calculatedCostMicros",
+          "unpricedJobCount"
+        ],
+        "title": "ProjectUsageSummaryDto"
+      },
+      "PropStateChange": {
+        "properties": {
+          "initialState": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Initialstate"
+          },
+          "changedState": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Changedstate"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "initialState",
+          "changedState"
+        ],
+        "title": "PropStateChange"
+      },
+      "RateCardItem": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "inputTokens",
+              "outputTokens",
+              "completionTokens",
+              "totalTokens",
+              "generatedImages",
+              "generatedVideoSeconds"
+            ],
+            "title": "Metric"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "million_tokens",
+              "image",
+              "video_second"
+            ],
+            "title": "Unit"
+          },
+          "unitPriceMicros": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unitpricemicros"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metric",
+          "unit",
+          "unitPriceMicros"
+        ],
+        "title": "RateCardItem"
+      },
+      "RateCardRevisionCreateCommand": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Revision"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectivefrom"
+          },
+          "rates": {
+            "items": {
+              "$ref": "#/components/schemas/RateCardItem"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rates"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "revision",
+          "effectiveFrom",
+          "rates"
+        ],
+        "title": "RateCardRevisionCreateCommand"
+      },
+      "RateCardRevisionDto": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Revision"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectivefrom"
+          },
+          "rates": {
+            "items": {
+              "$ref": "#/components/schemas/RateCardItem"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rates"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "revision",
+          "effectiveFrom",
+          "rates",
+          "createdAt"
+        ],
+        "title": "RateCardRevisionDto"
+      },
       "RationalFrameRate": {
         "properties": {
           "numerator": {
@@ -4502,6 +6109,32 @@
           "denominator"
         ],
         "title": "RationalFrameRate"
+      },
+      "SegmentEditInputDto": {
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "title": "Instruction"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "generationRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "candidateCoreRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instruction",
+          "issueRange",
+          "generationRange",
+          "candidateCoreRange"
+        ],
+        "title": "SegmentEditInputDto"
       },
       "SegmentRepairApproveCommand": {
         "properties": {
@@ -4567,35 +6200,12 @@
       },
       "SegmentRepairCreateCommand": {
         "properties": {
-          "repairId": {
+          "baseVideoAssetId": {
             "type": "string",
             "format": "uuid",
-            "title": "Repairid"
+            "title": "Basevideoassetid"
           },
-          "expectedInputHash": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Expectedinputhash"
-          },
-          "expectedCostMicros": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expectedcostmicros"
-          },
-          "idempotencyKey": {
-            "type": "string",
-            "maxLength": 96,
-            "minLength": 8,
-            "title": "Idempotencykey"
-          },
-          "validationRunId": {
+          "baseEditVersionId": {
             "anyOf": [
               {
                 "type": "string",
@@ -4605,21 +6215,37 @@
                 "type": "null"
               }
             ],
-            "title": "Validationrunid"
+            "title": "Baseeditversionid"
           },
-          "paidConfirmation": {
-            "type": "boolean",
-            "const": true,
-            "title": "Paidconfirmation"
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Instruction"
+          },
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "repairId",
+          "baseVideoAssetId",
+          "issueRange",
+          "instruction",
           "expectedInputHash",
-          "idempotencyKey",
-          "paidConfirmation"
+          "idempotencyKey"
         ],
         "title": "SegmentRepairCreateCommand"
       },
@@ -4703,23 +6329,11 @@
           "issueRange": {
             "$ref": "#/components/schemas/FrameRange"
           },
-          "prompt": {
+          "instruction": {
             "type": "string",
             "maxLength": 4000,
             "minLength": 1,
-            "title": "Prompt"
-          },
-          "validationRunId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationrunid"
+            "title": "Instruction"
           }
         },
         "additionalProperties": false,
@@ -4727,17 +6341,12 @@
         "required": [
           "baseVideoAssetId",
           "issueRange",
-          "prompt"
+          "instruction"
         ],
         "title": "SegmentRepairPreviewCommand"
       },
       "SegmentRepairPreviewDto": {
         "properties": {
-          "repairId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Repairid"
-          },
           "projectId": {
             "type": "string",
             "format": "uuid",
@@ -4795,6 +6404,10 @@
             "type": "string",
             "title": "Capabilityrevision"
           },
+          "instruction": {
+            "type": "string",
+            "title": "Instruction"
+          },
           "prompt": {
             "type": "string",
             "title": "Prompt"
@@ -4836,12 +6449,21 @@
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
             "title": "Inputhash"
+          },
+          "inputSnapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GenerationInputSnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "repairId",
           "projectId",
           "baseVideoAssetId",
           "baseTimelineHash",
@@ -4853,6 +6475,7 @@
           "provider",
           "model",
           "capabilityRevision",
+          "instruction",
           "prompt",
           "negativePrompt",
           "imageReferences",
@@ -4967,6 +6590,52 @@
             "maxItems": 4,
             "minItems": 1,
             "title": "Shots"
+          },
+          "directorTreatment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectorStoryTreatment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "directorPromptRevision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directorpromptrevision"
+          },
+          "directorModel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directormodel"
+          },
+          "directorInputHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directorinputhash"
           }
         },
         "additionalProperties": false,
@@ -4978,6 +6647,22 @@
           "shots"
         ],
         "title": "ShotPlanDraft"
+      },
+      "ShotPlanGenerationCommand": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotencyKey"
+        ],
+        "title": "ShotPlanGenerationCommand"
       },
       "ShotPlanVersionDto": {
         "properties": {
@@ -5020,6 +6705,49 @@
             "type": "integer",
             "title": "Totaldurationseconds"
           },
+          "directorTreatment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectorStoryTreatment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "directorPromptRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directorpromptrevision"
+          },
+          "directorModel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directormodel"
+          },
+          "directorInputHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directorinputhash"
+          },
           "active": {
             "type": "boolean",
             "title": "Active"
@@ -5051,6 +6779,58 @@
         ],
         "title": "ShotPlanVersionDto"
       },
+      "ShotSoundDesign": {
+        "properties": {
+          "ambience": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Ambience"
+          },
+          "objectEffects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Objecteffects"
+          },
+          "movementEffects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Movementeffects"
+          },
+          "musicIntent": {
+            "type": "string",
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Musicintent"
+          },
+          "dialogue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 240
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dialogue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "musicIntent"
+        ],
+        "title": "ShotSoundDesign"
+      },
       "ShotSpec": {
         "properties": {
           "id": {
@@ -5070,6 +6850,19 @@
             "maximum": 15.0,
             "minimum": 2.0,
             "title": "Durationseconds"
+          },
+          "durationFrames": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 360.0,
+                "minimum": 48.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationframes"
           },
           "framing": {
             "type": "string",
@@ -5109,6 +6902,106 @@
               "hard_cut"
             ],
             "title": "Transition"
+          },
+          "lens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LensDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "composition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompositionDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "childBlocking": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockingDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catBlocking": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlockingDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "physicalChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalChangeDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "continuity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContinuityDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lighting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LightingDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sound": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShotSoundDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "directorIntent": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directorintent"
+          },
+          "generationRisks": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationRisk"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Generationrisks"
           }
         },
         "additionalProperties": false,
@@ -5720,35 +7613,6 @@
             "maxLength": 96,
             "minLength": 8,
             "title": "Idempotencykey"
-          },
-          "expectedCostMicros": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expectedcostmicros"
-          },
-          "validationRunId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationrunid"
-          },
-          "paidCallAcknowledged": {
-            "type": "boolean",
-            "title": "Paidcallacknowledged",
-            "default": false
           }
         },
         "additionalProperties": false,
@@ -5808,6 +7672,34 @@
             "type": "integer",
             "title": "Providerdurationseconds"
           },
+          "selectionPolicyVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Selectionpolicyversion",
+            "default": 2
+          },
+          "legacyEditIntent": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "action",
+                  "character",
+                  "object",
+                  "environment",
+                  "style"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacyeditintent"
+          },
+          "instruction": {
+            "type": "string",
+            "title": "Instruction"
+          },
           "prompt": {
             "type": "string",
             "title": "Prompt"
@@ -5826,6 +7718,7 @@
               "draft",
               "generating",
               "candidate_ready",
+              "failed",
               "approved",
               "rejected",
               "outdated",
@@ -5913,6 +7806,7 @@
           "generationRange",
           "candidateCoreRange",
           "providerDurationSeconds",
+          "instruction",
           "prompt",
           "negativePrompt",
           "inputHash",

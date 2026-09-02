@@ -111,10 +111,12 @@ export interface ProjectDto extends ProjectCreate {
   updatedAt: string;
 }
 
+export type GenerationInputSnapshotDto = components["schemas"]["GenerationInputSnapshotDto"];
+
 export interface JobDto {
   id: string;
   projectId: string;
-  kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
+  kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
   status:
     | "queued"
     | "submitting"
@@ -142,9 +144,56 @@ export interface JobDto {
     deleteAfter: string;
   } | null;
   actualUsage?: Record<string, unknown> | null;
+  actualCostMicros?: number | null;
+  currency?: "CNY";
+  billingStatus?: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+  rateCardRevision?: string | null;
+  providerRequestId?: string | null;
+  inputSnapshot?: GenerationInputSnapshotDto | null;
   frozenInput: Record<string, unknown>;
   resultAssetIds: string[];
   error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; timedOut?: boolean };
+}
+
+export interface JobUsageDto {
+  jobId: string;
+  provider: string;
+  model: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  generatedImages?: number | null;
+  generatedVideoSeconds?: number | null;
+  providerUsage: Record<string, number>;
+  billingStatus: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+  calculatedCostMicros?: number | null;
+  currency: "CNY";
+  rateCardRevision?: string | null;
+  priceSource?: string | null;
+}
+
+export interface ProjectUsageSummaryDto {
+  projectId: string;
+  jobs: JobUsageDto[];
+  totals: Record<string, number>;
+  calculatedCostMicros: number;
+  unpricedJobCount: number;
+  currency: "CNY";
+}
+
+export type RateCardMetric = "inputTokens" | "outputTokens" | "completionTokens" | "totalTokens" | "generatedImages" | "generatedVideoSeconds";
+export type RateCardUnit = "million_tokens" | "image" | "video_second";
+export interface RateCardItemDto { metric: RateCardMetric; unit: RateCardUnit; unitPriceMicros: number }
+export interface RateCardRevisionDto {
+  provider: string;
+  model: string;
+  revision: string;
+  sourceUrl?: string | null;
+  effectiveFrom: string;
+  rates: RateCardItemDto[];
+  active: boolean;
+  createdAt: string;
 }
 
 
@@ -162,6 +211,11 @@ export interface PlannerJobDto {
   provider?: string;
   model?: string;
   providerTaskId?: string;
+  actualUsage?: Record<string, unknown> | null;
+  actualCostMicros?: number | null;
+  currency?: "CNY";
+  billingStatus?: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+  rateCardRevision?: string | null;
   error?: { code?: string; message?: string; retryable?: boolean; requestId?: string };
   createdAt: string;
   updatedAt: string;
@@ -266,6 +320,24 @@ export interface ShotSpecDto {
   catAction: string;
   environmentChange: string;
   transition: "continuous" | "soft_cut" | "hard_cut";
+  durationFrames?: number | null;
+  lens?: { focalLengthEquivalent: string; cameraHeight: string; cameraAngle: string; perspectiveIntent: string } | null;
+  composition?: { subjectPlacement: string; foreground: string; middleGround: string; background: string; screenDirection: string; eyeLine: string } | null;
+  childBlocking?: BlockingDesignDto | null;
+  catBlocking?: BlockingDesignDto | null;
+  physicalChange?: { subject: string; before: string; after: string } | null;
+  continuity?: { incoming: string; outgoing: string; sharedVisualElement: string; finalFrame: string } | null;
+  lighting?: { direction: string; softness: string; colorIntent: string } | null;
+  sound?: { ambience: string[]; objectEffects: string[]; movementEffects: string[]; musicIntent: string; dialogue?: string | null } | null;
+  directorIntent?: string | null;
+  generationRisks?: Array<{ code: string; message: string }>;
+}
+
+export interface BlockingDesignDto {
+  initialState: string;
+  movementPath: string;
+  endState: string;
+  microMotions: string[];
 }
 
 export interface ShotPlanVersionDto {
@@ -277,6 +349,10 @@ export interface ShotPlanVersionDto {
   clip: Record<string, unknown>;
   shots: ShotSpecDto[];
   totalDurationSeconds: number;
+  directorTreatment?: Record<string, unknown> | null;
+  directorPromptRevision?: string | null;
+  directorModel?: string | null;
+  directorInputHash?: string | null;
   active: boolean;
   outdated: boolean;
   createdAt: string;
@@ -294,6 +370,8 @@ export interface GenerationPreviewDto {
   storyVersionId: string;
   shotPlanVersionId: string;
   selectionHash: string;
+  durationSeconds: number;
+  inputSnapshot?: GenerationInputSnapshotDto | null;
   references: Array<{
     assetId: string;
     role: string;
@@ -367,5 +445,6 @@ export interface WorkspaceDto {
   selections: Partial<Record<AssetSlot, AssetDto>>;
   selectionHash: string;
   latestVideoJob?: JobDto | null;
+  latestDirectorJob?: JobDto | null;
   latestRepairJob?: JobDto | null;
 }

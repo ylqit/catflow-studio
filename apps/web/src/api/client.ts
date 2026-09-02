@@ -9,10 +9,13 @@ import type {
   EnvironmentPresetDto,
   GenerationPreviewDto,
   JobDto,
+  JobUsageDto,
   PlannerSnapshotDto,
   ObjectPublisherRuntimeDto,
   ProjectCreate,
   ProjectDto,
+  ProjectUsageSummaryDto,
+  RateCardRevisionDto,
   RuntimeBootstrapDto,
   SegmentRepairApproveCommand,
   SegmentRepairCreateCommand,
@@ -46,6 +49,14 @@ export class CatFlowClient {
 
   runtime(): Promise<RuntimeBootstrapDto> {
     return this.bootstrap();
+  }
+
+  rateCards(): Promise<RateCardRevisionDto[]> {
+    return this.request("/api/v1/runtime/rate-cards");
+  }
+
+  publishRateCard(command: Omit<RateCardRevisionDto, "active" | "createdAt">): Promise<RateCardRevisionDto> {
+    return this.json("/api/v1/runtime/rate-cards", "POST", command);
   }
 
   checkObjectPublisher(): Promise<ObjectPublisherRuntimeDto> {
@@ -107,7 +118,7 @@ export class CatFlowClient {
 
   plannerMessage(
     projectId: string,
-    command: { text: string; expectedContextRevision: number; idempotencyKey: string; validationRunId?: string; paidCallAcknowledged?: boolean },
+    command: { text: string; expectedContextRevision: number; idempotencyKey: string },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/planner/messages`, "POST", command);
   }
@@ -136,6 +147,12 @@ export class CatFlowClient {
     return this.json(`/api/v1/projects/${projectId}/shot-plans`, "POST", draft);
   }
 
+  generateShotPlan(projectId: string, idempotencyKey: string): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-plans/generations`, "POST", {
+      idempotencyKey,
+    });
+  }
+
   uploadAsset(projectId: string, role: AssetSlot, file: File): Promise<AssetDto> {
     const body = new FormData();
     body.append("file", file);
@@ -160,22 +177,16 @@ export class CatFlowClient {
     command: {
       kind: AssetGenerationKind;
       expectedInputHash: string;
-      expectedCostMicros: number | null;
       idempotencyKey: string;
-      validationRunId?: string;
-      paidCallAcknowledged?: boolean;
     },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/asset-generations`, "POST", command);
   }
 
-  diagnoseAsset(projectId: string, assetId: string, validationRunId?: string): Promise<JobDto> {
+  diagnoseAsset(projectId: string, assetId: string, idempotencyKey: string): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/assets/${assetId}/diagnose`, "POST", {
       assetId,
-      idempotencyKey: crypto.randomUUID(),
-      expectedCostMicros: validationRunId ? null : 0,
-      validationRunId,
-      paidCallAcknowledged: Boolean(validationRunId),
+      idempotencyKey,
     });
   }
 
@@ -185,23 +196,28 @@ export class CatFlowClient {
 
   createVideoJob(
     projectId: string,
-    command: { expectedInputHash: string; expectedCostMicros: number | null; idempotencyKey: string; validationRunId?: string; paidCallAcknowledged?: boolean },
+    command: { expectedInputHash: string; idempotencyKey: string },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/video-generations`, "POST", command);
   }
 
-  diagnoseVideo(projectId: string, assetId: string, validationRunId?: string): Promise<JobDto> {
+  diagnoseVideo(projectId: string, assetId: string, idempotencyKey: string): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/video-diagnoses`, "POST", {
       assetId,
-      idempotencyKey: crypto.randomUUID(),
-      expectedCostMicros: validationRunId ? null : 0,
-      validationRunId,
-      paidCallAcknowledged: Boolean(validationRunId),
+      idempotencyKey,
     });
   }
 
   job(jobId: string): Promise<JobDto> {
     return this.request(`/api/v1/jobs/${jobId}`);
+  }
+
+  jobUsage(jobId: string): Promise<JobUsageDto> {
+    return this.request(`/api/v1/jobs/${jobId}/usage`);
+  }
+
+  projectUsageSummary(projectId: string): Promise<ProjectUsageSummaryDto> {
+    return this.request(`/api/v1/projects/${projectId}/usage-summary`);
   }
 
   resumeJobStorage(jobId: string): Promise<JobDto> {
@@ -227,22 +243,22 @@ export class CatFlowClient {
     projectId: string,
     command: SegmentRepairPreviewCommand,
   ): Promise<SegmentRepairPreviewDto> {
-    return this.json(`/api/v1/projects/${projectId}/video-repairs/preview`, "POST", command);
+    return this.json(`/api/v1/projects/${projectId}/video-edits/preview`, "POST", command);
   }
 
   createVideoRepair(
     projectId: string,
     command: SegmentRepairCreateCommand,
   ): Promise<JobDto> {
-    return this.json(`/api/v1/projects/${projectId}/video-repairs`, "POST", command);
+    return this.json(`/api/v1/projects/${projectId}/video-edits`, "POST", command);
   }
 
   videoRepairs(projectId: string): Promise<VideoRepairDto[]> {
-    return this.request(`/api/v1/projects/${projectId}/video-repairs`);
+    return this.request(`/api/v1/projects/${projectId}/video-edits`);
   }
 
   videoRepair(projectId: string, repairId: string): Promise<VideoRepairDto> {
-    return this.request(`/api/v1/projects/${projectId}/video-repairs/${repairId}`);
+    return this.request(`/api/v1/projects/${projectId}/video-edits/${repairId}`);
   }
 
   approveVideoRepair(
@@ -251,7 +267,7 @@ export class CatFlowClient {
     command: SegmentRepairApproveCommand,
   ): Promise<EditVersionDto> {
     return this.json(
-      `/api/v1/projects/${projectId}/video-repairs/${repairId}/approve`,
+      `/api/v1/projects/${projectId}/video-edits/${repairId}/approve`,
       "POST",
       command,
     );
@@ -259,7 +275,7 @@ export class CatFlowClient {
 
   rejectVideoRepair(projectId: string, repairId: string): Promise<VideoRepairDto> {
     return this.json(
-      `/api/v1/projects/${projectId}/video-repairs/${repairId}/reject`,
+      `/api/v1/projects/${projectId}/video-edits/${repairId}/reject`,
       "POST",
       {},
     );

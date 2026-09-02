@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "environment_presets",
     "video_repairs",
     "media_publications",
+    "provider_rate_cards",
 }
 
 
@@ -57,12 +58,37 @@ def test_metadata_contains_goal_tables_and_paid_validation_authority() -> None:
 def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
     tables = {table.name: table for table in Base.metadata.tables.values()}
 
-    assert {"input_hash", "idempotency_key", "provider_task_id", "frozen_input_json"} <= set(
+    assert {
+        "input_hash",
+        "idempotency_key",
+        "provider_task_id",
+        "frozen_input_json",
+        "actual_cost_micros",
+        "billing_status",
+        "rate_card_revision",
+        "pricing_snapshot_json",
+        "provider_request_id",
+    } <= set(
         tables["jobs"].columns.keys()
     )
     assert tables["jobs"].columns.idempotency_key.unique is True
     assert {"storage_key", "sha256", "producing_job_id"} <= set(tables["assets"].columns.keys())
-    assert {"source_story_version_id", "source_selection_hash", "shots_json"} <= set(
+    assert "uq_assets_job_role_candidate" in {
+        constraint.name for constraint in tables["assets"].constraints
+    }
+    assert {
+        "uq_assets_project_sha_role_unproduced",
+        "uq_assets_global_sha_role_unproduced",
+    } <= {index.name for index in tables["assets"].indexes}
+    assert {
+        "source_story_version_id",
+        "source_selection_hash",
+        "shots_json",
+        "director_treatment_json",
+        "director_prompt_revision",
+        "director_model",
+        "director_input_hash",
+    } <= set(
         tables["shot_plan_versions"].columns.keys()
     )
     assert {
@@ -82,6 +108,9 @@ def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
         "generation_end_frame",
         "provider_duration_seconds",
         "approved_edit_version_id",
+        "selection_policy_version",
+        "edit_intent",
+        "instruction",
     } <= set(tables["video_repairs"].columns.keys())
     assert {"canon_snapshot_json", "repair_snapshot_json"} <= set(
         tables["validation_runs"].columns.keys()
@@ -99,6 +128,16 @@ def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
         "delete_after",
     } <= set(tables["media_publications"].columns.keys())
     assert tables["media_publications"].columns.job_id.unique is True
+    assert {
+        "provider",
+        "model",
+        "metric",
+        "unit",
+        "unit_price_micros",
+        "currency",
+        "revision",
+        "active",
+    } <= set(tables["provider_rate_cards"].columns.keys())
 
 
 def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
@@ -120,6 +159,7 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
         "environment_presets",
         "video_repairs",
         "media_publications",
+        "provider_rate_cards",
     }:
         assert f"CREATE TABLE {SCHEMA_NAME}.{table_name}" in sql
     assert "production_runs" not in sql

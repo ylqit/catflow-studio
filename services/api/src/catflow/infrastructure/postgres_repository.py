@@ -5,6 +5,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -18,6 +19,7 @@ from catflow.application.service import (
     EditVersionDto,
     EnvironmentPresetDto,
     FixedCanonRole,
+    GenerationInputSnapshotDto,
     JobDto,
     JobEventDto,
     JobPublicationDto,
@@ -30,6 +32,8 @@ from catflow.application.service import (
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
+    RateCardRevisionCreateCommand,
+    RateCardRevisionDto,
     ShotPlanVersionDto,
     StoredAssetDto,
     StoryCreateCommand,
@@ -41,6 +45,7 @@ from catflow.application.service import (
     VideoRepairDto,
     VideoRepairStatus,
 )
+from catflow.domain.billing import RateCardItem, rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
 from catflow.domain.validation import (
     ValidationCallKind,
@@ -63,6 +68,7 @@ from .models import (
     MediaPublicationRecord,
     ProjectRecord,
     ProjectSelectionRecord,
+    ProviderRateCardRecord,
     ShotPlanVersionRecord,
     StoryVersionRecord,
     ValidationRunRecord,
@@ -75,6 +81,87 @@ class PostgresStudioRepository:
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
+
+    def publish_rate_card(
+        self, command: RateCardRevisionCreateCommand
+    ) -> RateCardRevisionDto:
+        with self._sessions.begin() as session:
+            existing_rows = session.scalars(
+                select(ProviderRateCardRecord).where(
+                    ProviderRateCardRecord.provider == command.provider,
+                    ProviderRateCardRecord.model == command.model,
+                    ProviderRateCardRecord.revision == command.revision,
+                )
+            ).all()
+            if existing_rows:
+                existing = _rate_card_revision_dto(existing_rows)
+                expected = rate_card_revision_signature(
+                    provider=command.provider,
+                    model=command.model,
+                    revision=command.revision,
+                    source_url=command.source_url,
+                    effective_from=command.effective_from,
+                    rates=command.rates,
+                )
+                actual = rate_card_revision_signature(
+                    provider=existing.provider,
+                    model=existing.model,
+                    revision=existing.revision,
+                    source_url=existing.source_url,
+                    effective_from=existing.effective_from,
+                    rates=existing.rates,
+                )
+                if actual != expected:
+                    raise StudioConflictError(
+                        "rate-card revision already exists with different rates"
+                    )
+                return existing
+
+            session.execute(
+                update(ProviderRateCardRecord)
+                .where(
+                    ProviderRateCardRecord.provider == command.provider,
+                    ProviderRateCardRecord.model == command.model,
+                    ProviderRateCardRecord.active.is_(True),
+                )
+                .values(active=False)
+            )
+            now = datetime.now(UTC)
+            rows = [
+                ProviderRateCardRecord(
+                    id=uuid.uuid4(),
+                    provider=command.provider,
+                    model=command.model,
+                    metric=rate.metric,
+                    unit=rate.unit,
+                    unit_price_micros=rate.unit_price_micros,
+                    currency="CNY",
+                    source_url=command.source_url,
+                    effective_from=command.effective_from,
+                    revision=command.revision,
+                    active=True,
+                    created_at=now,
+                )
+                for rate in command.rates
+            ]
+            session.add_all(rows)
+            session.flush()
+            return _rate_card_revision_dto(rows)
+
+    def list_rate_cards(self) -> list[RateCardRevisionDto]:
+        with self._sessions() as session:
+            rows = session.scalars(
+                select(ProviderRateCardRecord).order_by(
+                    ProviderRateCardRecord.created_at.desc(),
+                    ProviderRateCardRecord.provider,
+                    ProviderRateCardRecord.model,
+                    ProviderRateCardRecord.metric,
+                )
+            ).all()
+            groups: dict[tuple[str, str, str], list[ProviderRateCardRecord]] = {}
+            for row in rows:
+                groups.setdefault((row.provider, row.model, row.revision), []).append(row)
+            return [_rate_card_revision_dto(group) for group in groups.values()]
 
     def active_canon_profile_id(self) -> uuid.UUID:
         with self._sessions.begin() as session:
@@ -322,6 +409,11 @@ class PostgresStudioRepository:
                         provider=latest_job.provider,
                         model=latest_job.model,
                         providerTaskId=latest_job.provider_task_id,
+                        actualUsage=latest_job.actual_usage_json,
+                        actualCostMicros=latest_job.actual_cost_micros,
+                        currency=latest_job.currency,
+                        billingStatus=latest_job.billing_status,
+                        rateCardRevision=latest_job.rate_card_revision,
                         error=latest_job.error_json,
                         createdAt=latest_job.created_at,
                         updatedAt=latest_job.updated_at,
@@ -601,6 +693,14 @@ class PostgresStudioRepository:
                 source_selection_hash=draft.source_selection_hash,
                 clip_json=draft.clip.model_dump(mode="json", by_alias=True),
                 shots_json=[shot.model_dump(mode="json", by_alias=True) for shot in draft.shots],
+                director_treatment_json=(
+                    draft.director_treatment.model_dump(mode="json", by_alias=True)
+                    if draft.director_treatment is not None
+                    else None
+                ),
+                director_prompt_revision=draft.director_prompt_revision,
+                director_model=draft.director_model,
+                director_input_hash=draft.director_input_hash,
                 total_duration_seconds=draft.total_duration_seconds,
                 active=True,
             )
@@ -826,29 +926,7 @@ class PostgresStudioRepository:
                     job.validation_run_id,
                     ValidationCallKind(job.kind),
                 )
-            record = JobRecord(
-                id=job.id,
-                project_id=job.project_id,
-                kind=job.kind,
-                status=job.status,
-                input_hash=job.input_hash,
-                idempotency_key=job.idempotency_key,
-                provider=job.provider,
-                model=job.model,
-                provider_task_id=job.provider_task_id,
-                validation_run_id=job.validation_run_id,
-                parent_job_id=job.parent_job_id,
-                video_repair_id=job.video_repair_id,
-                provider_submission_started_at=job.provider_submission_started_at,
-                provider_result_json=job.provider_result,
-                actual_usage_json=job.actual_usage,
-                expected_cost_micros=job.expected_cost_micros,
-                frozen_input_json=job.frozen_input,
-                supersedes_job_id=job.supersedes_job_id,
-                error_json=job.error,
-                created_at=job.created_at,
-                updated_at=job.updated_at,
-            )
+            record = _new_job_record(job)
             session.add(record)
             session.flush()
             _add_job_event(session, record, "job.queued")
@@ -858,6 +936,15 @@ class PostgresStudioRepository:
         with self._sessions() as session:
             record = session.get(JobRecord, job_id)
             return _job_dto(session, record) if record is not None else None
+
+    def list_project_jobs(self, project_id: uuid.UUID) -> list[JobDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(JobRecord)
+                .where(JobRecord.project_id == project_id)
+                .order_by(JobRecord.created_at.desc(), JobRecord.id.desc())
+            ).all()
+            return [_job_dto(session, record) for record in records]
 
     def latest_job(self, project_id: uuid.UUID, *, kind: str) -> JobDto | None:
         with self._sessions() as session:
@@ -999,31 +1086,25 @@ class PostgresStudioRepository:
 
     def create_video_repair(self, repair: VideoRepairDto) -> VideoRepairDto:
         with self._sessions.begin() as session:
-            record = VideoRepairRecord(
-                id=repair.id,
-                project_id=repair.project_id,
-                base_video_asset_id=repair.base_video_asset_id,
-                base_edit_version_id=repair.base_edit_version_id,
-                base_timeline_hash=repair.base_timeline_hash,
-                frame_rate_numerator=repair.frame_rate.numerator,
-                frame_rate_denominator=repair.frame_rate.denominator,
-                issue_start_frame=repair.issue_range.start_frame,
-                issue_end_frame=repair.issue_range.end_frame,
-                generation_start_frame=repair.generation_range.start_frame,
-                generation_end_frame=repair.generation_range.end_frame,
-                candidate_core_start_frame=repair.candidate_core_range.start_frame,
-                candidate_core_end_frame=repair.candidate_core_range.end_frame,
-                provider_duration_seconds=repair.provider_duration_seconds,
-                prompt=repair.prompt,
-                negative_prompt=repair.negative_prompt,
-                input_hash=repair.input_hash,
-                status=repair.status,
-                preview_json=repair.preview.model_dump(mode="json", by_alias=True),
-                created_at=repair.created_at,
-            )
+            record = _new_video_repair_record(repair)
             session.add(record)
             session.flush()
             return _video_repair_dto(record)
+
+    def create_video_repair_job(self, repair: VideoRepairDto, job: JobDto) -> JobDto:
+        with self._sessions.begin() as session:
+            existing = _job_by_idempotency(session, job.idempotency_key)
+            if existing is not None:
+                _require_same_input(existing, job.input_hash)
+                return _job_dto(session, existing)
+            repair_record = _new_video_repair_record(repair)
+            job_record = _new_job_record(job)
+            session.add(repair_record)
+            session.flush()
+            session.add(job_record)
+            session.flush()
+            _add_job_event(session, job_record, "job.queued")
+            return _job_dto(session, job_record)
 
     def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None:
         with self._sessions() as session:
@@ -1269,6 +1350,10 @@ def _shot_plan_dto(record: ShotPlanVersionRecord) -> ShotPlanVersionDto:
         clip=record.clip_json,
         shots=[ShotSpec.model_validate(payload) for payload in record.shots_json],
         totalDurationSeconds=record.total_duration_seconds,
+        directorTreatment=record.director_treatment_json,
+        directorPromptRevision=record.director_prompt_revision,
+        directorModel=record.director_model,
+        directorInputHash=record.director_input_hash,
         active=record.active,
         outdated=False,
         createdAt=record.created_at,
@@ -1341,6 +1426,66 @@ def _selection_dto(record: ProjectSelectionRecord) -> ProjectSelectionDto:
         decision=record.decision,
         sourceHash=record.source_hash,
         createdAt=record.created_at,
+    )
+
+
+def _new_job_record(job: JobDto) -> JobRecord:
+    return JobRecord(
+        id=job.id,
+        project_id=job.project_id,
+        kind=job.kind,
+        status=job.status,
+        input_hash=job.input_hash,
+        idempotency_key=job.idempotency_key,
+        provider=job.provider,
+        model=job.model,
+        provider_task_id=job.provider_task_id,
+        validation_run_id=job.validation_run_id,
+        parent_job_id=job.parent_job_id,
+        video_repair_id=job.video_repair_id,
+        provider_submission_started_at=job.provider_submission_started_at,
+        provider_result_json=job.provider_result,
+        actual_usage_json=job.actual_usage,
+        expected_cost_micros=job.expected_cost_micros,
+        actual_cost_micros=job.actual_cost_micros,
+        currency=job.currency,
+        billing_status=job.billing_status,
+        rate_card_revision=job.rate_card_revision,
+        pricing_snapshot_json=job.pricing_snapshot,
+        provider_request_id=job.provider_request_id,
+        frozen_input_json=job.frozen_input,
+        supersedes_job_id=job.supersedes_job_id,
+        error_json=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def _new_video_repair_record(repair: VideoRepairDto) -> VideoRepairRecord:
+    return VideoRepairRecord(
+        id=repair.id,
+        project_id=repair.project_id,
+        base_video_asset_id=repair.base_video_asset_id,
+        base_edit_version_id=repair.base_edit_version_id,
+        base_timeline_hash=repair.base_timeline_hash,
+        frame_rate_numerator=repair.frame_rate.numerator,
+        frame_rate_denominator=repair.frame_rate.denominator,
+        issue_start_frame=repair.issue_range.start_frame,
+        issue_end_frame=repair.issue_range.end_frame,
+        generation_start_frame=repair.generation_range.start_frame,
+        generation_end_frame=repair.generation_range.end_frame,
+        candidate_core_start_frame=repair.candidate_core_range.start_frame,
+        candidate_core_end_frame=repair.candidate_core_range.end_frame,
+        provider_duration_seconds=repair.provider_duration_seconds,
+        selection_policy_version=repair.selection_policy_version,
+        edit_intent=repair.legacy_edit_intent,
+        instruction=repair.instruction,
+        prompt=repair.prompt,
+        negative_prompt=repair.negative_prompt,
+        input_hash=repair.input_hash,
+        status=repair.status,
+        preview_json=repair.preview.model_dump(mode="json", by_alias=True),
+        created_at=repair.created_at,
     )
 
 
@@ -1417,6 +1562,14 @@ def _edit_dto(record: EditVersionRecord) -> EditVersionDto:
 
 
 def _video_repair_dto(record: VideoRepairRecord) -> VideoRepairDto:
+    preview_document = {
+        key: value
+        for key, value in record.preview_json.items()
+        if key not in {"repairId", "editIntent", "legacyEditIntent"}
+    }
+    preview_document.update({
+        "instruction": record.instruction,
+    })
     return VideoRepairDto(
         id=record.id,
         projectId=record.project_id,
@@ -1437,6 +1590,9 @@ def _video_repair_dto(record: VideoRepairRecord) -> VideoRepairDto:
             endFrame=record.candidate_core_end_frame,
         ),
         providerDurationSeconds=record.provider_duration_seconds,
+        selectionPolicyVersion=record.selection_policy_version,
+        legacyEditIntent=record.edit_intent,
+        instruction=record.instruction,
         prompt=record.prompt,
         negativePrompt=record.negative_prompt,
         inputHash=record.input_hash,
@@ -1445,9 +1601,34 @@ def _video_repair_dto(record: VideoRepairRecord) -> VideoRepairDto:
         approvedCandidateAssetId=record.approved_candidate_asset_id,
         approvedEditVersionId=record.approved_edit_version_id,
         approvalIdempotencyKey=record.approval_idempotency_key,
-        preview=record.preview_json,
+        preview=preview_document,
         createdAt=record.created_at,
         approvedAt=record.approved_at,
+    )
+
+
+def _rate_card_revision_dto(
+    rows: list[ProviderRateCardRecord],
+) -> RateCardRevisionDto:
+    if not rows:
+        raise ValueError("rate-card revision requires at least one metric")
+    first = rows[0]
+    return RateCardRevisionDto(
+        provider=first.provider,
+        model=first.model,
+        revision=first.revision,
+        sourceUrl=first.source_url,
+        effectiveFrom=first.effective_from,
+        rates=tuple(
+            RateCardItem(
+                metric=row.metric,
+                unit=row.unit,
+                unitPriceMicros=row.unit_price_micros,
+            )
+            for row in sorted(rows, key=lambda item: item.metric)
+        ),
+        active=all(row.active for row in rows),
+        createdAt=first.created_at,
     )
 
 
@@ -1478,6 +1659,12 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         if publication_record is not None
         else None
     )
+    snapshot_document = record.frozen_input_json.get("inputSnapshot")
+    input_snapshot = (
+        GenerationInputSnapshotDto.model_validate(snapshot_document)
+        if isinstance(snapshot_document, dict)
+        else _legacy_generation_input_snapshot(record)
+    )
     return JobDto(
         id=record.id,
         projectId=record.project_id,
@@ -1496,6 +1683,13 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         publication=publication,
         actualUsage=record.actual_usage_json,
         expectedCostMicros=record.expected_cost_micros,
+        actualCostMicros=record.actual_cost_micros,
+        currency=record.currency,
+        billingStatus=record.billing_status,
+        rateCardRevision=record.rate_card_revision,
+        pricingSnapshot=record.pricing_snapshot_json,
+        providerRequestId=record.provider_request_id,
+        inputSnapshot=input_snapshot,
         frozenInput=record.frozen_input_json,
         resultAssetIds=asset_ids,
         supersedesJobId=record.supersedes_job_id,
@@ -1503,6 +1697,110 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         createdAt=record.created_at,
         updatedAt=record.updated_at,
     )
+
+
+def _legacy_generation_input_snapshot(
+    record: JobRecord,
+) -> GenerationInputSnapshotDto | None:
+    frozen = record.frozen_input_json
+    common_keys = {
+        "prompt",
+        "negativePrompt",
+        "capabilityRevision",
+        "durationSeconds",
+        "resolution",
+        "aspectRatio",
+    }
+    if record.provider is None or record.model is None or not common_keys <= frozen.keys():
+        return None
+    if record.kind == "generate_video":
+        required = {"storyVersionId", "shotPlanVersionId", "selectionHash", "references"}
+        if not required <= frozen.keys() or not isinstance(frozen["references"], list):
+            return None
+        document = {
+            "schemaVersion": 1,
+            "kind": "whole_video",
+            "state": "submitted",
+            "provider": record.provider,
+            "model": record.model,
+            "capabilityRevision": frozen["capabilityRevision"],
+            "inputHash": record.input_hash,
+            "prompt": frozen["prompt"],
+            "negativePrompt": frozen["negativePrompt"],
+            "references": frozen["references"],
+            "video": {
+                "durationSeconds": frozen["durationSeconds"],
+                "resolution": frozen["resolution"],
+                "aspectRatio": frozen["aspectRatio"],
+                "frameRate": 24,
+            },
+            "source": {
+                "storyVersionId": frozen["storyVersionId"],
+                "shotPlanVersionId": frozen["shotPlanVersionId"],
+                "selectionHash": frozen["selectionHash"],
+            },
+            "promptCompilerRevision": frozen.get("promptCompilerRevision"),
+            "createdAt": record.created_at,
+        }
+    elif record.kind == "regenerate_video_segment":
+        required = {
+            "baseVideoAssetId",
+            "baseTimelineHash",
+            "instruction",
+            "issueRange",
+            "generationRange",
+            "candidateCoreRange",
+            "imageReferences",
+        }
+        if not required <= frozen.keys() or not isinstance(frozen["imageReferences"], list):
+            return None
+        document = {
+            "schemaVersion": 1,
+            "kind": "segment_edit",
+            "state": "submitted",
+            "provider": record.provider,
+            "model": record.model,
+            "capabilityRevision": frozen["capabilityRevision"],
+            "inputHash": record.input_hash,
+            "prompt": frozen["prompt"],
+            "negativePrompt": frozen["negativePrompt"],
+            "references": [
+                {
+                    "assetId": reference.get("assetId"),
+                    "role": reference.get("role"),
+                    "priority": index,
+                    "included": True,
+                    "sha256": reference.get("sha256"),
+                    "derived": reference.get("derived", False),
+                }
+                for index, reference in enumerate(frozen["imageReferences"], start=1)
+                if isinstance(reference, dict)
+            ],
+            "video": {
+                "durationSeconds": frozen["durationSeconds"],
+                "resolution": frozen["resolution"],
+                "aspectRatio": frozen["aspectRatio"],
+                "frameRate": 24,
+            },
+            "source": {
+                "baseVideoAssetId": frozen["baseVideoAssetId"],
+                "baseTimelineHash": frozen["baseTimelineHash"],
+            },
+            "segmentEdit": {
+                "instruction": frozen["instruction"],
+                "issueRange": frozen["issueRange"],
+                "generationRange": frozen["generationRange"],
+                "candidateCoreRange": frozen["candidateCoreRange"],
+            },
+            "promptCompilerRevision": frozen.get("promptCompilerRevision"),
+            "createdAt": record.created_at,
+        }
+    else:
+        return None
+    try:
+        return GenerationInputSnapshotDto.model_validate(document)
+    except ValidationError:
+        return None
 
 
 def _add_job_event(

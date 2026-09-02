@@ -85,6 +85,16 @@ class ArkTypedGateway:
             output_schema=output_schema,
         )
 
+    def plan_shots(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return self._structured_response(
+            model=self._settings.planning_model,
+            prompt=prompt,
+            image_paths=(),
+            output_schema=output_schema,
+        )
+
     def diagnose(
         self,
         *,
@@ -131,6 +141,7 @@ class ArkTypedGateway:
             url=str(data[0].url),
             response_id=_optional_string(getattr(response, "id", None)),
             model=str(getattr(response, "model", self._settings.image_model)),
+            usage=_usage_document(getattr(response, "usage", None)),
         )
 
     def submit_video(
@@ -226,6 +237,7 @@ class ArkTypedGateway:
                 duration_seconds=_optional_int(getattr(task, "duration", None)),
                 ratio=_optional_string(getattr(task, "ratio", None)),
                 resolution=_optional_string(getattr(task, "resolution", None)),
+                usage=_usage_document(getattr(task, "usage", None)),
             )
         error = getattr(task, "error", None)
         return VideoPollResult(
@@ -255,7 +267,10 @@ class ArkTypedGateway:
             {
                 "type": "text",
                 "text": (
-                    f"{request.prompt}\n负面约束：{request.negative_prompt}\n"
+                    f"本区间修改目标：{request.instruction}\n"
+                    f"精确问题时间：{request.issue_start_seconds:.3f}–"
+                    f"{request.issue_end_seconds:.3f}秒。\n{request.prompt}\n"
+                    f"负面约束：{request.negative_prompt}\n"
                     "视频1只负责原动作、机位、节奏和前后连续性；"
                     f"图片职责按顺序为：{role_sequence}。"
                 ),
@@ -461,11 +476,20 @@ def _response_text(response: object) -> str:
 def _usage_document(usage: object | None) -> dict[str, int]:
     if usage is None:
         return {}
-    return {
-        "inputTokens": int(getattr(usage, "input_tokens", 0) or 0),
-        "outputTokens": int(getattr(usage, "output_tokens", 0) or 0),
-        "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
-    }
+    fields = (
+        ("inputTokens", "input_tokens"),
+        ("outputTokens", "output_tokens"),
+        ("completionTokens", "completion_tokens"),
+        ("totalTokens", "total_tokens"),
+        ("generatedImages", "generated_images"),
+        ("generatedVideoSeconds", "generated_video_seconds"),
+    )
+    document: dict[str, int] = {}
+    for public_name, provider_name in fields:
+        value = getattr(usage, provider_name, None)
+        if value is not None:
+            document[public_name] = int(value)
+    return document
 
 
 def _sha256(path: Path) -> str:

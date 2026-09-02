@@ -10,8 +10,24 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from catflow.application.gateways import ProviderGatewayError
 from catflow.application.service import StudioService
-from catflow.domain.models import LifeStoryProposalDraft
-from catflow.infrastructure.models import JobEventRecord, JobRecord
+from catflow.domain.billing import RateCardItem, calculate_usage_cost
+from catflow.domain.models import (
+    BlockingDesign,
+    CompositionDesign,
+    ContinuityDesign,
+    DirectorMicroEvent,
+    DirectorPlanPayload,
+    DirectorStoryTreatment,
+    EmotionalArc,
+    LensDesign,
+    LifeStoryProposalDraft,
+    LightingDesign,
+    PhysicalChangeDesign,
+    PropStateChange,
+    ShotSoundDesign,
+    ShotSpec,
+)
+from catflow.infrastructure.models import JobEventRecord, JobRecord, VideoRepairRecord
 
 
 class ProviderPoll(BaseModel):
@@ -94,6 +110,8 @@ class DurableJobWorker:
             self._finish_data_url_probe(job_id, provider_task_id)
         elif kind == "plan_story" and provider == "fake" and status == "submitting":
             self._complete_fake_planner_job(job_id, frozen_input)
+        elif kind == "plan_shots" and provider == "fake" and status == "submitting":
+            self._complete_fake_director_job(job_id, frozen_input)
         elif kind == "render_export" and status == "submitting":
             self._store_local_result(job_id)
         elif status == "submitting" and provider_task_id is not None:
@@ -206,6 +224,152 @@ class DurableJobWorker:
             ),
         )
 
+    def _complete_fake_director_job(
+        self, job_id: uuid.UUID, frozen_input: dict[str, object]
+    ) -> None:
+        if self._studio_service is None:
+            self._fail(job_id, "director_service_unavailable", retryable=False)
+            return
+        clip = frozen_input.get("clip")
+        if not isinstance(clip, dict):
+            self._fail(job_id, "director_clip_missing", retryable=False)
+            return
+        target_duration = int(clip.get("durationSeconds") or 12)
+        theme = str(clip.get("microEvent") or "一人一猫生活微事件")
+        base_duration = target_duration // 3
+        durations = (base_duration, base_duration, target_duration - 2 * base_duration)
+        shot_intents = (
+            ("触发被看见", "注意到眼前变化", "停下观察", "事件状态清楚出现"),
+            ("动作产生因果", "沿清楚路径完成帮助动作", "自然配合并转移重心", "目标状态逐步改变"),
+            (
+                "主动温暖收束",
+                "收好道具并继续自然小动作",
+                "向前迈步且尾巴轻摆",
+                "变化完成且动作继续",
+            ),
+        )
+        shots: list[ShotSpec] = []
+        for index, (duration, intent) in enumerate(zip(durations, shot_intents, strict=True), 1):
+            intent_name, child_action, cat_action, visible_change = intent
+            shots.append(
+                ShotSpec(
+                    id=f"shot-{index}",
+                    order=index,
+                    durationSeconds=duration,
+                    durationFrames=duration * 24,
+                    framing=("中景" if index != 2 else "近景"),
+                    cameraMovement=("固定观察" if index == 1 else "缓慢跟随"),
+                    childAction=child_action,
+                    catAction=cat_action,
+                    environmentChange=visible_change,
+                    transition=("continuous" if index != 2 else "soft_cut"),
+                    lens=LensDesign(
+                        focalLengthEquivalent="35mm",
+                        cameraHeight="儿童腰部高度",
+                        cameraAngle="轻微俯拍",
+                        perspectiveIntent="同时保持儿童、猫咪和关键道具清楚可读",
+                    ),
+                    composition=CompositionDesign(
+                        subjectPlacement="儿童与猫咪分处画面中线两侧",
+                        foreground="当前生活道具",
+                        middleGround="同一位儿童和同一只猫咪",
+                        background="柔和数字插画生活环境",
+                        screenDirection="始终由画面外侧向事件中心，再向室内",
+                        eyeLine="儿童视线跟随猫咪和道具状态",
+                    ),
+                    childBlocking=BlockingDesign(
+                        initialState=f"儿童准备进入镜头{index}的{intent_name}状态",
+                        movementPath=child_action,
+                        endState=f"儿童完成镜头{index}动作并为下一镜头留出连续姿态",
+                        microMotions=["视线自然跟随", "衣角随动作轻摆"],
+                    ),
+                    catBlocking=BlockingDesign(
+                        initialState=f"猫咪四足稳定处于镜头{index}起始位置",
+                        movementPath=cat_action,
+                        endState=f"猫咪四足稳定处于镜头{index}结束位置",
+                        microMotions=["猫耳转向", "尾巴自然摆动"],
+                    ),
+                    physicalChange=PhysicalChangeDesign(
+                        subject="当前事件中的道具或环境状态",
+                        before=f"镜头{index}开始前尚未完成",
+                        after=visible_change,
+                    ),
+                    continuity=ContinuityDesign(
+                        incoming=("建立事件空间" if index == 1 else f"承接镜头{index - 1}结束姿态"),
+                        outgoing=("进入核心动作" if index == 1 else "保持动作方向连续"),
+                        sharedVisualElement="同一角色、道具、机位轴线与光线方向",
+                        finalFrame=(
+                            "儿童完成收纳动作，猫咪仍在主动向前迈步"
+                            if index == 3
+                            else f"镜头{index}动作状态清楚闭合"
+                        ),
+                    ),
+                    lighting=LightingDesign(
+                        direction="室内侧上方",
+                        softness="柔和漫射",
+                        colorIntent="自然暖灰色，不改变Canon画风",
+                    ),
+                    sound=ShotSoundDesign(
+                        ambience=["安静生活环境声"],
+                        objectEffects=["道具轻微接触声"],
+                        movementEffects=["衣料与猫爪轻响"],
+                        musicIntent="克制的温暖木琴点音",
+                    ),
+                    directorIntent=f"以{intent_name}推进唯一可见因果链",
+                    generationRisks=[
+                        {"code": "identity_drift", "message": "保持儿童和猫咪身份与比例"},
+                        {"code": "motion_overload", "message": "每个角色不超过三个微动作"},
+                    ],
+                )
+            )
+        self._studio_service.complete_shot_plan_job(
+            job_id,
+            DirectorPlanPayload(
+                targetDurationSeconds=target_duration,
+                directorTreatment=DirectorStoryTreatment(
+                    logline=f"围绕“{theme}”完成一个可见而温暖的生活动作",
+                    theme="一人一猫的日常照顾",
+                    emotionalTone=["安静", "温暖"],
+                    visualMotif="关键道具或环境状态发生清楚变化",
+                    spatialSetting=str(clip.get("environmentIntent") or "柔和室内生活空间"),
+                    emotionalArc=EmotionalArc(
+                        opening="发现一个日常小问题",
+                        development="儿童与猫咪通过动作共同处理",
+                        resolution="问题解决后仍保留一个主动温暖动作",
+                    ),
+                    microEvent=DirectorMicroEvent(
+                        trigger=theme,
+                        childIntent="照顾猫咪并解决眼前的小问题",
+                        childAction=str(clip.get("childAction") or "完成一个简单帮助动作"),
+                        catResponse=str(
+                            clip.get("catActionOrObservation") or "猫咪自然观察并配合"
+                        ),
+                        visibleCauseAndEffect=str(
+                            clip.get("visibleCauseAndEffect") or "生活状态明显改变"
+                        ),
+                        warmEnding=str(
+                            clip.get("warmEnding") or "一人一猫继续一个自然小动作"
+                        ),
+                    ),
+                    propStateChange=PropStateChange(
+                        initialState="事件道具处于问题发生时的状态",
+                        changedState="道具状态清楚变化并完成因果闭合",
+                    ),
+                    soundIntent="用环境声、物件声和动作声表达因果，不依赖对白",
+                    endingImage="儿童完成收纳，猫咪继续主动迈步，不静止凝视",
+                ),
+                shots=shots,
+            ),
+        )
+        with self._sessions.begin() as session:
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
+            if job is None:
+                return
+            job.status = "succeeded"
+            job.updated_at = datetime.now(UTC)
+            self._release(job)
+            self._add_event(session, job, "job.succeeded")
+
     def _submit(self, job_id: uuid.UUID, frozen_input: dict[str, object]) -> None:
         kind = self._job_kind(job_id)
         prepare = getattr(self._provider, "prepare_submission", None)
@@ -275,6 +439,7 @@ class DurableJobWorker:
                 return
             job.provider_task_id = provider_task_id
             job.provider_result_json = submission.metadata
+            job.provider_request_id = _provider_request_id(submission.metadata)
             job.status = "submitted"
             job.updated_at = datetime.now(UTC)
             self._release(job)
@@ -293,7 +458,11 @@ class DurableJobWorker:
             if job is None or job.status != "submitting":
                 return
             job.provider_result_json = submission.result
-            job.actual_usage_json = submission.usage
+            _record_provider_usage(
+                job,
+                usage=submission.usage,
+                provider_result=submission.result,
+            )
             job.status = "storing" if self._result_handler is not None else "succeeded"
             job.updated_at = datetime.now(UTC)
             self._release(job)
@@ -356,7 +525,11 @@ class DurableJobWorker:
                     **dict(job.provider_result_json or {}),
                     **dict(result.result or {}),
                 }
-                job.actual_usage_json = result.usage
+                _record_provider_usage(
+                    job,
+                    usage=result.usage,
+                    provider_result=job.provider_result_json,
+                )
                 job.status = "storing" if self._result_handler is not None else "succeeded"
                 event_type = f"job.{job.status}"
                 self._release(job)
@@ -434,6 +607,10 @@ class DurableJobWorker:
             if job is None:
                 return
             job.status = "cancelled" if cancelled else "cancel_requested"
+            if cancelled and job.video_repair_id is not None:
+                repair = session.get(VideoRepairRecord, job.video_repair_id)
+                if repair is not None and repair.status == "generating":
+                    repair.status = "cancelled"
             job.updated_at = datetime.now(UTC)
             self._release(job)
             self._add_event(session, job, f"job.{job.status}")
@@ -454,6 +631,10 @@ class DurableJobWorker:
                 "message": message,
                 "retryable": retryable,
             }
+            if job.video_repair_id is not None:
+                repair = session.get(VideoRepairRecord, job.video_repair_id)
+                if repair is not None and repair.status == "generating":
+                    repair.status = "failed"
             job.updated_at = datetime.now(UTC)
             self._release(job)
             self._add_event(session, job, "job.failed")
@@ -465,6 +646,10 @@ class DurableJobWorker:
                 return
             job.status = "failed"
             job.error_json = error
+            if job.video_repair_id is not None:
+                repair = session.get(VideoRepairRecord, job.video_repair_id)
+                if repair is not None and repair.status == "generating":
+                    repair.status = "failed"
             job.updated_at = datetime.now(UTC)
             self._release(job)
             self._add_event(session, job, "job.failed")
@@ -484,3 +669,56 @@ class DurableJobWorker:
                 payload_json={"jobId": str(job.id), "status": job.status},
             )
         )
+
+
+def _record_provider_usage(
+    job: JobRecord,
+    *,
+    usage: dict[str, object] | None,
+    provider_result: dict[str, object] | None,
+) -> None:
+    request_id = _provider_request_id(provider_result)
+    if request_id is not None:
+        job.provider_request_id = request_id
+    if usage is None:
+        return
+
+    numeric_usage = {
+        key: value
+        for key, value in usage.items()
+        if isinstance(value, int) and not isinstance(value, bool)
+    }
+    job.actual_usage_json = numeric_usage
+
+    provider_cost = None if provider_result is None else provider_result.get("actualCostMicros")
+    if isinstance(provider_cost, int) and not isinstance(provider_cost, bool):
+        job.actual_cost_micros = provider_cost
+        job.billing_status = "provider_adjusted"
+        return
+
+    snapshot = job.pricing_snapshot_json
+    rates_document = snapshot.get("rates") if isinstance(snapshot, dict) else None
+    if not isinstance(rates_document, list):
+        job.billing_status = "unpriced"
+        return
+    try:
+        rates = tuple(RateCardItem.model_validate(item) for item in rates_document)
+        calculated = calculate_usage_cost(numeric_usage, rates)
+    except (TypeError, ValueError):
+        job.billing_status = "unpriced"
+        return
+    job.actual_cost_micros = calculated.actual_cost_micros
+    job.billing_status = calculated.status
+    revision = snapshot.get("revision")
+    if isinstance(revision, str):
+        job.rate_card_revision = revision
+
+
+def _provider_request_id(document: dict[str, object] | None) -> str | None:
+    if document is None:
+        return None
+    for key in ("requestId", "responseId"):
+        value = document.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None

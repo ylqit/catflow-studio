@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { api } from "../../api/client";
-import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, JobDto, RuntimeBootstrapDto, ValidationRunDto, WorkspaceDto } from "../../api/types";
+import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, JobDto, RuntimeBootstrapDto, WorkspaceDto } from "../../api/types";
+import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { projectJobEvent } from "../../projectJobEvents";
 import { useUiStore } from "../../stores/ui";
 
@@ -13,10 +14,8 @@ const assets = ref<AssetDto[]>([]);
 const busySlot = ref<AssetSlot | null>(null);
 const error = ref("");
 const runtime = ref<RuntimeBootstrapDto | null>(null);
-const validationRun = ref<ValidationRunDto | null>(null);
 const generationPreview = ref<AssetGenerationPreviewDto | null>(null);
 const currentJob = ref<JobDto | null>(null);
-const diagnosisCandidate = ref<AssetDto | null>(null);
 let events: EventSource | null = null;
 
 const slots: Array<{ id: AssetGenerationKind; order: string; title: string; responsibility: string }> = [
@@ -28,13 +27,13 @@ const slots: Array<{ id: AssetGenerationKind; order: string; title: string; resp
 ];
 
 const grouped = computed(() => Object.fromEntries(slots.map((slot) => [slot.id, assets.value.filter((asset) => asset.role === slot.id)])) as Record<AssetSlot, AssetDto[]>);
+const currentJobLabel = computed(() => currentJob.value?.kind === "diagnose_image" ? "图片质量诊断" : "共享环境生成");
 
 async function load() {
   try {
-    [assets.value, runtime.value, validationRun.value] = await Promise.all([
+    [assets.value, runtime.value] = await Promise.all([
       api.assets(props.projectId),
       api.runtime(),
-      api.currentValidationRun(),
     ]);
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "资产读取失败";
@@ -70,36 +69,20 @@ async function select(slot: AssetSlot, assetId: string) {
   }
 }
 
-async function prepareGeneration() {
+async function generateEnvironment() {
+  if (busySlot.value) return;
   busySlot.value = "environment";
   error.value = "";
   try {
-    generationPreview.value = await api.previewAssetGeneration(props.projectId, "environment");
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : "环境预览失败";
-  } finally {
-    busySlot.value = null;
-  }
-}
-
-async function submitGeneration() {
-  const preview = generationPreview.value;
-  if (!preview) return;
-  if (runtime.value?.provider.name === "ark" && validationRun.value?.status !== "authorized") {
-    error.value = "需要先在首批真实验收页面授权付费调用";
-    return;
-  }
-  busySlot.value = "environment";
-  try {
+    const prepared = await api.previewAssetGeneration(props.projectId, "environment");
+    generationPreview.value = prepared;
+    const scope = `asset-generation:${props.projectId}:environment`;
     currentJob.value = await api.createAssetGeneration(props.projectId, {
       kind: "environment",
-      expectedInputHash: preview.inputHash,
-      expectedCostMicros: preview.expectedCostMicros,
-      idempotencyKey: crypto.randomUUID(),
-      validationRunId: runtime.value?.provider.name === "ark" ? validationRun.value?.id : undefined,
-      paidCallAcknowledged: runtime.value?.provider.name === "ark",
+      expectedInputHash: prepared.inputHash,
+      idempotencyKey: pendingIdempotencyKey(scope, prepared.inputHash),
     });
-    generationPreview.value = null;
+    settleIdempotencyKey(scope, prepared.inputHash);
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "候选生成失败";
   } finally {
@@ -107,26 +90,18 @@ async function submitGeneration() {
   }
 }
 
-function prepareDiagnosis(asset: AssetDto) {
+async function diagnose(asset: AssetDto) {
+  if (busySlot.value) return;
   error.value = "";
-  diagnosisCandidate.value = asset;
-}
-
-async function submitDiagnosis() {
-  const asset = diagnosisCandidate.value;
-  if (!asset) return;
-  if (runtime.value?.provider.name === "ark" && validationRun.value?.status !== "authorized") {
-    error.value = "需要先在首批真实验收页面授权付费调用";
-    return;
-  }
   busySlot.value = asset.role as AssetGenerationKind;
+  const scope = `asset-diagnosis:${props.projectId}:${asset.id}`;
   try {
     currentJob.value = await api.diagnoseAsset(
       props.projectId,
       asset.id,
-      runtime.value?.provider.name === "ark" ? validationRun.value?.id : undefined,
+      pendingIdempotencyKey(scope, asset.sha256),
     );
-    diagnosisCandidate.value = null;
+    settleIdempotencyKey(scope, asset.sha256);
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "诊断失败";
   } finally {
@@ -177,8 +152,11 @@ onBeforeUnmount(() => events?.close());
     <div class="slot-list">
       <p v-if="error" class="notice error">{{ error }}</p>
       <p v-if="currentJob" class="notice" :class="{ error: ['failed', 'submission_unknown'].includes(currentJob.status) }">
-        当前页面任务：{{ currentJob.kind }} · {{ currentJob.status }}（状态由 SSE 恢复）
+        {{ currentJobLabel }} · {{ currentJob.status }}（状态由 SSE 恢复）
         <span v-if="currentJob.error"> · {{ currentJob.error.code }}：{{ currentJob.error.message }}</span>
+        <span v-if="currentJob.actualUsage"> · 实际 usage {{ JSON.stringify(currentJob.actualUsage) }}</span>
+        <span v-if="currentJob.billingStatus === 'unpriced'"> · 费用待核价</span>
+        <span v-else-if="currentJob.actualCostMicros != null"> · ¥{{ (currentJob.actualCostMicros / 1_000_000).toFixed(4) }}</span>
       </p>
       <article v-for="slot in slots" :key="slot.id" class="asset-slot card">
         <div class="slot-order">{{ slot.order }}</div>
@@ -199,25 +177,19 @@ onBeforeUnmount(() => events?.close());
             <div v-for="asset in grouped[slot.id].filter((candidate) => candidate.id !== workspace.selections[slot.id]?.id)" :key="asset.id" class="candidate">
               <img :src="`/api/v1/assets/${asset.id}/content`" :alt="slot.title" />
               <span v-if="reportStatus(asset)" class="quality-badge">诊断 {{ reportStatus(asset) }}</span>
-              <button class="diagnose-button" :disabled="busySlot === slot.id" @click="prepareDiagnosis(asset)">诊断</button>
+              <button class="diagnose-button" :disabled="busySlot === slot.id" @click="diagnose(asset)">诊断</button>
               <button v-if="workspace.selections[slot.id]?.id !== asset.id" class="secondary" :disabled="busySlot === slot.id" @click="select(slot.id, asset.id)">选择</button>
             </div>
             <label class="upload-candidate" :class="{ busy: busySlot === slot.id }">
               <input type="file" accept="image/png,image/jpeg,image/webp" @change="upload(slot.id, $event)" />
               <b>{{ busySlot === slot.id ? "处理中…" : "＋" }}</b><span>上传候选</span>
             </label>
-            <button class="generate-candidate" :disabled="busySlot === slot.id" @click="prepareGeneration"><b>✦</b><span>生成新的共享环境候选</span></button>
+            <button class="generate-candidate" :disabled="busySlot === slot.id" @click="generateEnvironment"><b>✦</b><span>生成新的共享环境候选</span></button>
           </div>
-          <section v-if="slot.id === 'environment' && generationPreview" class="generation-confirm">
-            <b>图片付费确认</b><span>{{ generationPreview.provider }} · {{ generationPreview.model }}</span><span>占用 generate_image 额度 1 次 · {{ generationPreview.costEstimateStatus === 'unmetered_paid' ? '未计价付费调用' : generationPreview.expectedCostMicros }}</span><p>{{ generationPreview.prompt }}</p><code>{{ generationPreview.inputHash }}</code><button class="primary" @click="submitGeneration">确认并提交共享环境</button>
-          </section>
-          <section v-if="slot.id === 'environment' && diagnosisCandidate" class="generation-confirm">
-            <b>图片诊断付费确认</b>
-            <span>{{ runtime?.provider.name }} · {{ runtime?.provider.diagnosticModel }}</span>
-            <span>占用 diagnose_image 额度 1 次 · 未计价付费调用</span>
-            <p>候选会与儿童、猫咪、同框比例和净化画风板按职责对照；AI 结果只作建议。</p>
-            <code>Asset SHA256：{{ diagnosisCandidate.sha256 }}</code>
-            <div><button class="ghost" @click="diagnosisCandidate = null">取消</button><button class="primary" @click="submitDiagnosis">确认并提交图片诊断</button></div>
+          <section v-if="slot.id === 'environment'" class="paid-model-note">
+            <b>{{ runtime?.provider.name ?? "Ark" }} · {{ runtime?.provider.imageModel ?? "图片模型" }} · Ark 付费模型</b>
+            <span>点击生成或诊断会直接创建一个任务；完成后显示实际 usage，未配置费率时标记为待核价。</span>
+            <details v-if="generationPreview"><summary>查看最近一次冻结输入</summary><p>{{ generationPreview.prompt }}</p><code>{{ generationPreview.inputHash }}</code></details>
           </section>
         </div>
       </article>
@@ -258,8 +230,6 @@ onBeforeUnmount(() => events?.close());
 .generate-candidate b { font-size: 22px; }
 .generate-candidate span { font-size: 10px; }
 .candidates.inherited { overflow: visible; }
-.generation-confirm { display: grid; gap: 7px; margin-top: 12px; padding: 14px; border: 1px solid #d8b89d; border-radius: 12px; background: #fff7ef; font-size: 11px; }
-.generation-confirm span { color: var(--muted); }
-.generation-confirm p { margin: 3px 0; line-height: 1.6; }
-.generation-confirm code { overflow: hidden; text-overflow: ellipsis; }
+.paid-model-note { display: grid; gap: 5px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: #fff7ef; color: var(--muted); font-size: 10px; }
+.paid-model-note b { color: var(--ink); }.paid-model-note details { margin-top: 5px; }.paid-model-note p { line-height: 1.6; }.paid-model-note code { overflow-wrap: anywhere; }
 </style>

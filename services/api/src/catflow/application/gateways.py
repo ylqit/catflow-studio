@@ -20,6 +20,7 @@ class ImageProviderResult:
     url: str
     response_id: str | None
     model: str
+    usage: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +39,17 @@ class VideoPollResult:
     duration_seconds: int | None = None
     ratio: str | None = None
     resolution: str | None = None
+    usage: dict[str, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class SegmentVideoGenerationRequest:
+    instruction: str
     prompt: str
     negative_prompt: str
     context_video_url: str
+    issue_start_seconds: float
+    issue_end_seconds: float
     anchor_in_path: Path
     anchor_out_path: Path
     canon_reference_paths: tuple[Path, ...]
@@ -54,6 +59,10 @@ class SegmentVideoGenerationRequest:
     ratio: Literal["9:16"]
 
     def __post_init__(self) -> None:
+        if not self.instruction.strip():
+            raise ValueError("segment generation instruction is required")
+        if self.issue_start_seconds < 0 or self.issue_end_seconds <= self.issue_start_seconds:
+            raise ValueError("segment generation issue time range is invalid")
         if not 4 <= self.duration_seconds <= 15:
             raise ValueError("segment generation duration must be between 4 and 15 seconds")
         if len(self.canon_reference_paths) != 5:
@@ -78,6 +87,10 @@ class SegmentVideoGenerationRequest:
 
 class PlanningGateway(Protocol):
     def plan_story(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult: ...
+
+    def plan_shots(
         self, *, prompt: str, output_schema: dict[str, object]
     ) -> StructuredProviderResult: ...
 

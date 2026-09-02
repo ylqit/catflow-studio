@@ -1,24 +1,24 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     AssetGenerationCommand,
     AssetGenerationPreviewCommand,
-    CanonRevisionCreateCommand,
     ImageDiagnosisCommand,
     PlannerMessageCommand,
     ProjectCreate,
+    RateCardRevisionCreateCommand,
     StudioConflictError,
     StudioService,
-    ValidationRunCreateCommand,
 )
-from catflow.domain.validation import ValidationCallKind
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
 
 
-def _ark_service() -> StudioService:
+def _ark_service(*, paid_calls_enabled: bool = True) -> StudioService:
     return StudioService(
         MemoryStudioRepository(),
         provider_runtime=ProviderRuntime(
@@ -28,42 +28,26 @@ def _ark_service() -> StudioService:
             video_model="doubao-seedance-2-0-260128",
             diagnostic_model="doubao-seed-2-1-pro-260628",
             capability_revision="ark-seedance-2.0-v1",
-            paid_calls_enabled=True,
+            paid_calls_enabled=paid_calls_enabled,
             maximum_video_references=5,
             segment_reference_publishing_ready=True,
         ),
     )
 
 
-def test_ark_planner_requires_authorized_run_and_reserves_once_per_idempotent_job() -> None:
-    service = _ark_service()
-    project = service.create_project(
+def _project(service: StudioService):  # type: ignore[no-untyped-def]
+    return service.create_project(
         ProjectCreate(title="雨天擦爪", theme="雨天擦爪", targetDurationSeconds=12)
     )
 
-    with pytest.raises(StudioConflictError, match="validation run"):
-        service.enqueue_planner_message(
-            project.id,
-            PlannerMessageCommand(
-                text="雨天擦爪",
-                expectedContextRevision=1,
-                idempotencyKey="ark-planner-missing-run",
-            ),
-        )
 
-    preview = service.preview_validation_run()
-    run = service.authorize_validation_run(
-        ValidationRunCreateCommand(
-            expectedManifestHash=preview.manifest_hash,
-            paidCallAcknowledged=True,
-        )
-    )
+def test_ark_planner_submits_without_a_validation_run_and_remains_idempotent() -> None:
+    service = _ark_service()
+    project = _project(service)
     command = PlannerMessageCommand(
         text="雨天擦爪",
         expectedContextRevision=1,
-        idempotencyKey="ark-planner-one-reservation",
-        validationRunId=run.id,
-        paidCallAcknowledged=True,
+        idempotencyKey="ark-planner-direct-submit",
     )
 
     first = service.enqueue_planner_message(project.id, command)
@@ -73,132 +57,113 @@ def test_ark_planner_requires_authorized_run_and_reserves_once_per_idempotent_jo
     assert first.provider == "ark"
     assert first.model == "doubao-seed-2-1-pro-260628"
     assert first.expected_cost_micros is None
-    assert first.validation_run_id == run.id
-    assert first.frozen_input["outputSchema"]["required"] == [
-        "title",
-        "summary",
-        "body",
-        "trigger",
-        "childAction",
-        "catResponse",
-        "visibleChange",
-        "warmEnding",
-        "targetDurationSeconds",
-        "dialoguePolicy",
-        "environmentIntent",
-    ]
+    assert first.validation_run_id is None
     assert "原地互看" in str(first.frozen_input["prompt"])
-    persisted = service.get_validation_run(run.id)
-    assert persisted.usage[ValidationCallKind.PLAN_STORY] == 1
 
 
-def test_ark_image_generation_and_diagnosis_consume_their_exact_allowances() -> None:
+def test_normal_ark_image_jobs_have_no_application_quota() -> None:
     service = _ark_service()
-    project = service.create_project(
-        ProjectCreate(title="共享室内环境", theme="雨天擦爪", targetDurationSeconds=12)
-    )
-    manifest = service.preview_validation_run()
-    run = service.authorize_validation_run(
-        ValidationRunCreateCommand(
-            expectedManifestHash=manifest.manifest_hash,
-            paidCallAcknowledged=True,
-        )
-    )
+    project = _project(service)
     preview = service.preview_asset_generation(
         project.id, AssetGenerationPreviewCommand(kind="environment")
     )
-    image_job = service.create_asset_generation_job(
+
+    first = service.create_asset_generation_job(
         project.id,
         AssetGenerationCommand(
             kind="environment",
             expectedInputHash=preview.input_hash,
-            expectedCostMicros=None,
-            idempotencyKey="ark-shared-environment",
-            validationRunId=run.id,
-            paidCallAcknowledged=True,
+            idempotencyKey="ark-environment-first",
         ),
     )
+    same = service.create_asset_generation_job(
+        project.id,
+        AssetGenerationCommand(
+            kind="environment",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="ark-environment-first",
+        ),
+    )
+    second = service.create_asset_generation_job(
+        project.id,
+        AssetGenerationCommand(
+            kind="environment",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="ark-environment-second",
+        ),
+    )
+
+    assert same.id == first.id
+    assert second.id != first.id
+    assert first.validation_run_id is second.validation_run_id is None
+
     candidate = service.register_asset(
         project.id,
         role="environment",
         sha256="a" * 64,
-        producing_job_id=image_job.id,
+        producing_job_id=first.id,
     )
     diagnosis = service.create_image_diagnosis_job(
         project.id,
         ImageDiagnosisCommand(
             assetId=candidate.id,
-            idempotencyKey="ark-shared-environment-diagnosis",
-            validationRunId=run.id,
-            paidCallAcknowledged=True,
+            idempotencyKey="ark-environment-diagnosis",
         ),
     )
-
-    assert image_job.provider == diagnosis.provider == "ark"
-    assert image_job.expected_cost_micros is diagnosis.expected_cost_micros is None
-    assert diagnosis.frozen_input["outputSchema"]["required"] == [
-        "identity",
-        "style",
-        "anatomy",
-        "technical",
-        "warnings",
-    ]
-    usage = service.get_validation_run(run.id).usage
-    assert usage[ValidationCallKind.GENERATE_IMAGE] == 1
-    assert usage[ValidationCallKind.DIAGNOSE_IMAGE] == 1
-
-    with pytest.raises(StudioConflictError, match="already has this project call"):
-        service.create_asset_generation_job(
-            project.id,
-            AssetGenerationCommand(
-                kind="environment",
-                expectedInputHash=preview.input_hash,
-                expectedCostMicros=None,
-                idempotencyKey="ark-shared-environment-second-click",
-                validationRunId=run.id,
-                paidCallAcknowledged=True,
-            ),
-        )
-    assert service.get_validation_run(run.id).usage[ValidationCallKind.GENERATE_IMAGE] == 1
+    assert diagnosis.provider == "ark"
+    assert diagnosis.validation_run_id is None
 
 
-def test_project_bound_to_an_older_canon_cannot_spend_a_new_validation_run() -> None:
-    service = _ark_service()
-    old_project = service.create_project(
-        ProjectCreate(title="雨天擦爪", theme="雨天擦爪", targetDurationSeconds=12)
-    )
-    uploaded = {
-        role: service.register_canon_asset(
-            role=role,
-            sha256=f"{index:x}" * 64,
-            storage_key=f"canon/new/{role}.png",
-            byte_size=100,
-        )
-        for index, role in enumerate(
-            ("episode_child", "episode_cat", "pair_scale", "style_board"), start=5
-        )
-    }
-    service.publish_canon_revision(
-        CanonRevisionCreateCommand(
-            fixedAssets={role: asset.id for role, asset in uploaded.items()}
-        )
-    )
-    preview = service.preview_validation_run()
-    run = service.authorize_validation_run(
-        ValidationRunCreateCommand(
-            expectedManifestHash=preview.manifest_hash,
-            paidCallAcknowledged=True,
-        )
-    )
+def test_global_paid_provider_switch_still_blocks_direct_submission() -> None:
+    service = _ark_service(paid_calls_enabled=False)
+    project = _project(service)
 
-    with pytest.raises(StudioConflictError, match="Project Canon|project Canon"):
+    with pytest.raises(StudioConflictError, match="paid provider calls are disabled"):
         service.enqueue_planner_message(
-            old_project.id,
+            project.id,
             PlannerMessageCommand(
                 text="雨天擦爪",
                 expectedContextRevision=1,
-                idempotencyKey="old-canon-project-planning",
-                validationRunId=run.id,
-                paidCallAcknowledged=True,
+                idempotencyKey="ark-planner-disabled",
             ),
         )
+
+
+def test_paid_job_freezes_the_active_model_rate_revision_at_creation() -> None:
+    service = _ark_service()
+    service.publish_rate_card(
+        RateCardRevisionCreateCommand(
+            provider="ark",
+            model="doubao-seed-2-1-pro-260628",
+            revision="planning-rates-2026-09-02",
+            sourceUrl="https://example.test/ark-rates",
+            effectiveFrom=datetime.now(UTC),
+            rates=[
+                {
+                    "metric": "inputTokens",
+                    "unit": "million_tokens",
+                    "unitPriceMicros": 2_000_000,
+                }
+            ],
+        )
+    )
+    project = _project(service)
+
+    job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="ark-planner-frozen-rate",
+        ),
+    )
+
+    assert job.rate_card_revision == "planning-rates-2026-09-02"
+    assert job.pricing_snapshot is not None
+    assert job.pricing_snapshot["rates"] == [
+        {
+            "metric": "inputTokens",
+            "unit": "million_tokens",
+            "unitPriceMicros": 2_000_000,
+        }
+    ]

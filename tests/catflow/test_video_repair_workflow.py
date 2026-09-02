@@ -71,7 +71,7 @@ def test_ark_repair_preview_stops_before_paid_work_without_https_video_publicati
             SegmentRepairPreviewCommand(
                 baseVideoAssetId=video_id,
                 issueRange={"startFrame": 96, "endFrame": 192},
-                prompt="只重拍擦爪动作。",
+                instruction="修正擦爪动作。",
             ),
         )
 
@@ -85,7 +85,7 @@ def test_repair_preview_and_paid_job_freeze_frame_ranges_and_reference_roles() -
         SegmentRepairPreviewCommand(
             baseVideoAssetId=video_id,
             issueRange={"startFrame": 96, "endFrame": 192},
-            prompt="只重拍孩子用毛巾逐只擦干猫爪的动作。",
+            instruction="让孩子用毛巾逐只擦干猫爪。",
         ),
     )
 
@@ -105,25 +105,30 @@ def test_repair_preview_and_paid_job_freeze_frame_ranges_and_reference_roles() -
     ]
     assert preview.video_reference.role == "reference_video"
     assert preview.video_reference.asset_id == video_id
+    assert preview.instruction == "让孩子用毛巾逐只擦干猫爪。"
+    assert "第96帧（4.000秒）至第192帧（8.000秒）" in preview.prompt
+    assert "初始状态—运动路径—结束状态" in preview.prompt
     assert all(item.role != "style_source" for item in preview.image_references)
 
     command = SegmentRepairCreateCommand(
-        repairId=preview.repair_id,
+        baseVideoAssetId=video_id,
+        issueRange={"startFrame": 96, "endFrame": 192},
+        instruction="让孩子用毛巾逐只擦干猫爪。",
         expectedInputHash=preview.input_hash,
-        expectedCostMicros=preview.expected_cost_micros,
         idempotencyKey="repair-job-one",
-        paidConfirmation=True,
     )
     first = service.create_video_repair_job(project_id, command)
     repeated = service.create_video_repair_job(project_id, command)
 
     assert first.id == repeated.id
     assert first.kind == "regenerate_video_segment"
-    assert first.video_repair_id == preview.repair_id
+    assert first.video_repair_id is not None
     assert service.workspace(project_id)["latestRepairJob"]["id"] == str(first.id)
     assert first.frozen_input["issueRange"] == {"startFrame": 96, "endFrame": 192}
     assert first.frozen_input["generationRange"] == {"startFrame": 72, "endFrame": 216}
     assert first.frozen_input["providerDurationSeconds"] == 6
+    assert "editIntent" not in first.frozen_input
+    assert first.frozen_input["instruction"] == "让孩子用毛巾逐只擦干猫爪。"
     assert first.frozen_input["referenceRoles"] == [
         "anchor_in",
         "anchor_out",
@@ -143,17 +148,17 @@ def test_candidate_requires_all_quality_checks_before_creating_active_edit_v2() 
         SegmentRepairPreviewCommand(
             baseVideoAssetId=video_id,
             issueRange={"startFrame": 96, "endFrame": 192},
-            prompt="只重拍擦爪动作。",
+            instruction="修正擦爪动作。",
         ),
     )
     job = service.create_video_repair_job(
         project_id,
         SegmentRepairCreateCommand(
-            repairId=preview.repair_id,
+            baseVideoAssetId=video_id,
+            issueRange={"startFrame": 96, "endFrame": 192},
+            instruction="修正擦爪动作。",
             expectedInputHash=preview.input_hash,
-            expectedCostMicros=preview.expected_cost_micros,
             idempotencyKey="repair-job-approval",
-            paidConfirmation=True,
         ),
     )
     candidate = service.register_asset(
@@ -166,7 +171,9 @@ def test_candidate_requires_all_quality_checks_before_creating_active_edit_v2() 
         producing_job_id=job.id,
         metadata={"durationFrames": 144, "frameRateNumerator": 24, "frameRateDenominator": 1},
     )
-    service.mark_video_repair_candidate_ready(preview.repair_id, candidate.id)
+    assert job.video_repair_id is not None
+    repair_id = job.video_repair_id
+    service.mark_video_repair_candidate_ready(repair_id, candidate.id)
 
     incomplete = {
         "child_identity": "pass",
@@ -180,7 +187,7 @@ def test_candidate_requires_all_quality_checks_before_creating_active_edit_v2() 
     with pytest.raises(StudioConflictError, match="quality checks"):
         service.approve_video_repair(
             project_id,
-            preview.repair_id,
+            repair_id,
             SegmentRepairApproveCommand(
                 candidateAssetId=candidate.id,
                 candidateSourceRange={"startFrame": 24, "endFrame": 120},
@@ -195,7 +202,7 @@ def test_candidate_requires_all_quality_checks_before_creating_active_edit_v2() 
     all_pass = dict.fromkeys(incomplete, "pass")
     edit = service.approve_video_repair(
         project_id,
-        preview.repair_id,
+        repair_id,
         SegmentRepairApproveCommand(
             candidateAssetId=candidate.id,
             candidateSourceRange={"startFrame": 25, "endFrame": 121},
@@ -212,9 +219,9 @@ def test_candidate_requires_all_quality_checks_before_creating_active_edit_v2() 
     assert edit.parent_edit_version_id is None
     assert edit.edl.format == "catflow-edl-v2"
     assert [item.duration_frames for item in edit.edl.video_segments] == [96, 96, 96]
-    assert service.get_video_repair(preview.repair_id).status == "approved"
-    assert service.get_video_repair(preview.repair_id).approved_edit_version_id == edit.id
-    assert service.get_video_repair(preview.repair_id).candidate_core_range == FrameRange(
+    assert service.get_video_repair(repair_id).status == "approved"
+    assert service.get_video_repair(repair_id).approved_edit_version_id == edit.id
+    assert service.get_video_repair(repair_id).candidate_core_range == FrameRange(
         startFrame=25, endFrame=121
     )
 
@@ -226,9 +233,20 @@ def test_repair_approval_rejects_a_changed_base_video_selection() -> None:
         SegmentRepairPreviewCommand(
             baseVideoAssetId=video_id,
             issueRange={"startFrame": 96, "endFrame": 192},
-            prompt="只重拍擦爪动作。",
+            instruction="修正擦爪动作。",
         ),
     )
+    job = service.create_video_repair_job(
+        project_id,
+        SegmentRepairCreateCommand(
+            baseVideoAssetId=video_id,
+            issueRange={"startFrame": 96, "endFrame": 192},
+            instruction="修正擦爪动作。",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="repair-outdated-job",
+        ),
+    )
+    assert job.video_repair_id is not None
     replacement = service.register_asset(
         project_id,
         role="video",
@@ -243,7 +261,7 @@ def test_repair_approval_rejects_a_changed_base_video_selection() -> None:
     with pytest.raises(StudioConflictError, match="base timeline changed"):
         service.approve_video_repair(
             project_id,
-            preview.repair_id,
+            job.video_repair_id,
             SegmentRepairApproveCommand(
                 candidateAssetId=uuid.uuid4(),
                 candidateSourceRange={"startFrame": 24, "endFrame": 120},

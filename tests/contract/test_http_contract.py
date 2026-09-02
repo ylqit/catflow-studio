@@ -151,15 +151,6 @@ def test_validation_run_http_flow_only_authorizes_the_frozen_manifest() -> None:
 
 def test_video_repair_http_preview_and_create_only_enqueue_one_candidate() -> None:
     service, client = _app_client()
-    manifest = client.post("/api/v1/validation-runs/preview", json={}, headers=WRITE_HEADERS).json()
-    validation_run_id = client.post(
-        "/api/v1/validation-runs",
-        json={
-            "expectedManifestHash": manifest["manifestHash"],
-            "paidCallAcknowledged": True,
-        },
-        headers=WRITE_HEADERS,
-    ).json()["id"]
     project_id = uuid.UUID(
         client.post(
             "/api/v1/projects",
@@ -181,43 +172,39 @@ def test_video_repair_http_preview_and_create_only_enqueue_one_candidate() -> No
     service.select_asset(project_id, slot="environment", asset_id=environment.id)
 
     preview = client.post(
-        f"/api/v1/projects/{project_id}/video-repairs/preview",
+        f"/api/v1/projects/{project_id}/video-edits/preview",
         json={
             "baseVideoAssetId": str(base.id),
             "issueRange": {"startFrame": 96, "endFrame": 192},
-            "prompt": (
+            "instruction": (
                 "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。"
             ),
-            "validationRunId": validation_run_id,
         },
         headers=WRITE_HEADERS,
     )
 
     assert preview.status_code == 200
     document = preview.json()
+    assert "repairId" not in document
+    assert "editIntent" not in document
     assert document["generationRange"] == {"startFrame": 72, "endFrame": 216}
+    create_document = {
+        "baseVideoAssetId": str(base.id),
+        "issueRange": {"startFrame": 96, "endFrame": 192},
+        "instruction": (
+            "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。"
+        ),
+        "expectedInputHash": document["inputHash"],
+        "idempotencyKey": "http-segment-repair",
+    }
     created = client.post(
-        f"/api/v1/projects/{project_id}/video-repairs",
-        json={
-            "repairId": document["repairId"],
-            "expectedInputHash": document["inputHash"],
-            "expectedCostMicros": document["expectedCostMicros"],
-            "idempotencyKey": "http-segment-repair",
-            "validationRunId": validation_run_id,
-            "paidConfirmation": True,
-        },
+        f"/api/v1/projects/{project_id}/video-edits",
+        json=create_document,
         headers=WRITE_HEADERS,
     )
     repeated = client.post(
-        f"/api/v1/projects/{project_id}/video-repairs",
-        json={
-            "repairId": document["repairId"],
-            "expectedInputHash": document["inputHash"],
-            "expectedCostMicros": document["expectedCostMicros"],
-            "idempotencyKey": "http-segment-repair",
-            "validationRunId": validation_run_id,
-            "paidConfirmation": True,
-        },
+        f"/api/v1/projects/{project_id}/video-edits",
+        json=create_document,
         headers=WRITE_HEADERS,
     )
 
@@ -225,24 +212,69 @@ def test_video_repair_http_preview_and_create_only_enqueue_one_candidate() -> No
     assert repeated.status_code == 202
     assert created.json()["id"] == repeated.json()["id"]
     assert created.json()["kind"] == "regenerate_video_segment"
-    assert created.json()["videoRepairId"] == document["repairId"]
+    assert created.json()["videoRepairId"] is not None
+    assert created.json()["inputSnapshot"]["kind"] == "segment_edit"
+    assert created.json()["inputSnapshot"]["segmentEdit"]["instruction"].startswith("孩子蹲下")
+
+    stale = client.post(
+        f"/api/v1/projects/{project_id}/video-edits",
+        json={
+            **create_document,
+            "instruction": "改成猫咪主动收回前爪。",
+            "idempotencyKey": "http-stale-segment-repair",
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert stale.status_code == 409
+    assert stale.json()["latestPreview"]["instruction"] == "改成猫咪主动收回前爪。"
+
+
+def test_video_edit_http_rejects_a_sub_four_second_issue_range() -> None:
+    service, client = _app_client()
+    project_id = uuid.UUID(
+        client.post(
+            "/api/v1/projects",
+            json={"title": "短选区", "theme": "雨天擦爪", "targetDurationSeconds": 12},
+            headers=WRITE_HEADERS,
+        ).json()["id"]
+    )
+    base = service.register_asset(
+        project_id,
+        role="video",
+        media_type="video",
+        sha256="b" * 64,
+        metadata={"durationFrames": 288, "frameRateNumerator": 24, "frameRateDenominator": 1},
+    )
+    service.select_asset(project_id, slot="video", asset_id=base.id)
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/video-edits/preview",
+        json={
+            "baseVideoAssetId": str(base.id),
+            "issueRange": {"startFrame": 0, "endFrame": 95},
+            "instruction": "修正动作。",
+        },
+        headers=WRITE_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+    out_of_bounds = client.post(
+        f"/api/v1/projects/{project_id}/video-edits/preview",
+        json={
+            "baseVideoAssetId": str(base.id),
+            "issueRange": {"startFrame": 193, "endFrame": 289},
+            "instruction": "修正结尾动作。",
+        },
+        headers=WRITE_HEADERS,
+    )
+
+    assert out_of_bounds.status_code == 422
+    assert service.list_video_repairs(project_id) == []
 
 
 def test_planner_http_flow_returns_durable_job_and_adopts_directly_to_story() -> None:
     service, client = _app_client()
-    manifest = client.post(
-        "/api/v1/validation-runs/preview",
-        json={},
-        headers=WRITE_HEADERS,
-    ).json()
-    validation_run_id = client.post(
-        "/api/v1/validation-runs",
-        json={
-            "expectedManifestHash": manifest["manifestHash"],
-            "paidCallAcknowledged": True,
-        },
-        headers=WRITE_HEADERS,
-    ).json()["id"]
     project_response = client.post(
         "/api/v1/projects",
         json={
@@ -260,8 +292,6 @@ def test_planner_http_flow_returns_durable_job_and_adopts_directly_to_story() ->
             "text": "做一个雨天擦爪的生活片段",
             "expectedContextRevision": 1,
             "idempotencyKey": "http-planner-rain",
-            "validationRunId": validation_run_id,
-            "paidCallAcknowledged": True,
         },
         headers=WRITE_HEADERS,
     )

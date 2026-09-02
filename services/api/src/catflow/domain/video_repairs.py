@@ -8,6 +8,10 @@ from pydantic import Field, model_validator
 
 from .contract import ContractModel
 
+EDIT_FRAME_RATE = 24
+MIN_ISSUE_FRAMES = 4 * EDIT_FRAME_RATE
+MAX_ISSUE_FRAMES = 15 * EDIT_FRAME_RATE
+
 
 class RationalFrameRate(ContractModel):
     numerator: int = Field(gt=0)
@@ -38,6 +42,15 @@ class SegmentGenerationWindow(ContractModel):
     generation_range: FrameRange = Field(alias="generationRange")
     candidate_core_range: FrameRange = Field(alias="candidateCoreRange")
     provider_duration_seconds: int = Field(alias="providerDurationSeconds", ge=4, le=15)
+
+
+def validate_issue_range(issue_range: FrameRange, *, total_frames: int) -> None:
+    if total_frames <= 0 or issue_range.end_frame > total_frames:
+        raise ValueError("issue range must be inside the video")
+    if issue_range.duration_frames < MIN_ISSUE_FRAMES:
+        raise ValueError("issue range must be at least 4 seconds (96 frames)")
+    if issue_range.duration_frames > min(total_frames, MAX_ISSUE_FRAMES):
+        raise ValueError("issue range must not exceed 15 seconds (360 frames)")
 
 
 class EditVideoSegment(ContractModel):

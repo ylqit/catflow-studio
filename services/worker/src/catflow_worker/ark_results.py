@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from catflow.application.service import StudioService
-from catflow.domain.models import LifeStoryProposalDraft
+from catflow.domain.models import DirectorPlanPayload, LifeStoryProposalDraft
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import AssetRecord, JobRecord
 
@@ -40,6 +40,8 @@ class ArkResultLandingService:
             kind = job.kind
         if kind == "plan_story":
             self._store_planner(job_id)
+        elif kind == "plan_shots":
+            self._store_shot_plan(job_id)
         elif kind == "generate_image":
             self._store_image(job_id)
         elif kind == "diagnose_image":
@@ -61,6 +63,16 @@ class ArkResultLandingService:
         self._studio_service.complete_planner_job(
             job_id,
             LifeStoryProposalDraft.model_validate(proposal),
+        )
+
+    def _store_shot_plan(self, job_id: uuid.UUID) -> None:
+        result = self._provider_result(job_id)
+        payload = result.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("director result payload is missing")
+        self._studio_service.complete_shot_plan_job(
+            job_id,
+            DirectorPlanPayload.model_validate(payload),
         )
 
     def _store_image(self, job_id: uuid.UUID) -> None:
