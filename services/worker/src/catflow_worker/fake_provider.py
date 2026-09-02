@@ -8,6 +8,11 @@ from .runner import ProviderPoll, ProviderSubmission
 class FakeProviderGateway:
     """A zero-cost deterministic gateway used by local development and CI."""
 
+    def prepare_submission(
+        self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
+    ) -> None:
+        return None
+
     def submit(
         self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
     ) -> ProviderSubmission:

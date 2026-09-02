@@ -9,17 +9,28 @@ from dotenv import load_dotenv
 from PIL import Image
 from sqlalchemy import delete, select
 
-from catflow.application.service import PlannerMessageCommand, ProjectCreate, StudioService
+from catflow.application.service import (
+    PlannerMessageCommand,
+    ProjectCreate,
+    SegmentRepairCreateCommand,
+    SegmentRepairPreviewCommand,
+    StudioService,
+)
 from catflow.infrastructure.database import (
     DatabaseSettings,
     create_database_engine,
     create_session_factory,
 )
 from catflow.infrastructure.media import LocalMediaStore
-from catflow.infrastructure.models import AssetRecord, JobRecord, ProjectRecord
+from catflow.infrastructure.models import (
+    AssetRecord,
+    EnvironmentPresetRecord,
+    JobRecord,
+    ProjectRecord,
+)
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow_worker.ark_results import ArkResultLandingService
-from catflow_worker.provider_media import ProviderMediaDownloader
+from catflow_worker.provider_media import LandedProviderMedia, ProviderMediaDownloader
 
 
 def _png_bytes() -> bytes:
@@ -238,5 +249,108 @@ def test_video_diagnosis_landing_keeps_its_provider_ids_separate_from_video_ids(
             )
     finally:
         with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
+    tmp_path: Path,
+) -> None:
+    class SegmentDownloader:
+        def download_video(
+            self,
+            _url: str,
+            destination: Path,
+            *,
+            ffprobe_path: Path,
+            expected_duration_seconds: int,
+        ) -> LandedProviderMedia:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"candidate")
+            return LandedProviderMedia(
+                sha256="9" * 64,
+                byte_size=9,
+                width=480,
+                height=854,
+                duration_ms=expected_duration_seconds * 1000,
+                codec="h264",
+            )
+
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions))
+    project = service.create_project(
+        ProjectCreate(title="Ark 片段落地", theme="雨天擦爪", targetDurationSeconds=12)
+    )
+    try:
+        base = service.register_asset(
+            project.id,
+            role="video",
+            media_type="video",
+            sha256="7" * 64,
+            metadata={"durationFrames": 288, "frameRateNumerator": 24, "frameRateDenominator": 1},
+        )
+        environment = service.register_asset(
+            project.id, role="environment", media_type="image", sha256="8" * 64
+        )
+        service.select_asset(project.id, slot="video", asset_id=base.id)
+        service.select_asset(project.id, slot="environment", asset_id=environment.id)
+        preview = service.preview_video_repair(
+            project.id,
+            SegmentRepairPreviewCommand(
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                prompt="只重拍擦爪动作。",
+            ),
+        )
+        job = service.create_video_repair_job(
+            project.id,
+            SegmentRepairCreateCommand(
+                repairId=preview.repair_id,
+                expectedInputHash=preview.input_hash,
+                expectedCostMicros=0,
+                idempotencyKey=f"ark-segment-landing-{project.id}",
+                paidConfirmation=True,
+            ),
+        )
+        with sessions.begin() as session:
+            record = session.get(JobRecord, job.id)
+            assert record is not None
+            record.provider = "ark"
+            record.provider_task_id = "segment-task-1"
+            record.status = "storing"
+            record.provider_result_json = {
+                "videoUrl": "https://ark.cn-beijing.volces.com/segment.mp4",
+                "requestId": "segment-request-1",
+                "model": "doubao-seedance-2-0-260128",
+                "resolution": "480p",
+                "ratio": "9:16",
+            }
+        landing = ArkResultLandingService(
+            sessions,
+            LocalMediaStore(tmp_path),
+            studio_service=service,
+            downloader=SegmentDownloader(),  # type: ignore[arg-type]
+            ffprobe_path=Path("ffprobe"),
+        )
+
+        landing.store_result(job.id)
+
+        repair = service.get_video_repair(preview.repair_id)
+        candidate = service.get_asset(repair.candidate_asset_id)  # type: ignore[arg-type]
+        assert repair.status == "candidate_ready"
+        assert candidate.role == "repair_candidate"
+        assert candidate.metadata["providerTaskId"] == "segment-task-1"
+        assert candidate.metadata["durationFrames"] == 144
+        assert service.list_edits(project.id) == []
+        assert "videoUrl" not in service.get_job(job.id).provider_result
+    finally:
+        with sessions.begin() as session:
+            session.execute(
+                delete(EnvironmentPresetRecord).where(
+                    EnvironmentPresetRecord.source_project_id == project.id
+                )
+            )
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
         engine.dispose()

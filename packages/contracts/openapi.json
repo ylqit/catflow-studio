@@ -47,6 +47,26 @@
         }
       }
     },
+    "/api/v1/runtime/object-publisher/check": {
+      "post": {
+        "summary": "Check Object Publisher",
+        "operationId": "check_object_publisher_api_v1_runtime_object_publisher_check_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Check Object Publisher Api V1 Runtime Object Publisher Check Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runtime/settings": {
       "get": {
         "summary": "Runtime Settings",
@@ -1589,6 +1609,320 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/video-repairs/preview": {
+      "post": {
+        "summary": "Preview Video Repair",
+        "operationId": "preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRepairPreviewCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentRepairPreviewDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-repairs": {
+      "post": {
+        "summary": "Create Video Repair",
+        "operationId": "create_video_repair_api_v1_projects__project_id__video_repairs_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRepairCreateCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Video Repairs",
+        "operationId": "video_repairs_api_v1_projects__project_id__video_repairs_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VideoRepairDto"
+                  },
+                  "title": "Response Video Repairs Api V1 Projects  Project Id  Video Repairs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-repairs/{repair_id}": {
+      "get": {
+        "summary": "Video Repair",
+        "operationId": "video_repair_api_v1_projects__project_id__video_repairs__repair_id__get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "repair_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repair Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoRepairDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve": {
+      "post": {
+        "summary": "Approve Video Repair",
+        "operationId": "approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "repair_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repair Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentRepairApproveCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject": {
+      "post": {
+        "summary": "Reject Video Repair",
+        "operationId": "reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "repair_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repair Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoRepairDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs/{job_id}": {
       "get": {
         "summary": "Job",
@@ -2448,6 +2782,33 @@
         ],
         "title": "CompiledReference"
       },
+      "EditAudioV2": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "const": "preserve_original",
+            "title": "Policy"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy",
+          "assetId",
+          "sha256"
+        ],
+        "title": "EditAudioV2"
+      },
       "EditCreateCommand": {
         "properties": {
           "edl": {
@@ -2501,6 +2862,61 @@
         ],
         "title": "EditDecisionListDto"
       },
+      "EditDecisionListV2": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "const": "catflow-edl-v2",
+            "title": "Format"
+          },
+          "frameRate": {
+            "$ref": "#/components/schemas/RationalFrameRate"
+          },
+          "rootVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Rootvideoassetid"
+          },
+          "rootVideoSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Rootvideosha256"
+          },
+          "videoSegments": {
+            "items": {
+              "$ref": "#/components/schemas/EditVideoSegment"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Videosegments"
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/EditTransitionV2"
+            },
+            "type": "array",
+            "title": "Transitions"
+          },
+          "audio": {
+            "$ref": "#/components/schemas/EditAudioV2"
+          },
+          "output": {
+            "$ref": "#/components/schemas/EditOutputV2"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "format",
+          "frameRate",
+          "rootVideoAssetId",
+          "rootVideoSha256",
+          "videoSegments",
+          "audio",
+          "output"
+        ],
+        "title": "EditDecisionListV2"
+      },
       "EditOutputDto": {
         "properties": {
           "aspectRatio": {
@@ -2533,6 +2949,39 @@
           "format"
         ],
         "title": "EditOutputDto"
+      },
+      "EditOutputV2": {
+        "properties": {
+          "aspectRatio": {
+            "type": "string",
+            "const": "9:16",
+            "title": "Aspectratio"
+          },
+          "width": {
+            "type": "integer",
+            "const": 720,
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "const": 1280,
+            "title": "Height"
+          },
+          "format": {
+            "type": "string",
+            "const": "mp4",
+            "title": "Format"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "aspectRatio",
+          "width",
+          "height",
+          "format"
+        ],
+        "title": "EditOutputV2"
       },
       "EditSourceDto": {
         "properties": {
@@ -2599,6 +3048,41 @@
         ],
         "title": "EditTransitionDto"
       },
+      "EditTransitionV2": {
+        "properties": {
+          "afterSegmentIndex": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Aftersegmentindex"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cut",
+              "dissolve"
+            ],
+            "title": "Type"
+          },
+          "durationFrames": {
+            "type": "integer",
+            "enum": [
+              0,
+              2,
+              4,
+              6
+            ],
+            "title": "Durationframes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "afterSegmentIndex",
+          "type",
+          "durationFrames"
+        ],
+        "title": "EditTransitionV2"
+      },
       "EditVersionDto": {
         "properties": {
           "id": {
@@ -2620,7 +3104,15 @@
             "title": "Sourceselectionhash"
           },
           "edl": {
-            "$ref": "#/components/schemas/EditDecisionListDto"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditDecisionListDto"
+              },
+              {
+                "$ref": "#/components/schemas/EditDecisionListV2"
+              }
+            ],
+            "title": "Edl"
           },
           "status": {
             "type": "string",
@@ -2643,6 +3135,43 @@
             ],
             "title": "Renderedassetid"
           },
+          "parentEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parenteditversionid"
+          },
+          "formatVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Formatversion",
+            "default": 1
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": false
+          },
+          "timelineHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timelinehash"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -2661,6 +3190,66 @@
           "createdAt"
         ],
         "title": "EditVersionDto"
+      },
+      "EditVideoSegment": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "sourceInFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sourceinframe"
+          },
+          "durationFrames": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Durationframes"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "base_video",
+              "repair_candidate"
+            ],
+            "title": "Origin"
+          },
+          "repairId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repairid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "assetId",
+          "sha256",
+          "sourceInFrame",
+          "durationFrames",
+          "origin"
+        ],
+        "title": "EditVideoSegment"
       },
       "EnvironmentPresetDto": {
         "properties": {
@@ -2734,6 +3323,27 @@
           "assetId"
         ],
         "title": "FinalSelectionCommand"
+      },
+      "FrameRange": {
+        "properties": {
+          "startFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Startframe"
+          },
+          "endFrame": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Endframe"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "startFrame",
+          "endFrame"
+        ],
+        "title": "FrameRange"
       },
       "GenerationCommand": {
         "properties": {
@@ -2970,6 +3580,8 @@
               "diagnose_image",
               "generate_video",
               "diagnose_video",
+              "probe_segment_video_data_url",
+              "regenerate_video_segment",
               "render_export"
             ],
             "title": "Kind"
@@ -3055,6 +3667,18 @@
             ],
             "title": "Parentjobid"
           },
+          "videoRepairId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Videorepairid"
+          },
           "providerSubmissionStartedAt": {
             "anyOf": [
               {
@@ -3078,6 +3702,16 @@
               }
             ],
             "title": "Providerresult"
+          },
+          "publication": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobPublicationDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "actualUsage": {
             "anyOf": [
@@ -3164,6 +3798,56 @@
           "updatedAt"
         ],
         "title": "JobDto"
+      },
+      "JobPublicationDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "uploading",
+              "ready",
+              "delete_pending",
+              "deleted",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "publicHost": {
+            "type": "string",
+            "title": "Publichost"
+          },
+          "signedUrlExpiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signedurlexpiresat"
+          },
+          "deleteAfter": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Deleteafter"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "publicHost",
+          "deleteAfter"
+        ],
+        "title": "JobPublicationDto"
       },
       "LifeClipSpec": {
         "properties": {
@@ -3798,6 +4482,446 @@
         ],
         "title": "ProjectSelectionDto"
       },
+      "RationalFrameRate": {
+        "properties": {
+          "numerator": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Numerator"
+          },
+          "denominator": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Denominator"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "numerator",
+          "denominator"
+        ],
+        "title": "RationalFrameRate"
+      },
+      "SegmentRepairApproveCommand": {
+        "properties": {
+          "candidateAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Candidateassetid"
+          },
+          "candidateSourceRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "transition": {
+            "$ref": "#/components/schemas/SegmentRepairTransitionCommand"
+          },
+          "expectedBaseTimelineHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedbasetimelinehash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          },
+          "qualityChecks": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "warning",
+                "fail"
+              ]
+            },
+            "type": "object",
+            "title": "Qualitychecks"
+          },
+          "seamChecks": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "warning",
+                "fail"
+              ]
+            },
+            "type": "object",
+            "title": "Seamchecks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidateAssetId",
+          "candidateSourceRange",
+          "transition",
+          "expectedBaseTimelineHash",
+          "idempotencyKey",
+          "qualityChecks",
+          "seamChecks"
+        ],
+        "title": "SegmentRepairApproveCommand"
+      },
+      "SegmentRepairCreateCommand": {
+        "properties": {
+          "repairId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Repairid"
+          },
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "expectedCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedcostmicros"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          },
+          "paidConfirmation": {
+            "type": "boolean",
+            "const": true,
+            "title": "Paidconfirmation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repairId",
+          "expectedInputHash",
+          "idempotencyKey",
+          "paidConfirmation"
+        ],
+        "title": "SegmentRepairCreateCommand"
+      },
+      "SegmentRepairImageReferenceDto": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "anchor_in",
+              "anchor_out",
+              "episode_child",
+              "episode_cat",
+              "pair_scale",
+              "environment",
+              "style_board"
+            ],
+            "title": "Role"
+          },
+          "assetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "frameNumber": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Framenumber"
+          },
+          "derived": {
+            "type": "boolean",
+            "title": "Derived",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "sha256"
+        ],
+        "title": "SegmentRepairImageReferenceDto"
+      },
+      "SegmentRepairPreviewCommand": {
+        "properties": {
+          "baseVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Basevideoassetid"
+          },
+          "baseEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseeditversionid"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Prompt"
+          },
+          "validationRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validationrunid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "baseVideoAssetId",
+          "issueRange",
+          "prompt"
+        ],
+        "title": "SegmentRepairPreviewCommand"
+      },
+      "SegmentRepairPreviewDto": {
+        "properties": {
+          "repairId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Repairid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "baseVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Basevideoassetid"
+          },
+          "baseEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseeditversionid"
+          },
+          "baseTimelineHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Basetimelinehash"
+          },
+          "frameRate": {
+            "$ref": "#/components/schemas/RationalFrameRate"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "generationRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "candidateCoreRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "providerDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 4.0,
+            "title": "Providerdurationseconds"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "type": "string",
+            "title": "Negativeprompt"
+          },
+          "imageReferences": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentRepairImageReferenceDto"
+            },
+            "type": "array",
+            "title": "Imagereferences"
+          },
+          "videoReference": {
+            "$ref": "#/components/schemas/SegmentRepairVideoReferenceDto"
+          },
+          "expectedCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedcostmicros"
+          },
+          "costEstimateStatus": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "unmetered_paid"
+            ],
+            "title": "Costestimatestatus"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repairId",
+          "projectId",
+          "baseVideoAssetId",
+          "baseTimelineHash",
+          "frameRate",
+          "issueRange",
+          "generationRange",
+          "candidateCoreRange",
+          "providerDurationSeconds",
+          "provider",
+          "model",
+          "capabilityRevision",
+          "prompt",
+          "negativePrompt",
+          "imageReferences",
+          "videoReference",
+          "costEstimateStatus",
+          "inputHash"
+        ],
+        "title": "SegmentRepairPreviewDto"
+      },
+      "SegmentRepairTransitionCommand": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "cut",
+              "dissolve"
+            ],
+            "title": "Type"
+          },
+          "durationFrames": {
+            "type": "integer",
+            "enum": [
+              0,
+              2,
+              4,
+              6
+            ],
+            "title": "Durationframes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "durationFrames"
+        ],
+        "title": "SegmentRepairTransitionCommand"
+      },
+      "SegmentRepairVideoReferenceDto": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "reference_video",
+            "title": "Role"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "range": {
+            "$ref": "#/components/schemas/FrameRange"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "assetId",
+          "sha256",
+          "range"
+        ],
+        "title": "SegmentRepairVideoReferenceDto"
+      },
       "SelectionCommand": {
         "properties": {
           "slot": {
@@ -4141,7 +5265,8 @@
           "generate_image",
           "diagnose_image",
           "generate_video",
-          "diagnose_video"
+          "diagnose_video",
+          "regenerate_video_segment"
         ],
         "title": "ValidationCallKind"
       },
@@ -4263,6 +5388,30 @@
         ],
         "title": "ValidationError"
       },
+      "ValidationRepairSnapshotDto": {
+        "properties": {
+          "topic": {
+            "type": "string",
+            "const": "雨天擦爪",
+            "title": "Topic"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "topic",
+          "issueRange",
+          "prompt"
+        ],
+        "title": "ValidationRepairSnapshotDto"
+      },
       "ValidationRunCreateCommand": {
         "properties": {
           "expectedManifestHash": {
@@ -4354,6 +5503,19 @@
             ],
             "title": "Costestimatestatus"
           },
+          "authorizationReady": {
+            "type": "boolean",
+            "title": "Authorizationready",
+            "default": true
+          },
+          "blockingReasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockingreasons",
+            "default": []
+          },
           "canon": {
             "anyOf": [
               {
@@ -4363,6 +5525,9 @@
                 "type": "null"
               }
             ]
+          },
+          "repair": {
+            "$ref": "#/components/schemas/ValidationRepairSnapshotDto"
           },
           "id": {
             "type": "string",
@@ -4424,6 +5589,7 @@
           "models",
           "capabilityRevision",
           "costEstimateStatus",
+          "repair",
           "id",
           "status",
           "usage",
@@ -4501,8 +5667,24 @@
             ],
             "title": "Costestimatestatus"
           },
+          "authorizationReady": {
+            "type": "boolean",
+            "title": "Authorizationready",
+            "default": true
+          },
+          "blockingReasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockingreasons",
+            "default": []
+          },
           "canon": {
             "$ref": "#/components/schemas/ValidationCanonSnapshotDto"
+          },
+          "repair": {
+            "$ref": "#/components/schemas/ValidationRepairSnapshotDto"
           }
         },
         "additionalProperties": false,
@@ -4521,7 +5703,8 @@
           "models",
           "capabilityRevision",
           "costEstimateStatus",
-          "canon"
+          "canon",
+          "repair"
         ],
         "title": "ValidationRunPreviewDto"
       },
@@ -4575,6 +5758,169 @@
           "idempotencyKey"
         ],
         "title": "VideoDiagnosisCommand"
+      },
+      "VideoRepairDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "baseVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Basevideoassetid"
+          },
+          "baseEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseeditversionid"
+          },
+          "baseTimelineHash": {
+            "type": "string",
+            "title": "Basetimelinehash"
+          },
+          "frameRate": {
+            "$ref": "#/components/schemas/RationalFrameRate"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "generationRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "candidateCoreRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "providerDurationSeconds": {
+            "type": "integer",
+            "title": "Providerdurationseconds"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "type": "string",
+            "title": "Negativeprompt"
+          },
+          "inputHash": {
+            "type": "string",
+            "title": "Inputhash"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "generating",
+              "candidate_ready",
+              "approved",
+              "rejected",
+              "outdated",
+              "cancelled"
+            ],
+            "title": "Status"
+          },
+          "candidateAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidateassetid"
+          },
+          "approvedCandidateAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvedcandidateassetid"
+          },
+          "approvedEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvededitversionid"
+          },
+          "approvalIdempotencyKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvalidempotencykey"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/SegmentRepairPreviewDto"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "approvedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "projectId",
+          "baseVideoAssetId",
+          "baseTimelineHash",
+          "frameRate",
+          "issueRange",
+          "generationRange",
+          "candidateCoreRange",
+          "providerDurationSeconds",
+          "prompt",
+          "negativePrompt",
+          "inputHash",
+          "status",
+          "preview",
+          "createdAt"
+        ],
+        "title": "VideoRepairDto"
       }
     }
   }

@@ -14,11 +14,13 @@ from catflow.application.service import (
     CanonProfileDto,
     CanonRevisionCreateCommand,
     EditDecisionListDto,
+    EditDecisionListV2,
     EditVersionDto,
     EnvironmentPresetDto,
     FixedCanonRole,
     JobDto,
     JobEventDto,
+    JobPublicationDto,
     LifeStoryProposalDto,
     PlannerJobDto,
     PlannerMessageCommand,
@@ -36,6 +38,8 @@ from catflow.application.service import (
     StudioNotFoundError,
     ValidationRunDto,
     ValidationRunPreviewDto,
+    VideoRepairDto,
+    VideoRepairStatus,
 )
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
 from catflow.domain.validation import (
@@ -43,6 +47,7 @@ from catflow.domain.validation import (
     ValidationManifest,
     reserve_validation_call,
 )
+from catflow.domain.video_repairs import FrameRange, RationalFrameRate
 
 from .database import canon_v4_document, ensure_canon_v4
 from .models import (
@@ -55,11 +60,13 @@ from .models import (
     LifePlannerMessageRecord,
     LifePlannerProposalRecord,
     LifePlannerSessionRecord,
+    MediaPublicationRecord,
     ProjectRecord,
     ProjectSelectionRecord,
     ShotPlanVersionRecord,
     StoryVersionRecord,
     ValidationRunRecord,
+    VideoRepairRecord,
 )
 
 
@@ -109,9 +116,7 @@ class PostgresStudioRepository:
             session.flush()
             return _asset_dto(record)
 
-    def publish_canon_revision(
-        self, command: CanonRevisionCreateCommand
-    ) -> CanonProfileDto:
+    def publish_canon_revision(self, command: CanonRevisionCreateCommand) -> CanonProfileDto:
         with self._sessions.begin() as session:
             fixed: dict[FixedCanonRole, AssetRecord] = {}
             for role in FIXED_CANON_ROLES:
@@ -171,15 +176,14 @@ class PostgresStudioRepository:
                 resolution=preview.resolution,
                 aspect_ratio=preview.aspect_ratio,
                 target_budget_cny=preview.target_budget_cny,
-                call_limits_json={
-                    kind.value: limit for kind, limit in preview.call_limits.items()
-                },
+                call_limits_json={kind.value: limit for kind, limit in preview.call_limits.items()},
                 usage_json={kind.value: 0 for kind in preview.call_limits},
                 provider=preview.provider,
                 models_json=preview.models,
                 capability_revision=preview.capability_revision,
                 cost_estimate_status=preview.cost_estimate_status,
                 canon_snapshot_json=preview.canon.model_dump(mode="json", by_alias=True),
+                repair_snapshot_json=preview.repair.model_dump(mode="json", by_alias=True),
                 authorized_at=now,
             )
             session.add(record)
@@ -200,9 +204,7 @@ class PostgresStudioRepository:
             )
             return _validation_run_dto(record) if record is not None else None
 
-    def set_validation_run_status(
-        self, run_id: uuid.UUID, status: str
-    ) -> ValidationRunDto:
+    def set_validation_run_status(self, run_id: uuid.UUID, status: str) -> ValidationRunDto:
         with self._sessions.begin() as session:
             record = session.scalar(
                 select(ValidationRunRecord)
@@ -654,6 +656,7 @@ class PostgresStudioRepository:
         storage_key: str,
         byte_size: int,
         producing_job_id: uuid.UUID | None,
+        metadata: dict[str, object] | None = None,
     ) -> AssetDto:
         with self._sessions.begin() as session:
             existing = session.scalar(
@@ -673,7 +676,7 @@ class PostgresStudioRepository:
                 storage_key=storage_key,
                 sha256=sha256,
                 byte_size=byte_size,
-                metadata_json={},
+                metadata_json=metadata or {},
             )
             session.add(record)
             session.flush()
@@ -692,22 +695,16 @@ class PostgresStudioRepository:
             if project is None:
                 raise StudioNotFoundError("project not found")
             canon = session.get(CanonProfileRecord, project.canon_profile_id)
-            fixed_assets = (canon.profile_json if canon is not None else {}).get(
-                "fixedAssets", {}
-            )
+            fixed_assets = (canon.profile_json if canon is not None else {}).get("fixedAssets", {})
             if slot in fixed_assets:
-                raise StudioConflictError(
-                    "global Canon slots cannot be overridden by a project"
-                )
+                raise StudioConflictError("global Canon slots cannot be overridden by a project")
             asset = session.get(AssetRecord, asset_id)
             if asset is None or asset.project_id != project_id:
                 raise StudioNotFoundError("asset not found")
             if slot == "environment" and (
                 asset.role != "environment" or asset.media_type != "image"
             ):
-                raise StudioConflictError(
-                    "shared environment must be an environment image"
-                )
+                raise StudioConflictError("shared environment must be an environment image")
             record = ProjectSelectionRecord(
                 project_id=project_id,
                 asset_id=asset_id,
@@ -741,15 +738,17 @@ class PostgresStudioRepository:
             fixed_document = (canon.profile_json if canon is not None else {}).get(
                 "fixedAssets", {}
             )
-            fixed_ids = [
-                uuid.UUID(str(item["assetId"])) for item in fixed_document.values()
-            ]
-            fixed_records = {
-                record.id: record
-                for record in session.scalars(
-                    select(AssetRecord).where(AssetRecord.id.in_(fixed_ids))
-                ).all()
-            } if fixed_ids else {}
+            fixed_ids = [uuid.UUID(str(item["assetId"])) for item in fixed_document.values()]
+            fixed_records = (
+                {
+                    record.id: record
+                    for record in session.scalars(
+                        select(AssetRecord).where(AssetRecord.id.in_(fixed_ids))
+                    ).all()
+                }
+                if fixed_ids
+                else {}
+            )
             records = session.execute(
                 select(ProjectSelectionRecord, AssetRecord)
                 .join(AssetRecord, AssetRecord.id == ProjectSelectionRecord.asset_id)
@@ -839,6 +838,7 @@ class PostgresStudioRepository:
                 provider_task_id=job.provider_task_id,
                 validation_run_id=job.validation_run_id,
                 parent_job_id=job.parent_job_id,
+                video_repair_id=job.video_repair_id,
                 provider_submission_started_at=job.provider_submission_started_at,
                 provider_result_json=job.provider_result,
                 actual_usage_json=job.actual_usage,
@@ -950,12 +950,24 @@ class PostgresStudioRepository:
                     EditVersionRecord.project_id == project_id
                 )
             )
+            session.execute(
+                update(EditVersionRecord)
+                .where(
+                    EditVersionRecord.project_id == project_id,
+                    EditVersionRecord.active.is_(True),
+                )
+                .values(active=False)
+            )
+            edl_document = edl.model_dump(mode="json", by_alias=True)
             record = EditVersionRecord(
                 project_id=project_id,
                 revision=int(revision or 0) + 1,
                 source_selection_hash=source_selection_hash,
-                edl_json=edl.model_dump(mode="json", by_alias=True),
+                edl_json=edl_document,
                 status="draft",
+                format_version=1,
+                active=True,
+                timeline_hash=_document_hash(edl_document),
             )
             session.add(record)
             session.flush()
@@ -975,6 +987,189 @@ class PostgresStudioRepository:
             record = session.get(EditVersionRecord, edit_id)
             return _edit_dto(record) if record is not None else None
 
+    def active_edit(self, project_id: uuid.UUID) -> EditVersionDto | None:
+        with self._sessions() as session:
+            record = session.scalar(
+                select(EditVersionRecord).where(
+                    EditVersionRecord.project_id == project_id,
+                    EditVersionRecord.active.is_(True),
+                )
+            )
+            return _edit_dto(record) if record is not None else None
+
+    def create_video_repair(self, repair: VideoRepairDto) -> VideoRepairDto:
+        with self._sessions.begin() as session:
+            record = VideoRepairRecord(
+                id=repair.id,
+                project_id=repair.project_id,
+                base_video_asset_id=repair.base_video_asset_id,
+                base_edit_version_id=repair.base_edit_version_id,
+                base_timeline_hash=repair.base_timeline_hash,
+                frame_rate_numerator=repair.frame_rate.numerator,
+                frame_rate_denominator=repair.frame_rate.denominator,
+                issue_start_frame=repair.issue_range.start_frame,
+                issue_end_frame=repair.issue_range.end_frame,
+                generation_start_frame=repair.generation_range.start_frame,
+                generation_end_frame=repair.generation_range.end_frame,
+                candidate_core_start_frame=repair.candidate_core_range.start_frame,
+                candidate_core_end_frame=repair.candidate_core_range.end_frame,
+                provider_duration_seconds=repair.provider_duration_seconds,
+                prompt=repair.prompt,
+                negative_prompt=repair.negative_prompt,
+                input_hash=repair.input_hash,
+                status=repair.status,
+                preview_json=repair.preview.model_dump(mode="json", by_alias=True),
+                created_at=repair.created_at,
+            )
+            session.add(record)
+            session.flush()
+            return _video_repair_dto(record)
+
+    def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None:
+        with self._sessions() as session:
+            record = session.get(VideoRepairRecord, repair_id)
+            return _video_repair_dto(record) if record is not None else None
+
+    def list_video_repairs(self, project_id: uuid.UUID) -> list[VideoRepairDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(VideoRepairRecord)
+                .where(VideoRepairRecord.project_id == project_id)
+                .order_by(VideoRepairRecord.created_at.desc(), VideoRepairRecord.id.desc())
+            ).all()
+            return [_video_repair_dto(record) for record in records]
+
+    def set_video_repair_status(
+        self,
+        repair_id: uuid.UUID,
+        *,
+        status: VideoRepairStatus,
+        candidate_asset_id: uuid.UUID | None = None,
+    ) -> VideoRepairDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(VideoRepairRecord).where(VideoRepairRecord.id == repair_id).with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("video repair not found")
+            record.status = status
+            if candidate_asset_id is not None:
+                record.candidate_asset_id = candidate_asset_id
+            session.flush()
+            return _video_repair_dto(record)
+
+    def approve_video_repair(
+        self,
+        repair_id: uuid.UUID,
+        *,
+        edl: EditDecisionListV2,
+        source_selection_hash: str,
+        parent_edit_version_id: uuid.UUID | None,
+        candidate_asset_id: uuid.UUID,
+        candidate_source_range: FrameRange,
+        idempotency_key: str,
+    ) -> EditVersionDto:
+        with self._sessions.begin() as session:
+            repair = session.scalar(
+                select(VideoRepairRecord).where(VideoRepairRecord.id == repair_id).with_for_update()
+            )
+            if repair is None:
+                raise StudioNotFoundError("video repair not found")
+            if repair.approval_idempotency_key is not None:
+                if (
+                    repair.approval_idempotency_key != idempotency_key
+                    or repair.approved_edit_version_id is None
+                ):
+                    raise StudioConflictError(
+                        "repair approval idempotency key belongs to different input"
+                    )
+                existing = session.get(EditVersionRecord, repair.approved_edit_version_id)
+                if existing is None:
+                    raise StudioConflictError("approved edit version is missing")
+                return _edit_dto(existing)
+            conflicting = session.scalar(
+                select(VideoRepairRecord.id).where(
+                    VideoRepairRecord.approval_idempotency_key == idempotency_key,
+                    VideoRepairRecord.id != repair_id,
+                )
+            )
+            if conflicting is not None:
+                raise StudioConflictError(
+                    "repair approval idempotency key belongs to different input"
+                )
+            session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == repair.project_id).with_for_update()
+            )
+            current_video_id = session.scalar(
+                select(ProjectSelectionRecord.asset_id)
+                .where(
+                    ProjectSelectionRecord.project_id == repair.project_id,
+                    ProjectSelectionRecord.slot == "video",
+                    ProjectSelectionRecord.decision.in_(("selected", "approved")),
+                )
+                .order_by(
+                    ProjectSelectionRecord.created_at.desc(),
+                    ProjectSelectionRecord.id.desc(),
+                )
+                .limit(1)
+            )
+            active_edit_id = session.scalar(
+                select(EditVersionRecord.id).where(
+                    EditVersionRecord.project_id == repair.project_id,
+                    EditVersionRecord.active.is_(True),
+                )
+            )
+            if (
+                current_video_id != repair.base_video_asset_id
+                or active_edit_id != repair.base_edit_version_id
+            ):
+                repair.status = "outdated"
+                raise StudioConflictError("base timeline changed")
+            if (
+                repair.status != "candidate_ready"
+                or repair.candidate_asset_id != candidate_asset_id
+            ):
+                raise StudioConflictError("video repair has no matching candidate ready")
+            session.execute(
+                update(EditVersionRecord)
+                .where(
+                    EditVersionRecord.project_id == repair.project_id,
+                    EditVersionRecord.active.is_(True),
+                )
+                .values(active=False)
+            )
+            revision = int(
+                session.scalar(
+                    select(func.coalesce(func.max(EditVersionRecord.revision), 0)).where(
+                        EditVersionRecord.project_id == repair.project_id
+                    )
+                )
+                or 0
+            )
+            document = edl.model_dump(mode="json", by_alias=True)
+            edit = EditVersionRecord(
+                project_id=repair.project_id,
+                revision=revision + 1,
+                source_selection_hash=source_selection_hash,
+                edl_json=document,
+                status="draft",
+                parent_edit_version_id=parent_edit_version_id,
+                format_version=2,
+                active=True,
+                timeline_hash=_document_hash(document),
+            )
+            session.add(edit)
+            session.flush()
+            repair.status = "approved"
+            repair.candidate_core_start_frame = candidate_source_range.start_frame
+            repair.candidate_core_end_frame = candidate_source_range.end_frame
+            repair.approved_candidate_asset_id = candidate_asset_id
+            repair.approved_edit_version_id = edit.id
+            repair.approval_idempotency_key = idempotency_key
+            repair.approved_at = datetime.now(UTC)
+            session.flush()
+            return _edit_dto(edit)
+
 
 def _project_dto(record: ProjectRecord) -> ProjectDto:
     return ProjectDto(
@@ -990,9 +1185,7 @@ def _project_dto(record: ProjectRecord) -> ProjectDto:
 
 
 def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
-    call_limits = {
-        ValidationCallKind(key): value for key, value in record.call_limits_json.items()
-    }
+    call_limits = {ValidationCallKind(key): value for key, value in record.call_limits_json.items()}
     return ValidationRunDto(
         id=record.id,
         status=record.status,
@@ -1004,12 +1197,16 @@ def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
         targetBudgetCny=record.target_budget_cny,
         callLimits=call_limits,
         totalCallLimit=sum(call_limits.values()),
-        maximumVideoCalls=call_limits[ValidationCallKind.GENERATE_VIDEO],
+        maximumVideoCalls=(
+            call_limits[ValidationCallKind.GENERATE_VIDEO]
+            + call_limits.get(ValidationCallKind.REGENERATE_VIDEO_SEGMENT, 0)
+        ),
         provider=record.provider,
         models=record.models_json,
         capabilityRevision=record.capability_revision,
         costEstimateStatus=record.cost_estimate_status,
         canon=record.canon_snapshot_json,
+        repair=record.repair_snapshot_json,
         usage={ValidationCallKind(key): value for key, value in record.usage_json.items()},
         createdAt=record.created_at,
         authorizedAt=record.authorized_at,
@@ -1079,6 +1276,17 @@ def _shot_plan_dto(record: ShotPlanVersionRecord) -> ShotPlanVersionDto:
 
 
 def _asset_dto(record: AssetRecord) -> StoredAssetDto:
+    metadata = dict(record.metadata_json)
+    if record.width is not None:
+        metadata.setdefault("width", record.width)
+    if record.height is not None:
+        metadata.setdefault("height", record.height)
+    if record.duration_ms is not None:
+        metadata.setdefault("durationMs", record.duration_ms)
+        if record.media_type == "video":
+            metadata.setdefault("durationFrames", round(record.duration_ms * 24 / 1000))
+            metadata.setdefault("frameRateNumerator", 24)
+            metadata.setdefault("frameRateDenominator", 1)
     return StoredAssetDto(
         id=record.id,
         projectId=record.project_id,
@@ -1090,7 +1298,7 @@ def _asset_dto(record: AssetRecord) -> StoredAssetDto:
         storageKey=record.storage_key,
         sha256=record.sha256,
         byteSize=record.byte_size,
-        metadata=record.metadata_json,
+        metadata=metadata,
         createdAt=record.created_at,
     )
 
@@ -1098,12 +1306,16 @@ def _asset_dto(record: AssetRecord) -> StoredAssetDto:
 def _canon_profile_dto(session: Session, record: CanonProfileRecord) -> CanonProfileDto:
     fixed_document = record.profile_json.get("fixedAssets", {})
     fixed_ids = [uuid.UUID(str(item["assetId"])) for item in fixed_document.values()]
-    assets = {
-        asset.id: asset
-        for asset in session.scalars(
-            select(AssetRecord).where(AssetRecord.id.in_(fixed_ids))
-        ).all()
-    } if fixed_ids else {}
+    assets = (
+        {
+            asset.id: asset
+            for asset in session.scalars(
+                select(AssetRecord).where(AssetRecord.id.in_(fixed_ids))
+            ).all()
+        }
+        if fixed_ids
+        else {}
+    )
     return CanonProfileDto(
         id=record.id,
         version=record.version,
@@ -1143,9 +1355,7 @@ def _reserve_validation_call_in_session(
 ) -> ValidationRunRecord:
     """Lock and consume one paid-call allowance in the caller's job transaction."""
     record = session.scalar(
-        select(ValidationRunRecord)
-        .where(ValidationRunRecord.id == run_id)
-        .with_for_update()
+        select(ValidationRunRecord).where(ValidationRunRecord.id == run_id).with_for_update()
     )
     if record is None:
         raise StudioNotFoundError("validation run not found")
@@ -1157,17 +1367,17 @@ def _reserve_validation_call_in_session(
         resolution=record.resolution,
         aspect_ratio=record.aspect_ratio,
         target_budget_cny=record.target_budget_cny,
+        repair_topic=str(record.repair_snapshot_json["topic"]),
+        repair_start_frame=int(record.repair_snapshot_json["issueRange"]["startFrame"]),
+        repair_end_frame=int(record.repair_snapshot_json["issueRange"]["endFrame"]),
+        repair_prompt=str(record.repair_snapshot_json["prompt"]),
         call_limits={
-            ValidationCallKind(key): value
-            for key, value in record.call_limits_json.items()
+            ValidationCallKind(key): value for key, value in record.call_limits_json.items()
         },
     )
-    usage = {
-        ValidationCallKind(key): value for key, value in record.usage_json.items()
-    }
+    usage = {ValidationCallKind(key): value for key, value in record.usage_json.items()}
     record.usage_json = {
-        key.value: value
-        for key, value in reserve_validation_call(manifest, usage, kind).items()
+        key.value: value for key, value in reserve_validation_call(manifest, usage, kind).items()
     }
     return record
 
@@ -1185,15 +1395,59 @@ def _require_unique_validation_job(session: Session, job: JobDto) -> None:
 
 
 def _edit_dto(record: EditVersionRecord) -> EditVersionDto:
+    edl = (
+        EditDecisionListV2.model_validate(record.edl_json)
+        if record.format_version == 2
+        else EditDecisionListDto.model_validate(record.edl_json)
+    )
     return EditVersionDto(
         id=record.id,
         projectId=record.project_id,
         revision=record.revision,
         sourceSelectionHash=record.source_selection_hash,
-        edl=EditDecisionListDto.model_validate(record.edl_json),
+        edl=edl,
         status=record.status,
         renderedAssetId=record.rendered_asset_id,
+        parentEditVersionId=record.parent_edit_version_id,
+        formatVersion=record.format_version,
+        active=record.active,
+        timelineHash=record.timeline_hash,
         createdAt=record.created_at,
+    )
+
+
+def _video_repair_dto(record: VideoRepairRecord) -> VideoRepairDto:
+    return VideoRepairDto(
+        id=record.id,
+        projectId=record.project_id,
+        baseVideoAssetId=record.base_video_asset_id,
+        baseEditVersionId=record.base_edit_version_id,
+        baseTimelineHash=record.base_timeline_hash,
+        frameRate=RationalFrameRate(
+            numerator=record.frame_rate_numerator,
+            denominator=record.frame_rate_denominator,
+        ),
+        issueRange=FrameRange(startFrame=record.issue_start_frame, endFrame=record.issue_end_frame),
+        generationRange=FrameRange(
+            startFrame=record.generation_start_frame,
+            endFrame=record.generation_end_frame,
+        ),
+        candidateCoreRange=FrameRange(
+            startFrame=record.candidate_core_start_frame,
+            endFrame=record.candidate_core_end_frame,
+        ),
+        providerDurationSeconds=record.provider_duration_seconds,
+        prompt=record.prompt,
+        negativePrompt=record.negative_prompt,
+        inputHash=record.input_hash,
+        status=record.status,
+        candidateAssetId=record.candidate_asset_id,
+        approvedCandidateAssetId=record.approved_candidate_asset_id,
+        approvedEditVersionId=record.approved_edit_version_id,
+        approvalIdempotencyKey=record.approval_idempotency_key,
+        preview=record.preview_json,
+        createdAt=record.created_at,
+        approvedAt=record.approved_at,
     )
 
 
@@ -1210,6 +1464,20 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
             .order_by(AssetRecord.candidate_index, AssetRecord.created_at)
         ).all()
     )
+    publication_record = session.scalar(
+        select(MediaPublicationRecord).where(MediaPublicationRecord.job_id == record.id)
+    )
+    publication = (
+        JobPublicationDto(
+            id=publication_record.id,
+            state=publication_record.state,
+            publicHost=publication_record.public_host,
+            signedUrlExpiresAt=publication_record.signed_url_expires_at,
+            deleteAfter=publication_record.delete_after,
+        )
+        if publication_record is not None
+        else None
+    )
     return JobDto(
         id=record.id,
         projectId=record.project_id,
@@ -1222,8 +1490,10 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         providerTaskId=record.provider_task_id,
         validationRunId=record.validation_run_id,
         parentJobId=record.parent_job_id,
+        videoRepairId=record.video_repair_id,
         providerSubmissionStartedAt=record.provider_submission_started_at,
         providerResult=record.provider_result_json,
+        publication=publication,
         actualUsage=record.actual_usage_json,
         expectedCostMicros=record.expected_cost_micros,
         frozenInput=record.frozen_input_json,
@@ -1253,6 +1523,12 @@ def _add_job_event(
 
 def _selection_source_hash(project_id: uuid.UUID, slot: str, sha256: str) -> str:
     document = {"projectId": str(project_id), "slot": slot, "sha256": sha256}
+    return hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _document_hash(document: object) -> str:
     return hashlib.sha256(
         json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

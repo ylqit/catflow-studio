@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runtime/object-publisher/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Object Publisher */
+        post: operations["check_object_publisher_api_v1_runtime_object_publisher_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runtime/settings": {
         parameters: {
             query?: never;
@@ -553,6 +570,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-repairs/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Video Repair */
+        post: operations["preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-repairs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Repairs */
+        get: operations["video_repairs_api_v1_projects__project_id__video_repairs_get"];
+        put?: never;
+        /** Create Video Repair */
+        post: operations["create_video_repair_api_v1_projects__project_id__video_repairs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-repairs/{repair_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Repair */
+        get: operations["video_repair_api_v1_projects__project_id__video_repairs__repair_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Video Repair */
+        post: operations["approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Video Repair */
+        post: operations["reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -863,6 +966,21 @@ export interface components {
             /** Omittedreason */
             omittedReason?: string | null;
         };
+        /** EditAudioV2 */
+        EditAudioV2: {
+            /**
+             * Policy
+             * @constant
+             */
+            policy: "preserve_original";
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256: string;
+        };
         /** EditCreateCommand */
         EditCreateCommand: {
             edl: components["schemas"]["EditDecisionListDto"];
@@ -880,8 +998,53 @@ export interface components {
             audioPolicy: "native" | "mute" | "native_fades";
             output: components["schemas"]["EditOutputDto"];
         };
+        /** EditDecisionListV2 */
+        EditDecisionListV2: {
+            /**
+             * Format
+             * @constant
+             */
+            format: "catflow-edl-v2";
+            frameRate: components["schemas"]["RationalFrameRate"];
+            /**
+             * Rootvideoassetid
+             * Format: uuid
+             */
+            rootVideoAssetId: string;
+            /** Rootvideosha256 */
+            rootVideoSha256: string;
+            /** Videosegments */
+            videoSegments: components["schemas"]["EditVideoSegment"][];
+            /** Transitions */
+            transitions?: components["schemas"]["EditTransitionV2"][];
+            audio: components["schemas"]["EditAudioV2"];
+            output: components["schemas"]["EditOutputV2"];
+        };
         /** EditOutputDto */
         EditOutputDto: {
+            /**
+             * Aspectratio
+             * @constant
+             */
+            aspectRatio: "9:16";
+            /**
+             * Width
+             * @constant
+             */
+            width: 720;
+            /**
+             * Height
+             * @constant
+             */
+            height: 1280;
+            /**
+             * Format
+             * @constant
+             */
+            format: "mp4";
+        };
+        /** EditOutputV2 */
+        EditOutputV2: {
             /**
              * Aspectratio
              * @constant
@@ -929,6 +1092,21 @@ export interface components {
             /** Durationms */
             durationMs: number;
         };
+        /** EditTransitionV2 */
+        EditTransitionV2: {
+            /** Aftersegmentindex */
+            afterSegmentIndex: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "cut" | "dissolve";
+            /**
+             * Durationframes
+             * @enum {integer}
+             */
+            durationFrames: 0 | 2 | 4 | 6;
+        };
         /** EditVersionDto */
         EditVersionDto: {
             /**
@@ -945,7 +1123,8 @@ export interface components {
             revision: number;
             /** Sourceselectionhash */
             sourceSelectionHash: string;
-            edl: components["schemas"]["EditDecisionListDto"];
+            /** Edl */
+            edl: components["schemas"]["EditDecisionListDto"] | components["schemas"]["EditDecisionListV2"];
             /**
              * Status
              * @enum {string}
@@ -953,11 +1132,52 @@ export interface components {
             status: "draft" | "rendered" | "approved";
             /** Renderedassetid */
             renderedAssetId?: string | null;
+            /** Parenteditversionid */
+            parentEditVersionId?: string | null;
+            /**
+             * Formatversion
+             * @default 1
+             * @enum {integer}
+             */
+            formatVersion: 1 | 2;
+            /**
+             * Active
+             * @default false
+             */
+            active: boolean;
+            /** Timelinehash */
+            timelineHash?: string | null;
             /**
              * Createdat
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** EditVideoSegment */
+        EditVideoSegment: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256: string;
+            /** Sourceinframe */
+            sourceInFrame: number;
+            /** Durationframes */
+            durationFrames: number;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "base_video" | "repair_candidate";
+            /** Repairid */
+            repairId?: string | null;
         };
         /** EnvironmentPresetDto */
         EnvironmentPresetDto: {
@@ -997,6 +1217,13 @@ export interface components {
              * Format: uuid
              */
             assetId: string;
+        };
+        /** FrameRange */
+        FrameRange: {
+            /** Startframe */
+            startFrame: number;
+            /** Endframe */
+            endFrame: number;
         };
         /** GenerationCommand */
         GenerationCommand: {
@@ -1100,7 +1327,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "render_export";
+            kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
             /**
              * Status
              * @enum {string}
@@ -1120,12 +1347,15 @@ export interface components {
             validationRunId?: string | null;
             /** Parentjobid */
             parentJobId?: string | null;
+            /** Videorepairid */
+            videoRepairId?: string | null;
             /** Providersubmissionstartedat */
             providerSubmissionStartedAt?: string | null;
             /** Providerresult */
             providerResult?: {
                 [key: string]: unknown;
             } | null;
+            publication?: components["schemas"]["JobPublicationDto"] | null;
             /** Actualusage */
             actualUsage?: {
                 [key: string]: unknown;
@@ -1154,6 +1384,28 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** JobPublicationDto */
+        JobPublicationDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "uploading" | "ready" | "delete_pending" | "deleted" | "failed";
+            /** Publichost */
+            publicHost: string;
+            /** Signedurlexpiresat */
+            signedUrlExpiresAt?: string | null;
+            /**
+             * Deleteafter
+             * Format: date-time
+             */
+            deleteAfter: string;
         };
         /** LifeClipSpec */
         LifeClipSpec: {
@@ -1411,6 +1663,169 @@ export interface components {
              */
             createdAt: string;
         };
+        /** RationalFrameRate */
+        RationalFrameRate: {
+            /** Numerator */
+            numerator: number;
+            /** Denominator */
+            denominator: number;
+        };
+        /** SegmentRepairApproveCommand */
+        SegmentRepairApproveCommand: {
+            /**
+             * Candidateassetid
+             * Format: uuid
+             */
+            candidateAssetId: string;
+            candidateSourceRange: components["schemas"]["FrameRange"];
+            transition: components["schemas"]["SegmentRepairTransitionCommand"];
+            /** Expectedbasetimelinehash */
+            expectedBaseTimelineHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Qualitychecks */
+            qualityChecks: {
+                [key: string]: "pass" | "warning" | "fail";
+            };
+            /** Seamchecks */
+            seamChecks: {
+                [key: string]: "pass" | "warning" | "fail";
+            };
+        };
+        /** SegmentRepairCreateCommand */
+        SegmentRepairCreateCommand: {
+            /**
+             * Repairid
+             * Format: uuid
+             */
+            repairId: string;
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Expectedcostmicros */
+            expectedCostMicros?: number | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Validationrunid */
+            validationRunId?: string | null;
+            /**
+             * Paidconfirmation
+             * @constant
+             */
+            paidConfirmation: true;
+        };
+        /** SegmentRepairImageReferenceDto */
+        SegmentRepairImageReferenceDto: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "anchor_in" | "anchor_out" | "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board";
+            /** Assetid */
+            assetId?: string | null;
+            /** Sha256 */
+            sha256: string;
+            /** Framenumber */
+            frameNumber?: number | null;
+            /**
+             * Derived
+             * @default false
+             */
+            derived: boolean;
+        };
+        /** SegmentRepairPreviewCommand */
+        SegmentRepairPreviewCommand: {
+            /**
+             * Basevideoassetid
+             * Format: uuid
+             */
+            baseVideoAssetId: string;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
+            issueRange: components["schemas"]["FrameRange"];
+            /** Prompt */
+            prompt: string;
+            /** Validationrunid */
+            validationRunId?: string | null;
+        };
+        /** SegmentRepairPreviewDto */
+        SegmentRepairPreviewDto: {
+            /**
+             * Repairid
+             * Format: uuid
+             */
+            repairId: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /**
+             * Basevideoassetid
+             * Format: uuid
+             */
+            baseVideoAssetId: string;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
+            /** Basetimelinehash */
+            baseTimelineHash: string;
+            frameRate: components["schemas"]["RationalFrameRate"];
+            issueRange: components["schemas"]["FrameRange"];
+            generationRange: components["schemas"]["FrameRange"];
+            candidateCoreRange: components["schemas"]["FrameRange"];
+            /** Providerdurationseconds */
+            providerDurationSeconds: number;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /** Prompt */
+            prompt: string;
+            /** Negativeprompt */
+            negativePrompt: string;
+            /** Imagereferences */
+            imageReferences: components["schemas"]["SegmentRepairImageReferenceDto"][];
+            videoReference: components["schemas"]["SegmentRepairVideoReferenceDto"];
+            /** Expectedcostmicros */
+            expectedCostMicros?: number | null;
+            /**
+             * Costestimatestatus
+             * @enum {string}
+             */
+            costEstimateStatus: "priced" | "unmetered_paid";
+            /** Inputhash */
+            inputHash: string;
+        };
+        /** SegmentRepairTransitionCommand */
+        SegmentRepairTransitionCommand: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "cut" | "dissolve";
+            /**
+             * Durationframes
+             * @enum {integer}
+             */
+            durationFrames: 0 | 2 | 4 | 6;
+        };
+        /** SegmentRepairVideoReferenceDto */
+        SegmentRepairVideoReferenceDto: {
+            /**
+             * Role
+             * @constant
+             */
+            role: "reference_video";
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256: string;
+            range: components["schemas"]["FrameRange"];
+        };
         /** SelectionCommand */
         SelectionCommand: {
             /** Slot */
@@ -1559,7 +1974,7 @@ export interface components {
          * ValidationCallKind
          * @enum {string}
          */
-        ValidationCallKind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video";
+        ValidationCallKind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment";
         /** ValidationCanonReferenceDto */
         ValidationCanonReferenceDto: {
             /**
@@ -1612,6 +2027,17 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** ValidationRepairSnapshotDto */
+        ValidationRepairSnapshotDto: {
+            /**
+             * Topic
+             * @constant
+             */
+            topic: "雨天擦爪";
+            issueRange: components["schemas"]["FrameRange"];
+            /** Prompt */
+            prompt: string;
+        };
         /** ValidationRunCreateCommand */
         ValidationRunCreateCommand: {
             /** Expectedmanifesthash */
@@ -1657,7 +2083,18 @@ export interface components {
              * @enum {string}
              */
             costEstimateStatus: "priced" | "unmetered_paid";
+            /**
+             * Authorizationready
+             * @default true
+             */
+            authorizationReady: boolean;
+            /**
+             * Blockingreasons
+             * @default []
+             */
+            blockingReasons: string[];
             canon?: components["schemas"]["ValidationCanonSnapshotDto"] | null;
+            repair: components["schemas"]["ValidationRepairSnapshotDto"];
             /**
              * Id
              * Format: uuid
@@ -1715,7 +2152,18 @@ export interface components {
              * @enum {string}
              */
             costEstimateStatus: "priced" | "unmetered_paid";
+            /**
+             * Authorizationready
+             * @default true
+             */
+            authorizationReady: boolean;
+            /**
+             * Blockingreasons
+             * @default []
+             */
+            blockingReasons: string[];
             canon: components["schemas"]["ValidationCanonSnapshotDto"];
+            repair: components["schemas"]["ValidationRepairSnapshotDto"];
         };
         /** VideoDiagnosisCommand */
         VideoDiagnosisCommand: {
@@ -1735,6 +2183,61 @@ export interface components {
              * @default false
              */
             paidCallAcknowledged: boolean;
+        };
+        /** VideoRepairDto */
+        VideoRepairDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /**
+             * Basevideoassetid
+             * Format: uuid
+             */
+            baseVideoAssetId: string;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
+            /** Basetimelinehash */
+            baseTimelineHash: string;
+            frameRate: components["schemas"]["RationalFrameRate"];
+            issueRange: components["schemas"]["FrameRange"];
+            generationRange: components["schemas"]["FrameRange"];
+            candidateCoreRange: components["schemas"]["FrameRange"];
+            /** Providerdurationseconds */
+            providerDurationSeconds: number;
+            /** Prompt */
+            prompt: string;
+            /** Negativeprompt */
+            negativePrompt: string;
+            /** Inputhash */
+            inputHash: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "generating" | "candidate_ready" | "approved" | "rejected" | "outdated" | "cancelled";
+            /** Candidateassetid */
+            candidateAssetId?: string | null;
+            /** Approvedcandidateassetid */
+            approvedCandidateAssetId?: string | null;
+            /** Approvededitversionid */
+            approvedEditVersionId?: string | null;
+            /** Approvalidempotencykey */
+            approvalIdempotencyKey?: string | null;
+            preview: components["schemas"]["SegmentRepairPreviewDto"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Approvedat */
+            approvedAt?: string | null;
         };
     };
     responses: never;
@@ -1768,6 +2271,28 @@ export interface operations {
         };
     };
     runtime_bootstrap_api_v1_runtime_bootstrap_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    check_object_publisher_api_v1_runtime_object_publisher_check_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2910,6 +3435,213 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentRepairPreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SegmentRepairPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_repairs_api_v1_projects__project_id__video_repairs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoRepairDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_video_repair_api_v1_projects__project_id__video_repairs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentRepairCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_repair_api_v1_projects__project_id__video_repairs__repair_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                repair_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoRepairDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                repair_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentRepairApproveCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                repair_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoRepairDto"];
                 };
             };
             /** @description Validation Error */

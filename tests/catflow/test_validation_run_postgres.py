@@ -32,6 +32,7 @@ def _runtime() -> ProviderRuntime:
         capability_revision="ark-seedance-2.0-v1",
         paid_calls_enabled=True,
         maximum_video_references=5,
+        segment_reference_publishing_ready=True,
     )
 
 

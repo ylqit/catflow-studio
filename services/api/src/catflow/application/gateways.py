@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,42 @@ class VideoPollResult:
     resolution: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class SegmentVideoGenerationRequest:
+    prompt: str
+    negative_prompt: str
+    context_video_url: str
+    anchor_in_path: Path
+    anchor_out_path: Path
+    canon_reference_paths: tuple[Path, ...]
+    canon_reference_roles: tuple[str, ...]
+    duration_seconds: int
+    resolution: Literal["480p"]
+    ratio: Literal["9:16"]
+
+    def __post_init__(self) -> None:
+        if not 4 <= self.duration_seconds <= 15:
+            raise ValueError("segment generation duration must be between 4 and 15 seconds")
+        if len(self.canon_reference_paths) != 5:
+            raise ValueError("segment generation requires all five Canon references")
+        if self.canon_reference_roles != (
+            "episode_child",
+            "episode_cat",
+            "pair_scale",
+            "environment",
+            "style_board",
+        ):
+            raise ValueError("segment generation Canon roles are incomplete or out of order")
+        parsed = urlsplit(self.context_video_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError("segment generation context video must use an HTTPS URL")
+
+
 class PlanningGateway(Protocol):
     def plan_story(
         self, *, prompt: str, output_schema: dict[str, object]
@@ -70,6 +107,10 @@ class VideoGenerationGateway(Protocol):
         reference_roles: tuple[str, ...],
         duration_seconds: int,
         resolution: str,
+    ) -> VideoSubmissionResult: ...
+
+    def submit_segment_video(
+        self, request: SegmentVideoGenerationRequest
     ) -> VideoSubmissionResult: ...
 
     def poll_video(self, task_id: str) -> VideoPollResult: ...

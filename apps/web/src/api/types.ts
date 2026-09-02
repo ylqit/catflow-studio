@@ -1,3 +1,19 @@
+import type { components } from "@catflow/contracts";
+
+export interface ObjectPublisherRuntimeDto {
+  configured: boolean;
+  ready: boolean;
+  backend: "s3";
+  endpointHost: string;
+  publicHost: string;
+  bucket: string;
+  region: string;
+  addressingStyle: "virtual" | "path";
+  presignTtlSeconds: number;
+  retentionDays: number;
+  error?: { code: string; message: string } | null;
+}
+
 export interface RuntimeBootstrapDto {
   csrfToken: string;
   baseUrl: string;
@@ -6,6 +22,7 @@ export interface RuntimeBootstrapDto {
   workerReady: boolean;
   ffmpegReady: boolean;
   ffprobeReady: boolean;
+  objectPublisher: ObjectPublisherRuntimeDto;
   provider: {
     name: "fake" | "ark";
     planningModel: string;
@@ -15,6 +32,12 @@ export interface RuntimeBootstrapDto {
     capabilityRevision: string;
     paidCallsEnabled: boolean;
     apiKeyConfigured: boolean;
+    segmentRepair: {
+      supported: boolean;
+      blockedReason: string | null;
+      maximumImageReferences: number;
+      maximumVideoReferences: number;
+    };
   };
 }
 
@@ -23,7 +46,8 @@ export type ValidationCallKind =
   | "generate_image"
   | "diagnose_image"
   | "generate_video"
-  | "diagnose_video";
+  | "diagnose_video"
+  | "regenerate_video_segment";
 
 export type FixedCanonRole = "episode_child" | "episode_cat" | "pair_scale" | "style_board";
 
@@ -54,7 +78,14 @@ export interface ValidationRunPreviewDto {
   models: Record<string, string>;
   capabilityRevision: string;
   costEstimateStatus: "priced" | "unmetered_paid";
+  authorizationReady: boolean;
+  blockingReasons: string[];
   canon: ValidationCanonSnapshotDto;
+  repair: {
+    topic: "雨天擦爪";
+    issueRange: FrameRangeDto;
+    prompt: string;
+  };
 }
 
 export interface ValidationRunDto extends Omit<ValidationRunPreviewDto, "canon"> {
@@ -83,7 +114,7 @@ export interface ProjectDto extends ProjectCreate {
 export interface JobDto {
   id: string;
   projectId: string;
-  kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "render_export";
+  kind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
   status:
     | "queued"
     | "submitting"
@@ -100,11 +131,22 @@ export interface JobDto {
   model?: string;
   providerTaskId?: string;
   validationRunId?: string;
+  videoRepairId?: string;
   expectedCostMicros?: number | null;
+  providerResult?: Record<string, unknown> | null;
+  publication?: {
+    id: string;
+    state: "uploading" | "ready" | "delete_pending" | "deleted" | "failed";
+    publicHost: string;
+    signedUrlExpiresAt?: string | null;
+    deleteAfter: string;
+  } | null;
+  actualUsage?: Record<string, unknown> | null;
   frozenInput: Record<string, unknown>;
   resultAssetIds: string[];
   error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; timedOut?: boolean };
 }
+
 
 export interface PlannerMessageDto {
   id: string;
@@ -298,11 +340,23 @@ export interface EditVersionDto {
   projectId: string;
   revision: number;
   sourceSelectionHash: string;
-  edl: EditDecisionListDto;
+  edl: EditDecisionListDto | EditDecisionListV2Dto;
   status: "draft" | "rendered" | "approved";
   renderedAssetId?: string;
+  parentEditVersionId?: string;
+  formatVersion: 1 | 2;
+  active: boolean;
+  timelineHash?: string;
   createdAt: string;
 }
+
+export type FrameRangeDto = components["schemas"]["FrameRange"];
+export type EditDecisionListV2Dto = components["schemas"]["EditDecisionListV2"];
+export type SegmentRepairPreviewCommand = components["schemas"]["SegmentRepairPreviewCommand"];
+export type SegmentRepairPreviewDto = components["schemas"]["SegmentRepairPreviewDto"];
+export type SegmentRepairCreateCommand = components["schemas"]["SegmentRepairCreateCommand"];
+export type SegmentRepairApproveCommand = components["schemas"]["SegmentRepairApproveCommand"];
+export type VideoRepairDto = components["schemas"]["VideoRepairDto"];
 
 export interface WorkspaceDto {
     eventCursor: number;
@@ -313,4 +367,5 @@ export interface WorkspaceDto {
   selections: Partial<Record<AssetSlot, AssetDto>>;
   selectionHash: string;
   latestVideoJob?: JobDto | null;
+  latestRepairJob?: JobDto | null;
 }

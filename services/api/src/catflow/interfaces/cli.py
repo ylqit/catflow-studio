@@ -17,6 +17,7 @@ from catflow.infrastructure.database import (
     create_session_factory,
 )
 from catflow.infrastructure.media import LocalMediaStore
+from catflow.infrastructure.object_storage import ObjectPublisherRuntime
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow.interfaces.api import AppSettings, create_app
 
@@ -33,11 +34,14 @@ def serve(
 ) -> None:
     """Serve the CatFlow API and built Vue application on the loopback interface."""
     project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
-    load_dotenv(project_root / ".env", override=True)
+    load_dotenv(project_root / ".env", override=False)
     paths = RuntimePaths.from_env(project_root)
     configured = RuntimeConfig.from_env()
     runtime = RuntimeConfig(port=port or configured.port)
-    provider_runtime = ProviderRuntime.from_env()
+    object_publisher_runtime = ObjectPublisherRuntime.from_env()
+    provider_runtime = ProviderRuntime.from_env(
+        segment_reference_publishing_ready=object_publisher_runtime.status.ready
+    )
 
     spa_dist = project_root / "apps" / "web" / "dist"
     if not (spa_dist / "index.html").is_file():
@@ -62,6 +66,7 @@ def serve(
         ),
         media_store=LocalMediaStore(paths.media_root),
         spa_dist=spa_dist,
+        object_publisher_runtime=object_publisher_runtime,
     )
     application.state.database_engine = engine
     uvicorn.run(application, host=runtime.host, port=runtime.port)

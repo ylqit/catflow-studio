@@ -10,8 +10,10 @@ const projects = ref<ProjectDto[]>([]);
 const authorizing = ref(false);
 const error = ref("");
 const usedTotal = computed(() => run.value
+  && run.value.manifestHash === preview.value?.manifestHash
   ? Object.values(run.value.usage).reduce((sum, count) => sum + count, 0)
   : 0);
+const currentRun = computed(() => run.value?.manifestHash === preview.value?.manifestHash ? run.value : null);
 const canonLabels: Record<string, string> = {
   episode_child: "儿童身份",
   episode_cat: "猫咪身份",
@@ -62,19 +64,22 @@ onMounted(load);
     <section class="page-heading"><div><p class="eyebrow">Paid release gate</p><h1>首批 3 主题真实验收</h1><p class="subtitle">这里只冻结授权和显示额度；每一步仍需进入普通五步页面由用户点击完成。</p></div><RouterLink class="secondary" to="/settings">返回运行设置</RouterLink></section>
     <p v-if="error" class="notice error">{{ error }}</p>
     <section v-if="preview" class="manifest card" data-testid="validation-manifest">
-      <header><div><p class="eyebrow">Frozen manifest</p><h2>一次性付费授权清单</h2></div><span class="pill" :class="{ good: run?.status === 'authorized', warn: run?.status === 'paused' }">{{ run?.status ?? "未授权" }}</span></header>
+      <header><div><p class="eyebrow">Frozen manifest</p><h2>一次性付费授权清单</h2></div><span class="pill" :class="{ good: currentRun?.status === 'authorized', warn: currentRun?.status === 'paused' }">{{ currentRun?.status ?? "未授权" }}</span></header>
+      <p v-if="run && !currentRun" class="notice warn">检测到旧 Manifest 授权 {{ run.manifestHash.slice(0, 12) }}；本次 10/4 清单必须重新授权，旧额度不会复用。</p>
+      <p v-for="reason in preview.blockingReasons" :key="reason" class="notice error">付费授权已阻断：{{ reason }}</p>
       <div class="manifest-facts"><div><small>主题</small><b>{{ preview.topics.length }} 个固定原创主题</b></div><div><small>规格</small><b>{{ preview.durationSeconds }} 秒 · {{ preview.resolution }} · {{ preview.aspectRatio }}</b></div><div><small>参考</small><b>完整五张，服务端固定顺序</b></div><div><small>预算参考</small><b>¥{{ preview.targetBudgetCny }} · 未计价付费调用</b></div><div><small>总调用上限</small><b>{{ preview.totalCallLimit }}</b></div><div><small>视频上限</small><b>{{ preview.maximumVideoCalls }}</b></div></div>
       <ul class="topics"><li v-for="topic in preview.topics" :key="topic">{{ topic }}</li></ul>
+      <section class="repair-snapshot"><p class="eyebrow">Frozen repair</p><h3>{{ preview.repair.topic }} · [{{ preview.repair.issueRange.startFrame }}, {{ preview.repair.issueRange.endFrame }})</h3><p>{{ preview.repair.prompt }}</p></section>
       <section class="canon-snapshot" data-testid="validation-canon-snapshot">
         <header><div><p class="eyebrow">Frozen Canon</p><h3>6–7 岁 · 120 cm · Revision {{ preview.canon.version }}</h3></div><span class="pill good">4/4</span></header>
         <div class="hash"><span>Profile SHA256</span><code>{{ preview.canon.profileHash }}</code></div>
         <div class="canon-references"><div v-for="reference in preview.canon.references" :key="reference.role"><b>{{ canonLabels[reference.role] }}</b><code>{{ reference.sha256 }}</code></div></div>
       </section>
       <div class="models"><span v-for="(model, role) in preview.models" :key="role"><small>{{ role }}</small><code>{{ model }}</code></span></div>
-      <table><thead><tr><th>调用类型</th><th>上限</th><th>已用</th></tr></thead><tbody><tr v-for="(limit, kind) in preview.callLimits" :key="kind"><td>{{ kind }}</td><td>{{ limit }}</td><td>{{ run?.usage[kind] ?? 0 }}</td></tr></tbody><tfoot><tr><th>总计</th><th>{{ preview.totalCallLimit }}</th><th>{{ usedTotal }}</th></tr></tfoot></table>
+      <table><thead><tr><th>调用类型</th><th>上限</th><th>已用</th></tr></thead><tbody><tr v-for="(limit, kind) in preview.callLimits" :key="kind"><td>{{ kind }}</td><td>{{ limit }}</td><td>{{ currentRun?.usage[kind] ?? 0 }}</td></tr></tbody><tfoot><tr><th>总计</th><th>{{ preview.totalCallLimit }}</th><th>{{ usedTotal }}</th></tr></tfoot></table>
       <div class="hash"><span>Manifest SHA256</span><code>{{ preview.manifestHash }}</code></div>
-      <button v-if="!run || ['cancelled', 'completed'].includes(run.status)" class="primary authorize" :disabled="authorizing" @click="authorize">{{ authorizing ? "授权中…" : "授权首批运行（最多 9 次 / 3 次视频）" }}</button>
-      <button v-else-if="run.status === 'authorized'" class="secondary authorize" @click="pause">暂停剩余付费调用</button>
+      <button v-if="!currentRun || ['cancelled', 'completed'].includes(currentRun.status)" class="primary authorize" :disabled="authorizing || !preview.authorizationReady" @click="authorize">{{ authorizing ? "授权中…" : "授权首批运行（最多 10 次 / 4 次视频，含 1 次片段修复）" }}</button>
+      <button v-else-if="currentRun.status === 'authorized'" class="secondary authorize" @click="pause">暂停剩余付费调用</button>
     </section>
     <section v-if="preview" class="topic-grid">
       <article v-for="(topic, index) in preview.topics" :key="topic" class="card topic"><span>0{{ index + 1 }}</span><div><h2>{{ topic }}</h2><p>12 秒 · 3 个约 4 秒镜头 · 一次视频生成</p></div><RouterLink v-if="projectFor(topic)" class="secondary" :to="`/projects/${projectFor(topic)!.id}/planner`">继续普通五步流程</RouterLink><RouterLink v-else class="primary" :to="{ path: '/projects', query: { topic } }">去新建短片</RouterLink></article>

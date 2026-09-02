@@ -230,6 +230,7 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     workspace = service.workspace(project.id)
     assert workspace["latestVideoJob"]["id"] == str(first_video_job.id)
     assert workspace["eventCursor"] >= 1
+    assert all("storageKey" not in asset for asset in workspace["selections"].values())
     assert first_video_job.frozen_input["referenceAssetIds"] == [
         str(selected_assets[slot])
         for slot in (

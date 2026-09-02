@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import { api } from "../../api/client";
 import type { AssetDto, EditDecisionListDto, EditVersionDto, JobDto, WorkspaceDto } from "../../api/types";
 import { validateEditDecisionList } from "../../editing";
 import { mountWebAvPreview, type WebAvPreviewController } from "../../webavPreview";
+import VideoRepairWorkspace from "./VideoRepairWorkspace.vue";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -35,7 +36,26 @@ async function load() {
   edits.value = await api.edits(props.projectId);
   const assets = await api.assets(props.projectId);
   finalAssets.value = assets.filter((asset) => asset.role === "final");
-  savedEdit.value = edits.value[0] ?? null;
+  savedEdit.value = edits.value.find((edit) => edit.active) ?? edits.value[0] ?? null;
+}
+
+async function handleRepairChanged() {
+  await load();
+  emit("changed");
+}
+
+async function syncFromWorkspaceEvent() {
+  const pendingJob = exportJob.value;
+  const [refreshedJob] = await Promise.all([
+    pendingJob ? api.job(pendingJob.id) : Promise.resolve(null),
+    load(),
+  ]);
+  if (refreshedJob) exportJob.value = refreshedJob;
+}
+
+function metadataNumber(asset: AssetDto, key: string): number | null {
+  const value = asset.metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function saveEdit() {
@@ -81,6 +101,7 @@ async function startWebAv() {
 }
 
 onMounted(load);
+watch(() => props.workspace.eventCursor, () => void syncFromWorkspaceEvent());
 onBeforeUnmount(() => webavController.value?.destroy());
 </script>
 
@@ -105,9 +126,10 @@ onBeforeUnmount(() => webavController.value?.destroy());
     </div>
     <aside class="delivery-side">
       <div class="card version-card"><p class="eyebrow">Edit versions</p><h2>不可变剪辑版本</h2><div v-if="!edits.length" class="empty">保存后产生第一个版本。</div><article v-for="edit in edits" :key="edit.id"><b>Revision {{ edit.revision }}</b><span class="pill" :class="{ good: edit.status === 'approved' }">{{ edit.status }}</span><small>{{ new Date(edit.createdAt).toLocaleString("zh-CN") }}</small></article></div>
-      <div class="card export-card"><p class="eyebrow">Final exports</p><h2>正式成片</h2><p v-if="exportJob" class="notice">导出任务：{{ exportJob.status }}。浏览器关闭后 Worker 仍会继续。</p><div v-if="!finalAssets.length" class="empty">还没有 FFmpeg 成片。</div><article v-for="asset in finalAssets" :key="asset.id"><video controls :src="`/api/v1/assets/${asset.id}/content`" /><button v-if="workspace.selections.final?.id !== asset.id" class="primary" @click="approve(asset.id)">批准为最终成片</button><span v-else class="pill good">已批准</span></article></div>
+      <div class="card export-card"><p class="eyebrow">Final exports</p><h2>正式成片</h2><p v-if="exportJob" class="notice">导出任务：{{ exportJob.status }}。浏览器关闭后 Worker 仍会继续。</p><div v-if="!finalAssets.length" class="empty">还没有 FFmpeg 成片。</div><article v-for="asset in finalAssets" :key="asset.id"><video controls :src="`/api/v1/assets/${asset.id}/content`" /><dl class="technical-proof"><div><dt>Asset SHA256</dt><dd><code>{{ asset.sha256 }}</code></dd></div><div><dt>画幅</dt><dd>{{ metadataNumber(asset, "width") }} × {{ metadataNumber(asset, "height") }}</dd></div><div><dt>帧与时长</dt><dd>{{ metadataNumber(asset, "durationFrames") }} 帧 · {{ ((metadataNumber(asset, "durationMs") ?? 0) / 1000).toFixed(3) }} 秒</dd></div><div><dt>视频编码</dt><dd>{{ asset.metadata.codec ?? "未知" }}</dd></div><div><dt>音轨</dt><dd>{{ asset.metadata.audioPolicy === "preserve_original" && asset.metadata.candidateAudioUsed === false ? "根视频原音轨" : "按 EDL 输出" }}<span v-if="asset.metadata.audioCodec"> · {{ asset.metadata.audioCodec }}</span></dd></div></dl><button v-if="workspace.selections.final?.id !== asset.id" class="primary" @click="approve(asset.id)">批准为最终成片</button><span v-else class="pill good">已批准</span></article></div>
     </aside>
   </section>
+  <VideoRepairWorkspace v-if="workspace.selections.video" :project-id="projectId" :workspace="workspace" @changed="handleRepairChanged" />
 </template>
 
 <style scoped>
@@ -141,4 +163,5 @@ onBeforeUnmount(() => webavController.value?.destroy());
 .version-card article small { grid-column: span 2; color: var(--muted); }
 .export-card article { display: grid; gap: 10px; margin-top: 13px; }
 .export-card video { width: 100%; max-height: 310px; background: #222; }
+.technical-proof { display: grid; gap: 6px; margin: 0; }.technical-proof div { display: grid; grid-template-columns: 75px minmax(0, 1fr); gap: 8px; font-size: 9px; }.technical-proof dt { color: var(--muted); }.technical-proof dd { margin: 0; overflow-wrap: anywhere; }
 </style>

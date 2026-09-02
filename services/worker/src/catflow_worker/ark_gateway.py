@@ -12,6 +12,7 @@ from PIL import Image
 from catflow.application.gateways import (
     ImageProviderResult,
     ProviderGatewayError,
+    SegmentVideoGenerationRequest,
     StructuredProviderResult,
     VideoPollResult,
     VideoSubmissionResult,
@@ -61,7 +62,12 @@ class ArkGatewaySettings:
 class ArkTypedGateway:
     """Typed Ark transport boundary; it never mutates CatFlow business state."""
 
-    def __init__(self, settings: ArkGatewaySettings, *, client: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: ArkGatewaySettings,
+        *,
+        client: Any | None = None,
+    ) -> None:
         self._settings = settings
         if client is None:
             from volcenginesdkarkruntime import Ark
@@ -229,6 +235,73 @@ class ArkTypedGateway:
                 "message": str(getattr(error, "message", "Seedance task failed")),
                 "retryable": False,
             },
+        )
+
+    def submit_segment_video(
+        self, request: SegmentVideoGenerationRequest
+    ) -> VideoSubmissionResult:
+        image_paths = (
+            request.anchor_in_path,
+            request.anchor_out_path,
+            *request.canon_reference_paths,
+        )
+        image_roles = (
+            "anchor_in",
+            "anchor_out",
+            *request.canon_reference_roles,
+        )
+        role_sequence = " → ".join(image_roles)
+        content: list[dict[str, object]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"{request.prompt}\n负面约束：{request.negative_prompt}\n"
+                    "视频1只负责原动作、机位、节奏和前后连续性；"
+                    f"图片职责按顺序为：{role_sequence}。"
+                ),
+            },
+            {
+                "type": "video_url",
+                "video_url": {"url": request.context_video_url},
+                "role": "reference_video",
+            },
+        ]
+        content.extend(
+            {
+                "type": "image_url",
+                "image_url": {"url": _image_data_url(path)},
+                "role": "reference_image",
+            }
+            for path in image_paths
+        )
+        try:
+            response = self._client.content_generation.tasks.create(
+                model=self._settings.video_model,
+                content=content,
+                return_last_frame=True,
+                generate_audio=False,
+                watermark=False,
+                resolution=request.resolution,
+                ratio=request.ratio,
+                duration=request.duration_seconds,
+                timeout=self._settings.request_timeout_seconds,
+            )
+        except Exception as exc:
+            raise _provider_error(exc, submission=True) from exc
+        task_id = str(getattr(response, "id", "")).strip()
+        if not task_id:
+            raise ProviderGatewayError(
+                code="empty_task_id",
+                message="Seedance did not return a segment repair task ID",
+                retryable=False,
+                submission_unknown=True,
+            )
+        return VideoSubmissionResult(
+            task_id=task_id,
+            request_id=_optional_string(
+                getattr(response, "request_id", None)
+                or getattr(response, "_request_id", None)
+            ),
         )
 
     def cancel_video(self, task_id: str) -> bool:

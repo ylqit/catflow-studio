@@ -33,6 +33,10 @@ class ProviderSubmission(BaseModel):
 
 
 class ProviderTaskGateway(Protocol):
+    def prepare_submission(
+        self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
+    ) -> None: ...
+
     def submit(
         self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
     ) -> ProviderSubmission: ...
@@ -53,14 +57,18 @@ class DurableJobWorker:
         provider: ProviderTaskGateway,
         *,
         worker_id: str,
+        provider_name: str | None = None,
         lease_seconds: int = 30,
+        poll_backoff_seconds: float = 2.0,
         studio_service: StudioService | None = None,
         result_handler: JobResultHandler | None = None,
     ) -> None:
         self._sessions = sessions
         self._provider = provider
         self._worker_id = worker_id
+        self._provider_name = provider_name
         self._lease_seconds = lease_seconds
+        self._poll_backoff_seconds = poll_backoff_seconds
         self._studio_service = studio_service
         self._result_handler = result_handler
 
@@ -82,6 +90,8 @@ class DurableJobWorker:
             self._cancel(job_id, provider_task_id)
         elif status == "storing":
             self._store_local_result(job_id)
+        elif kind == "probe_segment_video_data_url" and status in {"submitted", "polling"}:
+            self._finish_data_url_probe(job_id, provider_task_id)
         elif kind == "plan_story" and provider == "fake" and status == "submitting":
             self._complete_fake_planner_job(job_id, frozen_input)
         elif kind == "render_export" and status == "submitting":
@@ -106,15 +116,18 @@ class DurableJobWorker:
 
     def _claim(
         self,
-    ) -> tuple[
-        uuid.UUID,
-        str,
-        str | None,
-        str,
-        str | None,
-        datetime | None,
-        dict[str, object],
-    ] | None:
+    ) -> (
+        tuple[
+            uuid.UUID,
+            str,
+            str | None,
+            str,
+            str | None,
+            datetime | None,
+            dict[str, object],
+        ]
+        | None
+    ):
         now = datetime.now(UTC)
         priority = case(
             (JobRecord.status.in_(("cancel_requested", "storing")), 0),
@@ -134,6 +147,11 @@ class DurableJobWorker:
                             "storing",
                             "cancel_requested",
                         )
+                    ),
+                    (
+                        JobRecord.provider.in_((self._provider_name, "local_ffmpeg"))
+                        if self._provider_name is not None
+                        else True
                     ),
                     or_(JobRecord.leased_until.is_(None), JobRecord.leased_until < now),
                 )
@@ -167,9 +185,7 @@ class DurableJobWorker:
             self._fail(job_id, "planner_service_unavailable", retryable=False)
             return
         theme = str(frozen_input.get("text") or "一人一猫的安静日常")
-        target_duration = max(
-            8, min(15, int(frozen_input.get("targetDurationSeconds") or 10))
-        )
+        target_duration = max(8, min(15, int(frozen_input.get("targetDurationSeconds") or 10)))
         self._studio_service.complete_planner_job(
             job_id,
             LifeStoryProposalDraft(
@@ -191,12 +207,28 @@ class DurableJobWorker:
         )
 
     def _submit(self, job_id: uuid.UUID, frozen_input: dict[str, object]) -> None:
+        kind = self._job_kind(job_id)
+        prepare = getattr(self._provider, "prepare_submission", None)
+        if callable(prepare):
+            try:
+                prepare(job_id=job_id, kind=kind, frozen_input=frozen_input)
+            except ProviderGatewayError as exc:
+                self._fail_with_document(job_id, exc.as_error_document())
+                return
+            except Exception as exc:
+                self._fail_with_message(
+                    job_id,
+                    "provider_input_preparation_failed",
+                    str(exc),
+                    retryable=False,
+                )
+                return
         if not self._begin_submission(job_id):
             return
         try:
             submission = self._provider.submit(
                 job_id=job_id,
-                kind=self._job_kind(job_id),
+                kind=kind,
                 frozen_input=frozen_input,
             )
         except ProviderGatewayError as exc:
@@ -255,13 +287,9 @@ class DurableJobWorker:
                 raise ValueError("job not found")
             return job.kind
 
-    def _persist_immediate_result(
-        self, job_id: uuid.UUID, submission: ProviderSubmission
-    ) -> None:
+    def _persist_immediate_result(self, job_id: uuid.UUID, submission: ProviderSubmission) -> None:
         with self._sessions.begin() as session:
-            job = session.scalar(
-                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
-            )
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None or job.status != "submitting":
                 return
             job.provider_result_json = submission.result
@@ -275,9 +303,7 @@ class DurableJobWorker:
 
     def _begin_submission(self, job_id: uuid.UUID) -> bool:
         with self._sessions.begin() as session:
-            job = session.scalar(
-                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
-            )
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None or job.status != "submitting" or job.provider_task_id is not None:
                 return False
             if job.provider_submission_started_at is not None:
@@ -287,13 +313,9 @@ class DurableJobWorker:
             session.flush()
             return True
 
-    def _mark_submission_unknown(
-        self, job_id: uuid.UUID, error: ProviderGatewayError
-    ) -> None:
+    def _mark_submission_unknown(self, job_id: uuid.UUID, error: ProviderGatewayError) -> None:
         with self._sessions.begin() as session:
-            job = session.scalar(
-                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
-            )
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None:
                 return
             job.status = "submission_unknown"
@@ -322,9 +344,13 @@ class DurableJobWorker:
             job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None:
                 return
+            previous_status = job.status
+            now = datetime.now(UTC)
             if result.status == "running":
                 job.status = "polling"
-                event_type = "job.polling"
+                event_type = "job.polling" if previous_status != "polling" else None
+                job.locked_by = None
+                job.leased_until = now + timedelta(seconds=self._poll_backoff_seconds)
             elif result.status == "succeeded":
                 job.provider_result_json = {
                     **dict(job.provider_result_json or {}),
@@ -333,6 +359,7 @@ class DurableJobWorker:
                 job.actual_usage_json = result.usage
                 job.status = "storing" if self._result_handler is not None else "succeeded"
                 event_type = f"job.{job.status}"
+                self._release(job)
             else:
                 job.status = "failed"
                 job.error_json = result.error or {
@@ -341,11 +368,41 @@ class DurableJobWorker:
                     "retryable": False,
                 }
                 event_type = "job.failed"
-            job.updated_at = datetime.now(UTC)
-            self._release(job)
-            self._add_event(session, job, event_type)
+                self._release(job)
+            job.updated_at = now
+            if event_type is not None:
+                self._add_event(session, job, event_type)
         if result.status == "succeeded" and self._result_handler is not None:
             self._store_local_result(job_id)
+
+    def _finish_data_url_probe(
+        self, job_id: uuid.UUID, provider_task_id: str | None
+    ) -> None:
+        if provider_task_id is None:
+            self._fail(job_id, "missing_provider_task_id", retryable=False)
+            return
+        cancel_error: str | None = None
+        try:
+            cancel_requested = self._provider.cancel(provider_task_id)
+        except Exception as exc:
+            cancel_requested = False
+            cancel_error = str(exc)
+        with self._sessions.begin() as session:
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
+            if job is None:
+                return
+            job.provider_result_json = {
+                **dict(job.provider_result_json or {}),
+                "transport": "data_url_experimental",
+                "transportAccepted": True,
+                "cancelRequested": cancel_requested,
+            }
+            if cancel_error:
+                job.provider_result_json["cancelError"] = cancel_error
+            job.status = "succeeded"
+            job.updated_at = datetime.now(UTC)
+            self._release(job)
+            self._add_event(session, job, "job.succeeded")
 
     def _store_local_result(self, job_id: uuid.UUID) -> None:
         if self._result_handler is None:
@@ -403,9 +460,7 @@ class DurableJobWorker:
 
     def _fail_with_document(self, job_id: uuid.UUID, error: dict[str, object]) -> None:
         with self._sessions.begin() as session:
-            job = session.scalar(
-                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
-            )
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None:
                 return
             job.status = "failed"

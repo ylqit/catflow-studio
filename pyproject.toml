@@ -9,6 +9,7 @@ description = "Local-first web studio for original child-and-cat life clips"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.14,<2",
+  "boto3>=1.35,<2",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "pillow>=11,<13",

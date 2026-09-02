@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from catflow.application.gateways import ProviderGatewayError
+from catflow.application.gateways import ProviderGatewayError, SegmentVideoGenerationRequest
 from catflow_worker.ark_gateway import ArkGatewaySettings, ArkTypedGateway
 
 
@@ -168,6 +168,111 @@ def test_ark_video_poll_maps_succeeded_media_urls() -> None:
     assert result.status == "succeeded"
     assert result.video_url == "https://ark.example/video.mp4"
     assert result.duration_seconds == 12
+
+
+def test_ark_segment_gateway_submits_one_video_and_seven_ordered_images(
+    tmp_path: Path,
+) -> None:
+    tasks = Recorder(SimpleNamespace(id="segment-task-1", request_id="request-1"))
+    gateway = ArkTypedGateway(
+        _settings(),
+        client=SimpleNamespace(content_generation=SimpleNamespace(tasks=tasks)),
+    )
+    images = tuple(
+        _image(tmp_path / f"segment-{index}.png", color)
+        for index, color in enumerate(
+            ("black", "white", "red", "green", "blue", "gray", "yellow"), 1
+        )
+    )
+
+    result = gateway.submit_segment_video(
+        SegmentVideoGenerationRequest(
+            prompt="只修复擦爪动作并锁定首尾衔接。",
+            negative_prompt="禁止身份漂移和接缝双影。",
+            context_video_url=(
+                "https://media.example.test/catflow/context.mp4?signature=temporary"
+            ),
+            anchor_in_path=images[0],
+            anchor_out_path=images[1],
+            canon_reference_paths=images[2:],
+            canon_reference_roles=(
+                "episode_child",
+                "episode_cat",
+                "pair_scale",
+                "environment",
+                "style_board",
+            ),
+            duration_seconds=6,
+            resolution="480p",
+            ratio="9:16",
+        )
+    )
+
+    assert result.task_id == "segment-task-1"
+    request = tasks.calls[0]
+    content = request["content"]
+    assert [item["type"] for item in content] == [  # type: ignore[index]
+        "text",
+        "video_url",
+        "image_url",
+        "image_url",
+        "image_url",
+        "image_url",
+        "image_url",
+        "image_url",
+        "image_url",
+    ]
+    assert content[1]["role"] == "reference_video"  # type: ignore[index]
+    assert content[1]["video_url"]["url"] == (  # type: ignore[index]
+        "https://media.example.test/catflow/context.mp4?signature=temporary"
+    )
+    assert [item["role"] for item in content[2:]] == [  # type: ignore[index]
+        "reference_image",
+        "reference_image",
+        "reference_image",
+        "reference_image",
+        "reference_image",
+        "reference_image",
+        "reference_image",
+    ]
+    assert request["duration"] == 6
+    assert request["generate_audio"] is False
+    assert request["watermark"] is False
+
+
+def test_ark_segment_request_rejects_a_non_https_reference_url_before_submission(
+    tmp_path: Path,
+) -> None:
+    tasks = Recorder(SimpleNamespace(id="must-not-be-created"))
+    gateway = ArkTypedGateway(
+        _settings(),
+        client=SimpleNamespace(content_generation=SimpleNamespace(tasks=tasks)),
+    )
+    images = tuple(_image(tmp_path / f"blocked-{index}.png", "gray") for index in range(7))
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        gateway.submit_segment_video(
+            SegmentVideoGenerationRequest(
+                prompt="只修复擦爪动作。",
+                negative_prompt="禁止身份漂移。",
+                context_video_url="http://127.0.0.1/context.mp4",
+                anchor_in_path=images[0],
+                anchor_out_path=images[1],
+                canon_reference_paths=images[2:],
+                canon_reference_roles=(
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board",
+                ),
+                duration_seconds=4,
+                resolution="480p",
+                ratio="9:16",
+            )
+        )
+
+    assert tasks.calls == []
 
 
 def test_ark_submission_timeout_is_never_presented_as_safe_to_retry() -> None:

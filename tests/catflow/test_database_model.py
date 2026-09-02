@@ -25,6 +25,8 @@ EXPECTED_TABLES = {
     "edit_versions",
     "validation_runs",
     "environment_presets",
+    "video_repairs",
+    "media_publications",
 }
 
 
@@ -63,13 +65,40 @@ def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
     assert {"source_story_version_id", "source_selection_hash", "shots_json"} <= set(
         tables["shot_plan_versions"].columns.keys()
     )
-    assert {"source_selection_hash", "edl_json", "rendered_asset_id"} <= set(
-        tables["edit_versions"].columns.keys()
+    assert {
+        "source_selection_hash",
+        "edl_json",
+        "rendered_asset_id",
+        "parent_edit_version_id",
+        "format_version",
+        "active",
+        "timeline_hash",
+    } <= set(tables["edit_versions"].columns.keys())
+    assert {
+        "base_timeline_hash",
+        "issue_start_frame",
+        "issue_end_frame",
+        "generation_start_frame",
+        "generation_end_frame",
+        "provider_duration_seconds",
+        "approved_edit_version_id",
+    } <= set(tables["video_repairs"].columns.keys())
+    assert {"canon_snapshot_json", "repair_snapshot_json"} <= set(
+        tables["validation_runs"].columns.keys()
     )
-    assert "canon_snapshot_json" in tables["validation_runs"].columns
     assert "ck_validation_runs_canon_snapshot" in {
         constraint.name for constraint in tables["validation_runs"].constraints
     }
+    assert {
+        "job_id",
+        "source_asset_id",
+        "object_key",
+        "source_sha256",
+        "state",
+        "signed_url_expires_at",
+        "delete_after",
+    } <= set(tables["media_publications"].columns.keys())
+    assert tables["media_publications"].columns.job_id.unique is True
 
 
 def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
@@ -86,7 +115,12 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
         migration.upgrade()  # type: ignore[attr-defined]
 
     sql = output.getvalue()
-    for table_name in EXPECTED_TABLES - {"validation_runs", "environment_presets"}:
+    for table_name in EXPECTED_TABLES - {
+        "validation_runs",
+        "environment_presets",
+        "video_repairs",
+        "media_publications",
+    }:
         assert f"CREATE TABLE {SCHEMA_NAME}.{table_name}" in sql
     assert "production_runs" not in sql
     assert "canvas_graph_nodes" not in sql

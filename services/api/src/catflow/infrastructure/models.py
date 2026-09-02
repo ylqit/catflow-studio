@@ -112,6 +112,7 @@ class ValidationRunRecord(Base):
     capability_revision: Mapped[str] = mapped_column(String(120), nullable=False)
     cost_estimate_status: Mapped[str] = mapped_column(String(32), nullable=False)
     canon_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    repair_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -123,7 +124,8 @@ class JobRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('plan_story','generate_image','diagnose_image',"
-            "'generate_video','diagnose_video','render_export')",
+            "'generate_video','diagnose_video','probe_segment_video_data_url',"
+            "'regenerate_video_segment','render_export')",
             name="ck_jobs_kind",
         ),
         CheckConstraint(
@@ -167,9 +169,11 @@ class JobRecord(Base):
     parent_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="SET NULL")
     )
-    provider_submission_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
+    video_repair_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.video_repairs.id", ondelete="SET NULL"),
     )
+    provider_submission_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     provider_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     actual_usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     expected_cost_micros: Mapped[int | None] = mapped_column(BigInteger)
@@ -220,6 +224,49 @@ class AssetRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MediaPublicationRecord(Base):
+    __tablename__ = "media_publications"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('uploading','ready','delete_pending','deleted','failed')",
+            name="ck_media_publications_state",
+        ),
+        Index("ix_media_publications_cleanup", "state", "delete_after"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    source_asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    backend: Mapped[str] = mapped_column(String(16), nullable=False)
+    bucket: Mapped[str] = mapped_column(String(128), nullable=False)
+    object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    etag: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    public_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    signed_url_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delete_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EnvironmentPresetRecord(Base):
@@ -441,6 +488,13 @@ class EditVersionRecord(Base):
         CheckConstraint(
             "status IN ('draft','rendered','approved')", name="ck_edit_versions_status"
         ),
+        CheckConstraint("format_version IN (1,2)", name="ck_edit_versions_format_version"),
+        Index(
+            "uq_edit_versions_active",
+            "project_id",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
         {"schema": SCHEMA_NAME},
     )
 
@@ -455,6 +509,84 @@ class EditVersionRecord(Base):
     rendered_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="SET NULL")
     )
+    parent_edit_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.edit_versions.id", ondelete="SET NULL"),
+    )
+    format_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    timeline_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class VideoRepairRecord(Base):
+    __tablename__ = "video_repairs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','generating','candidate_ready','approved','rejected',"
+            "'outdated','cancelled')",
+            name="ck_video_repairs_status",
+        ),
+        CheckConstraint(
+            "issue_start_frame >= 0 AND issue_end_frame > issue_start_frame",
+            name="ck_video_repairs_issue_range",
+        ),
+        CheckConstraint(
+            "generation_start_frame >= 0 AND generation_end_frame > generation_start_frame",
+            name="ck_video_repairs_generation_range",
+        ),
+        CheckConstraint(
+            "provider_duration_seconds BETWEEN 4 AND 15",
+            name="ck_video_repairs_provider_duration",
+        ),
+        Index("ix_video_repairs_project_created", "project_id", "created_at"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    base_video_asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    base_edit_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.edit_versions.id", ondelete="RESTRICT"),
+    )
+    base_timeline_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    frame_rate_numerator: Mapped[int] = mapped_column(Integer, nullable=False)
+    frame_rate_denominator: Mapped[int] = mapped_column(Integer, nullable=False)
+    issue_start_frame: Mapped[int] = mapped_column(Integer, nullable=False)
+    issue_end_frame: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_start_frame: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_end_frame: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_core_start_frame: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_core_end_frame: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    negative_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    candidate_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="SET NULL")
+    )
+    approved_candidate_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="SET NULL")
+    )
+    approved_edit_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.edit_versions.id", ondelete="SET NULL"),
+    )
+    approval_idempotency_key: Mapped[str | None] = mapped_column(String(96), unique=True)
+    preview_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

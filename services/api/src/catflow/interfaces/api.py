@@ -38,6 +38,10 @@ from catflow.application.service import (
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
+    SegmentRepairApproveCommand,
+    SegmentRepairCreateCommand,
+    SegmentRepairPreviewCommand,
+    SegmentRepairPreviewDto,
     ShotPlanVersionDto,
     StoryCreateCommand,
     StoryVersionDto,
@@ -48,10 +52,15 @@ from catflow.application.service import (
     ValidationRunDto,
     ValidationRunPreviewDto,
     VideoDiagnosisCommand,
+    VideoRepairDto,
 )
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import ShotPlanDraft
 from catflow.infrastructure.media import InvalidMediaError, LocalMediaStore
+from catflow.infrastructure.object_storage import (
+    ObjectPublisherError,
+    ObjectPublisherRuntime,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +90,9 @@ def create_app(
     settings: AppSettings,
     media_store: LocalMediaStore | None = None,
     spa_dist: Path | None = None,
+    object_publisher_runtime: ObjectPublisherRuntime | None = None,
 ) -> FastAPI:
+    publisher_runtime = object_publisher_runtime or ObjectPublisherRuntime.disabled()
     app = FastAPI(title="CatFlow Studio API", version="0.1.0")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
 
@@ -138,6 +149,19 @@ def create_app(
     @app.get("/api/v1/runtime/bootstrap")
     def runtime_bootstrap() -> dict[str, object]:
         provider = service.provider_runtime
+        publisher_status = publisher_runtime.status
+        segment_repair_supported = provider.segment_repair_supported and (
+            provider.provider != "ark" or publisher_status.ready
+        )
+        segment_repair_blocked_reason = provider.segment_repair_block_reason
+        if (
+            provider.provider == "ark"
+            and not publisher_status.ready
+            and segment_repair_blocked_reason is None
+        ):
+            segment_repair_blocked_reason = (
+                publisher_status.error or {"message": "object publisher is not ready"}
+            )["message"]
         return {
             "csrfToken": settings.csrf_token,
             "baseUrl": settings.base_url,
@@ -146,6 +170,7 @@ def create_app(
             "workerReady": _worker_ready(settings),
             "ffmpegReady": settings.ffmpeg_ready,
             "ffprobeReady": settings.ffprobe_ready,
+            "objectPublisher": publisher_status.as_document(),
             "provider": {
                 "name": provider.provider,
                 "planningModel": provider.planning_model,
@@ -155,8 +180,21 @@ def create_app(
                 "capabilityRevision": provider.capability_revision,
                 "paidCallsEnabled": provider.paid_calls_enabled,
                 "apiKeyConfigured": settings.ark_api_key_configured,
+                "segmentRepair": {
+                    "supported": segment_repair_supported,
+                    "blockedReason": segment_repair_blocked_reason,
+                    "maximumImageReferences": provider.maximum_segment_image_references,
+                    "maximumVideoReferences": provider.maximum_segment_video_references,
+                },
             },
         }
+
+    @app.post("/api/v1/runtime/object-publisher/check")
+    def check_object_publisher() -> dict[str, object]:
+        try:
+            return publisher_runtime.check_roundtrip().as_document()
+        except ObjectPublisherError as exc:
+            raise HTTPException(status_code=503, detail=exc.message) from exc
 
     @app.get("/api/v1/runtime/settings")
     def runtime_settings() -> dict[str, object]:
@@ -446,6 +484,63 @@ def create_app(
     )
     def diagnose_video(project_id: uuid.UUID, command: VideoDiagnosisCommand) -> JobDto:
         return service.create_video_diagnosis_job(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-repairs/preview",
+        response_model=SegmentRepairPreviewDto,
+    )
+    def preview_video_repair(
+        project_id: uuid.UUID, command: SegmentRepairPreviewCommand
+    ) -> SegmentRepairPreviewDto:
+        return service.preview_video_repair(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-repairs",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def create_video_repair(project_id: uuid.UUID, command: SegmentRepairCreateCommand) -> JobDto:
+        return service.create_video_repair_job(project_id, command)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-repairs",
+        response_model=list[VideoRepairDto],
+    )
+    def video_repairs(project_id: uuid.UUID) -> list[VideoRepairDto]:
+        return service.list_video_repairs(project_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-repairs/{repair_id}",
+        response_model=VideoRepairDto,
+    )
+    def video_repair(project_id: uuid.UUID, repair_id: uuid.UUID) -> VideoRepairDto:
+        repair = service.get_video_repair(repair_id)
+        if repair.project_id != project_id:
+            raise StudioNotFoundError("video repair not found")
+        return repair
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve",
+        response_model=EditVersionDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def approve_video_repair(
+        project_id: uuid.UUID,
+        repair_id: uuid.UUID,
+        command: SegmentRepairApproveCommand,
+    ) -> EditVersionDto:
+        return service.approve_video_repair(project_id, repair_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject",
+        response_model=VideoRepairDto,
+    )
+    def reject_video_repair(
+        project_id: uuid.UUID,
+        repair_id: uuid.UUID,
+        _payload: dict[str, Any] = Body(default={}),
+    ) -> VideoRepairDto:
+        return service.reject_video_repair(project_id, repair_id)
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobDto)
     def job(job_id: uuid.UUID) -> JobDto:

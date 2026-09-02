@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipWebBuild
+    [switch]$SkipWebBuild,
+    [ValidateSet('environment', 'fake')]
+    [string]$Provider = 'environment',
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,12 +20,17 @@ foreach ($line in Get-Content -LiteralPath $environmentFile) {
     }
 }
 $env:CATFLOW_ROOT = $projectRoot
+if ($Provider -eq 'fake') {
+    $env:CATFLOW_PROVIDER = 'fake'
+    $env:CATFLOW_PAID_CALLS_ENABLED = 'false'
+}
 $catflowPort = if ($env:CATFLOW_PORT) { [int]$env:CATFLOW_PORT } else { 8877 }
 . (Join-Path $PSScriptRoot 'runtime-paths.ps1')
 $runtimePaths = Get-CatFlowRuntimePaths -ProjectRoot $projectRoot
 $runtimeDirectory = $runtimePaths.WorkRoot
 $logDirectory = $runtimePaths.LogRoot
 $pidFile = Join-Path $runtimeDirectory 'local-processes.json'
+$workerReadyFile = Join-Path $runtimeDirectory 'worker-ready.json'
 
 New-Item -ItemType Directory -Force -Path $runtimeDirectory, $logDirectory | Out-Null
 
@@ -34,6 +42,9 @@ if (Test-Path -LiteralPath $pidFile) {
     if ($live.Count -gt 0) {
         throw 'CatFlow already has recorded local processes. Run scripts\stop-local.ps1 first.'
     }
+}
+if (Test-Path -LiteralPath $workerReadyFile) {
+    Remove-Item -LiteralPath $workerReadyFile
 }
 
 $portOwner = Get-NetTCPConnection -LocalPort $catflowPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -107,4 +118,6 @@ if (-not $ready) {
 
 Write-Host 'CatFlow API, PostgreSQL connection and Worker are ready.'
 Write-Host "Logs: $logDirectory"
-Start-Process "http://127.0.0.1:$catflowPort/projects"
+if (-not $NoBrowser) {
+    Start-Process "http://127.0.0.1:$catflowPort/projects"
+}

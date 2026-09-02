@@ -14,6 +14,9 @@ from catflow.application.service import (
     ExportCommand,
     ImageDiagnosisCommand,
     ProjectCreate,
+    SegmentRepairApproveCommand,
+    SegmentRepairCreateCommand,
+    SegmentRepairPreviewCommand,
     StudioService,
 )
 from catflow.infrastructure.database import (
@@ -22,9 +25,15 @@ from catflow.infrastructure.database import (
     create_session_factory,
 )
 from catflow.infrastructure.media import LocalMediaStore
-from catflow.infrastructure.models import AssetRecord, JobRecord, ProjectRecord
+from catflow.infrastructure.models import (
+    AssetRecord,
+    EnvironmentPresetRecord,
+    JobRecord,
+    ProjectRecord,
+)
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow_worker.media_jobs import MediaJobExecutor
+from catflow_worker.runtime_support import AssetMediaResolver
 
 
 def test_fake_video_result_is_a_valid_immutable_vertical_mp4(tmp_path: Path) -> None:
@@ -79,6 +88,11 @@ def test_fake_video_result_is_a_valid_immutable_vertical_mp4(tmp_path: Path) -> 
             assert (tmp_path / "media" / assets[0].storage_key).is_file()
     finally:
         with sessions.begin() as session:
+            session.execute(
+                delete(EnvironmentPresetRecord).where(
+                    EnvironmentPresetRecord.source_project_id == project.id
+                )
+            )
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
         engine.dispose()
 
@@ -214,5 +228,160 @@ def test_ffmpeg_export_validates_edl_source_and_records_rendered_asset(tmp_path:
         assert rendered_edit.rendered_asset_id == final.id
     finally:
         with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_fake_segment_job_creates_one_candidate_without_changing_the_active_edit(
+    tmp_path: Path,
+) -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions))
+    project = service.create_project(
+        ProjectCreate(title="Fake 片段候选", theme="雨天擦爪", targetDurationSeconds=12)
+    )
+    source_job_id = uuid.uuid4()
+    executor = MediaJobExecutor(
+        sessions,
+        LocalMediaStore(tmp_path / "media"),
+        ffmpeg_path=Path(os.environ["FFMPEG_PATH"]),
+        ffprobe_path=Path(os.environ["FFPROBE_PATH"]),
+    )
+    try:
+        with sessions.begin() as session:
+            session.add(
+                JobRecord(
+                    id=source_job_id,
+                    project_id=project.id,
+                    kind="generate_video",
+                    status="storing",
+                    input_hash="1" * 64,
+                    idempotency_key=f"fake-repair-source-{source_job_id}",
+                    provider="fake",
+                    model="fake-video",
+                    provider_task_id=f"fake-{source_job_id}",
+                    expected_cost_micros=0,
+                    frozen_input_json={
+                        "prompt": "雨天擦爪",
+                        "durationSeconds": 12,
+                        "includeFakeAudio": True,
+                    },
+                )
+            )
+        executor.store_result(source_job_id)
+        base = next(asset for asset in service.list_assets(project.id) if asset.role == "video")
+        environment = service.register_asset(
+            project.id, role="environment", media_type="image", sha256="2" * 64
+        )
+        service.select_asset(project.id, slot="video", asset_id=base.id)
+        service.select_asset(project.id, slot="environment", asset_id=environment.id)
+        preview = service.preview_video_repair(
+            project.id,
+            SegmentRepairPreviewCommand(
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                prompt="只重拍擦爪动作。",
+            ),
+        )
+        repair_job = service.create_video_repair_job(
+            project.id,
+            SegmentRepairCreateCommand(
+                repairId=preview.repair_id,
+                expectedInputHash=preview.input_hash,
+                expectedCostMicros=0,
+                idempotencyKey=f"fake-repair-candidate-{project.id}",
+                paidConfirmation=True,
+            ),
+        )
+
+        resolver = AssetMediaResolver(
+            sessions,
+            LocalMediaStore(tmp_path / "media"),
+            ffmpeg_path=Path(os.environ["FFMPEG_PATH"]),
+        )
+        context, anchor_in, anchor_out = resolver.prepare_segment_media(
+            repair_job.id,
+            base.id,
+            72,
+            216,
+            96,
+            192,
+            6,
+        )
+
+        assert context.is_file()
+        assert anchor_in.is_file()
+        assert anchor_out.is_file()
+        prepared_roles = {
+            asset.role
+            for asset in service.list_assets(project.id)
+            if asset.producing_job_id == repair_job.id
+        }
+        assert prepared_roles == {
+            "repair_context",
+            "repair_anchor_in",
+            "repair_anchor_out",
+        }
+
+        executor.store_result(repair_job.id)
+        executor.store_result(repair_job.id)
+
+        candidates = [
+            asset for asset in service.list_assets(project.id) if asset.role == "repair_candidate"
+        ]
+        assert len(candidates) == 1
+        assert candidates[0].producing_job_id == repair_job.id
+        assert candidates[0].metadata["durationFrames"] == 144
+        assert service.get_video_repair(preview.repair_id).status == "candidate_ready"
+        assert service.list_edits(project.id) == []
+
+        edit = service.approve_video_repair(
+            project.id,
+            preview.repair_id,
+            SegmentRepairApproveCommand(
+                candidateAssetId=candidates[0].id,
+                candidateSourceRange={"startFrame": 24, "endFrame": 120},
+                transition={"type": "dissolve", "durationFrames": 4},
+                expectedBaseTimelineHash=preview.base_timeline_hash,
+                idempotencyKey=f"fake-repair-approval-{project.id}",
+                qualityChecks={
+                    "child_identity": "pass",
+                    "cat_identity": "pass",
+                    "pair_scale": "pass",
+                    "style": "pass",
+                    "structure": "pass",
+                    "motion_continuity": "pass",
+                    "causal_chain": "pass",
+                },
+                seamChecks={"in": "pass", "out": "pass"},
+            ),
+        )
+        export = service.create_export_job(
+            project.id,
+            ExportCommand(
+                editVersionId=edit.id,
+                idempotencyKey=f"fake-repair-export-{project.id}",
+            ),
+        )
+
+        executor.store_result(export.id)
+
+        final = next(asset for asset in service.list_assets(project.id) if asset.role == "final")
+        assert final.metadata["frameCount"] == 288
+        assert final.metadata["durationFrames"] == 288
+        assert final.metadata["audioPolicy"] == "preserve_original"
+        assert final.metadata["candidateAudioUsed"] is False
+        assert final.metadata["audioCodec"] == "aac"
+        assert final.metadata["audioTranscoded"] is False
+        assert service.list_edits(project.id)[0].rendered_asset_id == final.id
+    finally:
+        with sessions.begin() as session:
+            session.execute(
+                delete(EnvironmentPresetRecord).where(
+                    EnvironmentPresetRecord.source_project_id == project.id
+                )
+            )
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
         engine.dispose()

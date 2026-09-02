@@ -10,14 +10,20 @@ import type {
   GenerationPreviewDto,
   JobDto,
   PlannerSnapshotDto,
+  ObjectPublisherRuntimeDto,
   ProjectCreate,
   ProjectDto,
   RuntimeBootstrapDto,
+  SegmentRepairApproveCommand,
+  SegmentRepairCreateCommand,
+  SegmentRepairPreviewCommand,
+  SegmentRepairPreviewDto,
   ShotPlanVersionDto,
   StoryVersionDto,
   WorkspaceDto,
   ValidationRunDto,
   ValidationRunPreviewDto,
+  VideoRepairDto,
 } from "./types";
 
 export class ApiError extends Error {
@@ -40,6 +46,10 @@ export class CatFlowClient {
 
   runtime(): Promise<RuntimeBootstrapDto> {
     return this.bootstrap();
+  }
+
+  checkObjectPublisher(): Promise<ObjectPublisherRuntimeDto> {
+    return this.json("/api/v1/runtime/object-publisher/check", "POST", {});
   }
 
   currentCanon(): Promise<CanonProfileDto> {
@@ -211,6 +221,48 @@ export class CatFlowClient {
     command: { editVersionId: string; idempotencyKey: string },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/exports`, "POST", command);
+  }
+
+  previewVideoRepair(
+    projectId: string,
+    command: SegmentRepairPreviewCommand,
+  ): Promise<SegmentRepairPreviewDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-repairs/preview`, "POST", command);
+  }
+
+  createVideoRepair(
+    projectId: string,
+    command: SegmentRepairCreateCommand,
+  ): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-repairs`, "POST", command);
+  }
+
+  videoRepairs(projectId: string): Promise<VideoRepairDto[]> {
+    return this.request(`/api/v1/projects/${projectId}/video-repairs`);
+  }
+
+  videoRepair(projectId: string, repairId: string): Promise<VideoRepairDto> {
+    return this.request(`/api/v1/projects/${projectId}/video-repairs/${repairId}`);
+  }
+
+  approveVideoRepair(
+    projectId: string,
+    repairId: string,
+    command: SegmentRepairApproveCommand,
+  ): Promise<EditVersionDto> {
+    return this.json(
+      `/api/v1/projects/${projectId}/video-repairs/${repairId}/approve`,
+      "POST",
+      command,
+    );
+  }
+
+  rejectVideoRepair(projectId: string, repairId: string): Promise<VideoRepairDto> {
+    return this.json(
+      `/api/v1/projects/${projectId}/video-repairs/${repairId}/reject`,
+      "POST",
+      {},
+    );
   }
 
   approveFinal(projectId: string, assetId: string): Promise<unknown> {

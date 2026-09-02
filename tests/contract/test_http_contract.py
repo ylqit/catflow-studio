@@ -28,6 +28,7 @@ def _app_client() -> tuple[StudioService, TestClient]:
             capability_revision="ark-seedance-2.0-v1",
             paid_calls_enabled=True,
             maximum_video_references=5,
+            segment_reference_publishing_ready=True,
         ),
     )
     app = create_app(
@@ -49,6 +50,7 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
     assert {
         "/api/v1/health",
         "/api/v1/runtime/bootstrap",
+        "/api/v1/runtime/object-publisher/check",
         "/api/v1/validation-runs/preview",
         "/api/v1/validation-runs",
         "/api/v1/validation-runs/{run_id}",
@@ -72,6 +74,11 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
         "/api/v1/projects/{project_id}/asset-generations",
         "/api/v1/projects/{project_id}/video-generations/preview",
         "/api/v1/projects/{project_id}/video-generations",
+        "/api/v1/projects/{project_id}/video-repairs/preview",
+        "/api/v1/projects/{project_id}/video-repairs",
+        "/api/v1/projects/{project_id}/video-repairs/{repair_id}",
+        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve",
+        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject",
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/cancel",
         "/api/v1/jobs/{job_id}/resume-storage",
@@ -82,6 +89,38 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
         "/api/v1/assets/{asset_id}/content",
     } <= paths
     assert all("/api/v2" not in path for path in paths)
+    assert all("segment-reference-probe" not in path for path in paths)
+
+
+def test_runtime_bootstrap_exposes_only_non_secret_object_publisher_status() -> None:
+    _, client = _app_client()
+
+    bootstrap = client.get("/api/v1/runtime/bootstrap").json()
+
+    assert bootstrap["objectPublisher"] == {
+        "configured": False,
+        "ready": False,
+        "backend": "s3",
+        "endpointHost": "",
+        "publicHost": "",
+        "bucket": "",
+        "region": "",
+        "addressingStyle": "virtual",
+        "presignTtlSeconds": 7200,
+        "retentionDays": 7,
+        "error": {
+            "code": "object_storage_not_configured",
+            "message": "S3-compatible object storage is not fully configured",
+        },
+    }
+    assert "access" not in str(bootstrap).lower()
+    assert "secret" not in str(bootstrap).lower()
+    checked = client.post(
+        "/api/v1/runtime/object-publisher/check",
+        json={},
+        headers=WRITE_HEADERS,
+    )
+    assert checked.status_code == 503
 
 
 def test_validation_run_http_flow_only_authorizes_the_frozen_manifest() -> None:
@@ -93,8 +132,8 @@ def test_validation_run_http_flow_only_authorizes_the_frozen_manifest() -> None:
         headers=WRITE_HEADERS,
     )
     assert preview.status_code == 200
-    assert preview.json()["totalCallLimit"] == 9
-    assert preview.json()["maximumVideoCalls"] == 3
+    assert preview.json()["totalCallLimit"] == 10
+    assert preview.json()["maximumVideoCalls"] == 4
 
     authorized = client.post(
         "/api/v1/validation-runs",
@@ -108,6 +147,85 @@ def test_validation_run_http_flow_only_authorizes_the_frozen_manifest() -> None:
     run_id = authorized.json()["id"]
     assert client.get(f"/api/v1/validation-runs/{run_id}").json()["status"] == "authorized"
     assert service.list_projects() == []
+
+
+def test_video_repair_http_preview_and_create_only_enqueue_one_candidate() -> None:
+    service, client = _app_client()
+    manifest = client.post("/api/v1/validation-runs/preview", json={}, headers=WRITE_HEADERS).json()
+    validation_run_id = client.post(
+        "/api/v1/validation-runs",
+        json={
+            "expectedManifestHash": manifest["manifestHash"],
+            "paidCallAcknowledged": True,
+        },
+        headers=WRITE_HEADERS,
+    ).json()["id"]
+    project_id = uuid.UUID(
+        client.post(
+            "/api/v1/projects",
+            json={"title": "雨天擦爪", "theme": "雨天擦爪", "targetDurationSeconds": 12},
+            headers=WRITE_HEADERS,
+        ).json()["id"]
+    )
+    base = service.register_asset(
+        project_id,
+        role="video",
+        media_type="video",
+        sha256="a" * 64,
+        metadata={"durationFrames": 288, "frameRateNumerator": 24, "frameRateDenominator": 1},
+    )
+    environment = service.register_asset(
+        project_id, role="environment", media_type="image", sha256="e" * 64
+    )
+    service.select_asset(project_id, slot="video", asset_id=base.id)
+    service.select_asset(project_id, slot="environment", asset_id=environment.id)
+
+    preview = client.post(
+        f"/api/v1/projects/{project_id}/video-repairs/preview",
+        json={
+            "baseVideoAssetId": str(base.id),
+            "issueRange": {"startFrame": 96, "endFrame": 192},
+            "prompt": (
+                "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。"
+            ),
+            "validationRunId": validation_run_id,
+        },
+        headers=WRITE_HEADERS,
+    )
+
+    assert preview.status_code == 200
+    document = preview.json()
+    assert document["generationRange"] == {"startFrame": 72, "endFrame": 216}
+    created = client.post(
+        f"/api/v1/projects/{project_id}/video-repairs",
+        json={
+            "repairId": document["repairId"],
+            "expectedInputHash": document["inputHash"],
+            "expectedCostMicros": document["expectedCostMicros"],
+            "idempotencyKey": "http-segment-repair",
+            "validationRunId": validation_run_id,
+            "paidConfirmation": True,
+        },
+        headers=WRITE_HEADERS,
+    )
+    repeated = client.post(
+        f"/api/v1/projects/{project_id}/video-repairs",
+        json={
+            "repairId": document["repairId"],
+            "expectedInputHash": document["inputHash"],
+            "expectedCostMicros": document["expectedCostMicros"],
+            "idempotencyKey": "http-segment-repair",
+            "validationRunId": validation_run_id,
+            "paidConfirmation": True,
+        },
+        headers=WRITE_HEADERS,
+    )
+
+    assert created.status_code == 202
+    assert repeated.status_code == 202
+    assert created.json()["id"] == repeated.json()["id"]
+    assert created.json()["kind"] == "regenerate_video_segment"
+    assert created.json()["videoRepairId"] == document["repairId"]
 
 
 def test_planner_http_flow_returns_durable_job_and_adopts_directly_to_story() -> None:

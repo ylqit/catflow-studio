@@ -46,6 +46,8 @@ class ArkResultLandingService:
             self._store_diagnosis(job_id, metadata_key="qualityReport")
         elif kind == "generate_video":
             self._store_video(job_id)
+        elif kind == "regenerate_video_segment":
+            self._store_video(job_id, repair_candidate=True)
         elif kind == "diagnose_video":
             self._store_diagnosis(job_id, metadata_key="videoDiagnosis")
         else:
@@ -95,24 +97,40 @@ class ArkResultLandingService:
         )
         self._sanitize_result(job_id, asset_id, result)
 
-    def _store_video(self, job_id: uuid.UUID) -> None:
+    def _store_video(
+        self, job_id: uuid.UUID, *, repair_candidate: bool = False
+    ) -> None:
         with self._sessions() as session:
             job = session.get(JobRecord, job_id)
             if job is None:
                 raise ValueError("job not found")
             existing = session.scalar(
-                select(AssetRecord).where(AssetRecord.producing_job_id == job_id)
+                select(AssetRecord).where(
+                    AssetRecord.producing_job_id == job_id,
+                    AssetRecord.role == (
+                        "repair_candidate" if repair_candidate else "video"
+                    ),
+                )
             )
             if existing is not None:
+                if repair_candidate and job.video_repair_id is not None:
+                    self._studio_service.mark_video_repair_candidate_ready(
+                        job.video_repair_id, existing.id
+                    )
                 return
             project_id = job.project_id
             provider_task_id = job.provider_task_id
+            video_repair_id = job.video_repair_id
             expected_duration = int(job.frozen_input_json.get("durationSeconds", 12))
             result = dict(job.provider_result_json or {})
         url = str(result.get("videoUrl", ""))
         if not url:
             raise ValueError("video provider result URL is missing")
-        storage_key = f"generated/{project_id}/video/{job_id}.mp4"
+        storage_key = (
+            f"generated/{project_id}/video-repairs/{job_id}/candidate.mp4"
+            if repair_candidate
+            else f"generated/{project_id}/video/{job_id}.mp4"
+        )
         landed = self._downloader.download_video(
             url,
             self._media_store.resolve(storage_key),
@@ -121,7 +139,7 @@ class ArkResultLandingService:
         )
         asset_id = self._persist_asset(
             job_id,
-            role="video",
+            role="repair_candidate" if repair_candidate else "video",
             storage_key=storage_key,
             media_type="video",
             landed=landed,
@@ -136,9 +154,18 @@ class ArkResultLandingService:
                 "codec": landed.codec,
                 "ratio": result.get("ratio"),
                 "resolution": result.get("resolution"),
+                "durationFrames": round((landed.duration_ms or 0) * 24 / 1000),
+                "frameRateNumerator": 24,
+                "frameRateDenominator": 1,
             },
         )
         self._sanitize_result(job_id, asset_id, result)
+        if repair_candidate:
+            if video_repair_id is None:
+                raise ValueError("repair candidate job has no video repair")
+            self._studio_service.mark_video_repair_candidate_ready(
+                video_repair_id, asset_id
+            )
 
     def _store_diagnosis(self, job_id: uuid.UUID, *, metadata_key: str) -> None:
         with self._sessions.begin() as session:
@@ -183,7 +210,10 @@ class ArkResultLandingService:
     ) -> uuid.UUID:
         with self._sessions.begin() as session:
             existing = session.scalar(
-                select(AssetRecord).where(AssetRecord.producing_job_id == job_id)
+                select(AssetRecord).where(
+                    AssetRecord.producing_job_id == job_id,
+                    AssetRecord.role == role,
+                )
             )
             if existing is not None:
                 return existing.id

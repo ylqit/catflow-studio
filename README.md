@@ -18,7 +18,7 @@ CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界
   → 角色与画风（五个固定槽位）
   → 分镜画布（1–4 个镜头）
   → 生成与选择（冻结输入、幂等 Job）
-  → 剪辑与导出（WebAV 决策、FFmpeg 正式 MP4）
+  → 剪辑与导出（逐帧区间修复、WebAV 预览、FFmpeg 正式 MP4）
 ```
 
 浏览器只保存当前项目、查询缓存、面板与 SSE 连接状态。故事、Canon、选择、分镜、Job、Provider task ID、剪辑版本和正式成片全部从 PostgreSQL 投影。
@@ -54,7 +54,7 @@ catflow_studio
 .\scripts\configure-existing-postgres.ps1
 ```
 
-脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 已使用新 Alembic `0001_catflow_core` 建立 12 张业务表；`catflow.alembic_version` 是额外的迁移版本表。
+脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；截至 `0008_validation_repair_snapshot` 有 15 张业务表，`catflow.alembic_version` 是额外的迁移版本表。
 
 ## 本机启动
 
@@ -122,9 +122,16 @@ npm run build
 - Provider Key、数据库凭据、磁盘路径和进程环境不进入 Renderer。
 - 相同幂等键与输入返回同一个 Job；输入变化返回 `409`。
 - Provider task ID 持久化后，Worker 重启只能继续轮询、存储、取消或对账。
-- 当前 `CATFLOW_PROVIDER=fake`、`CATFLOW_PAID_CALLS_ENABLED=false`；本实现不会发起真实付费调用。
+- 正式 Ark 片段修复通过应用拥有的 S3 兼容发布器，把本地上下文 MP4 流式上传为私有临时对象，再向 Ark 提交 2 小时只读预签名 HTTPS URL。首发使用 TOS 北京区 S3 兼容 Endpoint、私有 Bucket `test-vedio-ylq` 和 VirtualHostStyle；后续切换 MinIO 只改对象存储配置，不改 Ark Gateway、Job 或 Repair 生命周期。2026-09-02 的一次性 Web 探针已确认 Seedance 会以 HTTP 400 拒绝 `data:video/mp4;base64,...`，正式流程不会再发送视频 Data URL。历史证据见 [Base64 视频传输报告](output/playwright/base64-video-probe/report.md)。
+- 是否允许真实付费由 `.env` 中的 `CATFLOW_PROVIDER` 与 `CATFLOW_PAID_CALLS_ENABLED` 明确控制；浏览器不会接收 Ark Key。
 - 上传图片会校验扩展名、MIME、文件头和 Pillow 解码结果，媒体磁盘路径不直接暴露。
 - 数据库只保存相对 `storage_key`；API、Worker、备份和恢复通过同一个 `RuntimePaths` 在项目根内解析，拒绝绝对路径与越界路径。
+
+对象发布器使用 `CATFLOW_OBJECT_STORAGE_*` 命名空间。`.env.example` 包含 TOS 的非敏感默认配置，真实 AK/SK 只写在被 Git 忽略的 `.env` 中；旧 `AccessKeyId` / `SecretAccessKey` 仅保留一版兼容读取并产生弃用警告。设置页的“验证上传、签名读取与删除”会创建 1 KiB 随机对象、通过公网预签名 URL 读回并核对 SHA256，随后立即精确删除，不调用 Ark、不产生模型费用，也不会把签名 URL 返回浏览器。
+
+发布记录保存在 PostgreSQL `media_publications`：每个 Repair Job 只有一个确定性对象键，数据库只记录 Bucket、对象键、源 SHA256、ETag、状态、到期时间和脱敏错误，不保存凭据或完整签名 URL。Worker 每分钟领取到期记录并执行精确 `DeleteObject`，删除失败保持 `delete_pending` 等待重试；对象默认保留 7 天。TOS 控制台还应为 `catflow/segment-references/` 前缀配置 7 天生命周期规则作为 Worker 停机兜底，应用不会修改全桶策略。
+
+CatFlow 的 IAM 身份应只拥有 Bucket `test-vedio-ylq` 下 `catflow/segment-references/*` 和 `catflow/publisher-checks/*` 的 `PutObject`、`GetObject`、`HeadObject`、`DeleteObject`；仅当 TOS 探测要求时再增加最小 `HeadBucket` / `GetBucketLocation`。不要授予公开读、全桶管理、策略修改或 Bucket 删除权限。
 
 ## 质量门槛
 
@@ -153,3 +160,11 @@ git diff --check
 ```
 
 Provider 上限不足时按上述优先级裁剪并记录 `omittedReason`。`style_source` 即使有空余名额也不会进入请求。AI 质量诊断只提供 warning；人工选择和最终批准才改变当前投影。
+
+## 逐帧片段修复
+
+剪辑页以恒定 24 fps 和 `[startFrame, endFrame)` 表示正式区间。用户可通过 I/O 键、逐帧/十帧步进和时间线拖动选择任意区间；不足 4 秒的区间会在页面同时显示问题范围与扩展后的 Provider 上下文。每次付费确认只创建一个 `regenerate_video_segment` Job，候选完成后不会自动替换。
+
+批准候选必须完成七项质量检查和入/出点接缝检查。服务端随后基于当前时间线哈希创建新的不可变 `EditVersion`（EDL v2），原视频、旧 EditVersion、失败候选和 Provider task ID 全部保留。正式导出使用 FFmpeg 合成前段、批准的候选核心段和后段；默认硬切，可显式选择 2/4/6 帧叠化，输出总帧数保持不变，候选音轨永不进入正式成片，根视频无音轨时继续保持无音轨。
+
+Fake Web 黑盒证据保存在 [片段修复报告](output/playwright/segment-repair-fake/report.md)。

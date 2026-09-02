@@ -28,6 +28,12 @@ class RecordingProvider(ProviderTaskGateway):
     def __init__(self) -> None:
         self.submissions: list[uuid.UUID] = []
         self.polls: list[str] = []
+        self.cancellations: list[str] = []
+
+    def prepare_submission(
+        self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
+    ) -> None:
+        return None
 
     def submit(
         self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
@@ -40,6 +46,7 @@ class RecordingProvider(ProviderTaskGateway):
         return ProviderPoll(status="running")
 
     def cancel(self, provider_task_id: str) -> bool:
+        self.cancellations.append(provider_task_id)
         return True
 
 
@@ -74,6 +81,101 @@ class ImmediateProvider(RecordingProvider):
             result={"proposal": {"title": "雨天擦爪"}},
             usage={"inputTokens": 120, "outputTokens": 80},
         )
+
+
+class FailedPreparationProvider(RecordingProvider):
+    def prepare_submission(
+        self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
+    ) -> None:
+        raise ValueError("local context extraction failed")
+
+
+def test_local_input_preparation_failure_happens_before_provider_submission_boundary() -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions))
+    project = service.create_project(
+        ProjectCreate(title="输入准备失败", theme="雨天擦爪", targetDurationSeconds=12)
+    )
+    job_id = uuid.uuid4()
+    try:
+        with sessions.begin() as session:
+            session.add(
+                JobRecord(
+                    id=job_id,
+                    project_id=project.id,
+                    kind="regenerate_video_segment",
+                    status="queued",
+                    input_hash="e" * 64,
+                    idempotency_key=f"prepare-failure-{job_id}",
+                    provider="ark",
+                    model="video-model",
+                    frozen_input_json={"prompt": "雨天擦爪"},
+                )
+            )
+
+        provider = FailedPreparationProvider()
+        worker = DurableJobWorker(sessions, provider, worker_id="prepare-failure")
+
+        assert worker.run_once() is True
+        with sessions() as session:
+            job = session.get(JobRecord, job_id)
+            assert job is not None
+            assert job.status == "failed"
+            assert job.provider_submission_started_at is None
+            assert job.error_json["code"] == "provider_input_preparation_failed"
+        assert provider.submissions == []
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_worker_claims_only_its_configured_provider_queue() -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions))
+    project = service.create_project(
+        ProjectCreate(title="Provider 队列隔离", theme="线团", targetDurationSeconds=12)
+    )
+    ark_job_id = uuid.uuid4()
+    fake_job_id = uuid.uuid4()
+    try:
+        with sessions.begin() as session:
+            for job_id, provider in ((ark_job_id, "ark"), (fake_job_id, "fake")):
+                session.add(
+                    JobRecord(
+                        id=job_id,
+                        project_id=project.id,
+                        kind="generate_video",
+                        status="queued",
+                        input_hash=provider[0] * 64,
+                        idempotency_key=f"provider-isolation-{job_id}",
+                        provider=provider,
+                        model="video-model",
+                        frozen_input_json={"prompt": provider},
+                    )
+                )
+
+        provider = RecordingProvider()
+        worker = DurableJobWorker(
+            sessions,
+            provider,
+            worker_id="fake-provider-worker",
+            provider_name="fake",
+        )
+        assert worker.run_once() is True
+
+        with sessions() as session:
+            assert session.get(JobRecord, ark_job_id).status == "queued"  # type: ignore[union-attr]
+            assert session.get(JobRecord, fake_job_id).status == "submitted"  # type: ignore[union-attr]
+        assert provider.submissions == [fake_job_id]
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
 
 
 def test_worker_persists_provider_task_before_polling_and_never_resubmits() -> None:
@@ -119,6 +221,72 @@ def test_worker_persists_provider_task_before_polling_and_never_resubmits() -> N
         assert second_worker.run_once() is True
         assert provider.submissions == [job_id]
         assert provider.polls == [f"provider-{job_id}"]
+        assert second_worker.run_once() is False
+        assert provider.polls == [f"provider-{job_id}"]
+        with sessions() as session:
+            polling = session.get(JobRecord, job_id)
+            assert polling is not None
+            assert polling.status == "polling"
+            assert polling.leased_until is not None
+            assert polling.leased_until > datetime.now(UTC)
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_base64_probe_persists_task_then_cancels_after_worker_restart_without_polling() -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions))
+    project = service.create_project(
+        ProjectCreate(title="Base64 探针恢复", theme="雨天擦爪", targetDurationSeconds=12)
+    )
+    job_id = uuid.uuid4()
+    try:
+        with sessions.begin() as session:
+            session.add(
+                JobRecord(
+                    id=job_id,
+                    project_id=project.id,
+                    kind="probe_segment_video_data_url",
+                    status="queued",
+                    input_hash="f" * 64,
+                    idempotency_key=f"test-base64-probe-{job_id}",
+                    provider="ark",
+                    model="video-model",
+                    expected_cost_micros=None,
+                    frozen_input_json={"sourceVideoAssetId": str(uuid.uuid4())},
+                )
+            )
+
+        provider = RecordingProvider()
+        first_worker = DurableJobWorker(sessions, provider, worker_id="probe-submit")
+        restarted_worker = DurableJobWorker(sessions, provider, worker_id="probe-cancel")
+
+        assert first_worker.run_once() is True
+        with sessions() as session:
+            submitted = session.get(JobRecord, job_id)
+            assert submitted is not None
+            assert submitted.status == "submitted"
+            assert submitted.provider_task_id == f"provider-{job_id}"
+        assert provider.submissions == [job_id]
+
+        assert restarted_worker.run_once() is True
+        with sessions() as session:
+            completed = session.get(JobRecord, job_id)
+            assert completed is not None
+            assert completed.status == "succeeded"
+            assert completed.provider_task_id == f"provider-{job_id}"
+            assert completed.provider_result_json == {
+                "transport": "data_url_experimental",
+                "transportAccepted": True,
+                "cancelRequested": True,
+            }
+        assert provider.submissions == [job_id]
+        assert provider.polls == []
+        assert provider.cancellations == [f"provider-{job_id}"]
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
@@ -293,9 +461,7 @@ def test_worker_persists_immediate_provider_result_before_finishing_job() -> Non
             assert persisted is not None
             assert persisted.status == "succeeded"
             assert persisted.provider_task_id is None
-            assert persisted.provider_result_json == {
-                "proposal": {"title": "雨天擦爪"}
-            }
+            assert persisted.provider_result_json == {"proposal": {"title": "雨天擦爪"}}
             assert persisted.actual_usage_json == {
                 "inputTokens": 120,
                 "outputTokens": 80,

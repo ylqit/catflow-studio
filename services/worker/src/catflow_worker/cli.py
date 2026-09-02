@@ -18,6 +18,7 @@ from catflow.infrastructure.database import (
     create_session_factory,
 )
 from catflow.infrastructure.media import LocalMediaStore
+from catflow.infrastructure.object_storage import ObjectPublisherRuntime
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 
 from .ark_gateway import ArkGatewaySettings, ArkTypedGateway
@@ -28,6 +29,7 @@ from .media_jobs import MediaJobExecutor
 from .provider_media import ProviderMediaDownloader
 from .runner import DurableJobWorker
 from .runtime_support import AssetMediaResolver, JobResultDispatcher
+from .segment_publisher import SegmentReferencePublisher
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -39,16 +41,17 @@ def run_worker(
 ) -> None:
     """Run the durable planning, fake-media and FFmpeg worker."""
     project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
-    load_dotenv(project_root / ".env", override=True)
+    load_dotenv(project_root / ".env", override=False)
     paths = RuntimePaths.from_env(project_root)
-    provider_runtime = ProviderRuntime.from_env()
+    object_publisher_runtime = ObjectPublisherRuntime.from_env()
+    provider_runtime = ProviderRuntime.from_env(
+        segment_reference_publishing_ready=object_publisher_runtime.status.ready
+    )
     ffmpeg_path = _required_tool("FFMPEG_PATH")
     ffprobe_path = _required_tool("FFPROBE_PATH")
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(
-        PostgresStudioRepository(sessions), provider_runtime=provider_runtime
-    )
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=provider_runtime)
     media_store = LocalMediaStore(paths.media_root)
     local_results = MediaJobExecutor(
         sessions,
@@ -63,10 +66,18 @@ def run_worker(
             media_store,
             ffmpeg_path=ffmpeg_path,
         )
+        segment_publisher = (
+            SegmentReferencePublisher(sessions, object_publisher_runtime.store)
+            if object_publisher_runtime.status.ready
+            and object_publisher_runtime.store is not None
+            else None
+        )
         provider = ArkProviderJobGateway(
             typed_gateway,
             resolve_asset_paths=resolver.resolve_paths,
             extract_video_frames=resolver.extract_video_frames,
+            prepare_segment_media=resolver.prepare_segment_media,
+            publish_segment_reference=segment_publisher,
         )
         ark_results = ArkResultLandingService(
             sessions,
@@ -78,10 +89,12 @@ def run_worker(
     else:
         provider = FakeProviderGateway()
         ark_results = None
+        segment_publisher = None
     worker = DurableJobWorker(
         sessions,
         provider,
         worker_id=f"{socket.gethostname()}-{os.getpid()}",
+        provider_name=provider_runtime.provider,
         studio_service=service,
         result_handler=JobResultDispatcher(
             sessions,
@@ -98,7 +111,14 @@ def run_worker(
     )
     temporary_ready_file.replace(ready_file)
     try:
+        next_publication_cleanup = time.monotonic()
         while True:
+            if (
+                segment_publisher is not None
+                and time.monotonic() >= next_publication_cleanup
+            ):
+                segment_publisher.delete_due()
+                next_publication_cleanup = time.monotonic() + 60
             handled = worker.run_once()
             if once:
                 return

@@ -10,6 +10,7 @@ const canon = ref<CanonProfileDto | null>(null);
 const uploaded = reactive<Partial<Record<CanonRole, AssetDto>>>({});
 const busyRole = ref<CanonRole | null>(null);
 const publishing = ref(false);
+const checkingPublisher = ref(false);
 const error = ref("");
 const canonSlots: Array<{ role: CanonRole; label: string }> = [
   { role: "episode_child", label: "儿童设计" },
@@ -58,6 +59,21 @@ async function publish() {
   }
 }
 
+async function checkPublisher() {
+  if (!runtime.value?.objectPublisher.configured) return;
+  checkingPublisher.value = true;
+  error.value = "";
+  try {
+    const publisher = await api.checkObjectPublisher();
+    const refreshed = await api.runtime();
+    runtime.value = { ...refreshed, objectPublisher: publisher };
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : "对象发布器预检失败";
+  } finally {
+    checkingPublisher.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -67,7 +83,8 @@ onMounted(load);
     <p v-if="error" class="notice error">{{ error }}</p>
     <div v-if="runtime" class="settings-grid">
       <section class="card settings-card"><p class="eyebrow">Connection</p><h2>本机 Web 服务</h2><dl><div><dt>正式地址</dt><dd data-testid="runtime-address">{{ runtime.baseUrl }}</dd></div><div><dt>PostgreSQL</dt><dd><span class="pill" :class="{ good: runtime.databaseReady }">{{ runtime.databaseReady ? "Ready" : "Unavailable" }}</span></dd></div><div><dt>Worker</dt><dd><span class="pill" :class="{ good: runtime.workerReady }">{{ runtime.workerReady ? "Ready" : "Unavailable" }}</span></dd></div><div><dt>FFmpeg / ffprobe</dt><dd><span class="pill" :class="{ good: runtime.ffmpegReady && runtime.ffprobeReady }">{{ runtime.ffmpegReady && runtime.ffprobeReady ? "Ready" : "Unavailable" }}</span></dd></div></dl></section>
-      <section class="card settings-card"><p class="eyebrow">Provider</p><h2>Ark typed gateway</h2><dl><div><dt>Provider</dt><dd><span class="pill good">{{ runtime.provider.name }}</span></dd></div><div><dt>Ark Key</dt><dd>{{ runtime.provider.apiKeyConfigured ? "已配置" : "未配置" }}</dd></div><div><dt>规划 / 诊断</dt><dd>{{ runtime.provider.planningModel }}</dd></div><div><dt>图片</dt><dd>{{ runtime.provider.imageModel }}</dd></div><div><dt>视频</dt><dd>{{ runtime.provider.videoModel }}</dd></div><div><dt>Capability</dt><dd>{{ runtime.provider.capabilityRevision }}</dd></div></dl></section>
+      <section class="card settings-card"><p class="eyebrow">Provider</p><h2>Ark typed gateway</h2><dl><div><dt>Provider</dt><dd><span class="pill good">{{ runtime.provider.name }}</span></dd></div><div><dt>Ark Key</dt><dd>{{ runtime.provider.apiKeyConfigured ? "已配置" : "未配置" }}</dd></div><div><dt>规划 / 诊断</dt><dd>{{ runtime.provider.planningModel }}</dd></div><div><dt>图片</dt><dd>{{ runtime.provider.imageModel }}</dd></div><div><dt>视频</dt><dd>{{ runtime.provider.videoModel }}</dd></div><div><dt>Capability</dt><dd>{{ runtime.provider.capabilityRevision }}</dd></div><div><dt>片段修复</dt><dd><span class="pill" :class="{ good: runtime.provider.segmentRepair.supported }">{{ runtime.provider.segmentRepair.supported ? "Ready" : "Blocked" }}</span> · 1 视频 + 7/{{ runtime.provider.segmentRepair.maximumImageReferences }} 图片<span v-if="runtime.provider.segmentRepair.blockedReason" class="capability-reason">{{ runtime.provider.segmentRepair.blockedReason }}</span></dd></div></dl></section>
+      <section class="card settings-card wide publisher-card"><header><div><p class="eyebrow">S3-compatible publisher</p><h2>Ark 参考视频临时发布</h2></div><span data-testid="object-publisher-status" class="pill" :class="{ good: runtime.objectPublisher.ready }">{{ runtime.objectPublisher.ready ? "Ready" : runtime.objectPublisher.configured ? "Needs check" : "Not configured" }}</span></header><p class="notice">私有对象只通过短时 HTTPS 签名供 Ark 读取；浏览器不会接收 AK、SK、对象键或签名 URL。</p><dl><div><dt>上传 Endpoint</dt><dd>{{ runtime.objectPublisher.endpointHost || "未配置" }}</dd></div><div><dt>Ark 公网 Host</dt><dd>{{ runtime.objectPublisher.publicHost || "未配置" }}</dd></div><div><dt>Bucket / Region</dt><dd>{{ runtime.objectPublisher.bucket || "—" }} / {{ runtime.objectPublisher.region || "—" }}</dd></div><div><dt>协议</dt><dd>{{ runtime.objectPublisher.backend }} · {{ runtime.objectPublisher.addressingStyle }} · URL {{ runtime.objectPublisher.presignTtlSeconds / 3600 }}h</dd></div><div><dt>临时对象</dt><dd>私有 · 保留 {{ runtime.objectPublisher.retentionDays }} 天</dd></div></dl><p v-if="runtime.objectPublisher.error" class="capability-reason">{{ runtime.objectPublisher.error.message }}</p><button data-testid="check-object-publisher" class="secondary publisher-check" :disabled="checkingPublisher || !runtime.objectPublisher.configured" @click="checkPublisher">{{ checkingPublisher ? "预检中…" : "验证上传、签名读取与删除" }}</button></section>
       <section class="card settings-card wide canon-manager"><header><div><p class="eyebrow">Canon v4 publication</p><h2>四个固定全局资产</h2></div><span v-if="canon" class="pill good">Revision {{ canon.version }} · {{ Object.keys(canon.fixedAssets).length }}/4</span></header><p class="notice">正式权威：同一位 6–7 岁、约 1.2 米、约 4.5–5 头身的齐下颌短发儿童。发布前逐项显示 SHA256；发布后项目只读继承，普通项目不能覆盖四个槽位。</p><div v-if="canon" class="profile-hash"><span>当前 Profile SHA256</span><code>{{ canon.profileHash }}</code></div><div class="canon-grid"><label v-for="slot in canonSlots" :key="slot.role" class="canon-slot"><b>{{ slot.label }}</b><input :aria-label="`上传${slot.label}`" type="file" accept="image/png,image/jpeg,image/webp" :disabled="busyRole === slot.role" @change="upload(slot.role, $event)" /><code v-if="uploaded[slot.role]">{{ uploaded[slot.role]!.sha256 }}</code><span v-else>等待上传并校验</span></label></div><button class="primary publish-canon" :disabled="!allUploaded || publishing" @click="publish">{{ publishing ? "发布中…" : "核对 SHA256 并发布 Canon v4" }}</button></section>
     </div>
   </main>
@@ -81,7 +98,10 @@ onMounted(load);
 .settings-card dl > div { display: grid; grid-template-columns: 150px 1fr; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .settings-card dt { color: var(--muted); }
 .settings-card dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.capability-reason { display: block; margin-top: 6px; color: #a34f3f; font-weight: 500; line-height: 1.5; }
 .canon-manager header { display: flex; justify-content: space-between; align-items: start; }
+.publisher-card header { display: flex; justify-content: space-between; align-items: start; }
+.publisher-check { width: 100%; margin-top: 16px; }
 .canon-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
 .canon-slot { display: grid; gap: 9px; padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
 .canon-slot b { font-size: 13px; }

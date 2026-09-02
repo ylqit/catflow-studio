@@ -16,6 +16,15 @@ from catflow.domain.validation import (
     ValidationLimitError,
     first_release_manifest,
 )
+from catflow.domain.video_repairs import (
+    EditDecisionListV2,
+    EditTransitionV2,
+    FrameRange,
+    RationalFrameRate,
+    build_base_timeline,
+    expand_generation_window,
+    splice_repair_candidate,
+)
 
 from .provider_config import ProviderRuntime
 
@@ -29,9 +38,7 @@ class StudioNotFoundError(LookupError):
 
 
 class ValidationRunCreateCommand(ContractModel):
-    expected_manifest_hash: str = Field(
-        alias="expectedManifestHash", pattern=r"^[a-f0-9]{64}$"
-    )
+    expected_manifest_hash: str = Field(alias="expectedManifestHash", pattern=r"^[a-f0-9]{64}$")
     paid_call_acknowledged: Literal[True] = Field(alias="paidCallAcknowledged")
 
 
@@ -50,6 +57,12 @@ class ValidationCanonSnapshotDto(ContractModel):
     references: tuple[ValidationCanonReferenceDto, ...]
 
 
+class ValidationRepairSnapshotDto(ContractModel):
+    topic: Literal["雨天擦爪"]
+    issue_range: FrameRange = Field(alias="issueRange")
+    prompt: str
+
+
 class ValidationRunPreviewDto(ContractModel):
     manifest_hash: str = Field(alias="manifestHash")
     topics: tuple[str, ...]
@@ -63,10 +76,11 @@ class ValidationRunPreviewDto(ContractModel):
     provider: str
     models: dict[str, str]
     capability_revision: str = Field(alias="capabilityRevision")
-    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(
-        alias="costEstimateStatus"
-    )
+    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
+    authorization_ready: bool = Field(alias="authorizationReady", default=True)
+    blocking_reasons: tuple[str, ...] = Field(alias="blockingReasons", default=())
     canon: ValidationCanonSnapshotDto
+    repair: ValidationRepairSnapshotDto
 
 
 class ValidationRunDto(ValidationRunPreviewDto):
@@ -326,6 +340,16 @@ class ShotPlanVersionDto(ContractModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+class JobPublicationDto(ContractModel):
+    id: uuid.UUID
+    state: Literal["uploading", "ready", "delete_pending", "deleted", "failed"]
+    public_host: str = Field(alias="publicHost")
+    signed_url_expires_at: datetime | None = Field(
+        alias="signedUrlExpiresAt", default=None
+    )
+    delete_after: datetime = Field(alias="deleteAfter")
+
+
 class JobDto(ContractModel):
     id: uuid.UUID
     project_id: uuid.UUID = Field(alias="projectId")
@@ -335,6 +359,8 @@ class JobDto(ContractModel):
         "diagnose_image",
         "generate_video",
         "diagnose_video",
+        "probe_segment_video_data_url",
+        "regenerate_video_segment",
         "render_export",
     ]
     status: JobStatus
@@ -345,10 +371,12 @@ class JobDto(ContractModel):
     provider_task_id: str | None = Field(alias="providerTaskId", default=None)
     validation_run_id: uuid.UUID | None = Field(alias="validationRunId", default=None)
     parent_job_id: uuid.UUID | None = Field(alias="parentJobId", default=None)
+    video_repair_id: uuid.UUID | None = Field(alias="videoRepairId", default=None)
     provider_submission_started_at: datetime | None = Field(
         alias="providerSubmissionStartedAt", default=None
     )
     provider_result: dict[str, Any] | None = Field(alias="providerResult", default=None)
+    publication: JobPublicationDto | None = None
     actual_usage: dict[str, Any] | None = Field(alias="actualUsage", default=None)
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
     frozen_input: dict[str, Any] = Field(alias="frozenInput")
@@ -378,9 +406,7 @@ class GenerationPreviewDto(ContractModel):
     negative_prompt: str = Field(alias="negativePrompt")
     references: list[CompiledReference]
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
-    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(
-        alias="costEstimateStatus"
-    )
+    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
     story_version_id: uuid.UUID = Field(alias="storyVersionId")
     shot_plan_version_id: uuid.UUID = Field(alias="shotPlanVersionId")
     selection_hash: str = Field(alias="selectionHash")
@@ -397,9 +423,7 @@ class AssetGenerationPreviewDto(ContractModel):
     negative_prompt: str = Field(alias="negativePrompt")
     references: list[CompiledReference]
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
-    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(
-        alias="costEstimateStatus"
-    )
+    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
     warnings: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -450,6 +474,9 @@ class EditDecisionListDto(ContractModel):
         return self
 
 
+EditDecisionListContract = EditDecisionListDto | EditDecisionListV2
+
+
 class EditCreateCommand(ContractModel):
     edl: EditDecisionListDto
 
@@ -459,10 +486,134 @@ class EditVersionDto(ContractModel):
     project_id: uuid.UUID = Field(alias="projectId")
     revision: int
     source_selection_hash: str = Field(alias="sourceSelectionHash")
-    edl: EditDecisionListDto
+    edl: EditDecisionListContract
     status: Literal["draft", "rendered", "approved"]
     rendered_asset_id: uuid.UUID | None = Field(alias="renderedAssetId", default=None)
+    parent_edit_version_id: uuid.UUID | None = Field(alias="parentEditVersionId", default=None)
+    format_version: Literal[1, 2] = Field(alias="formatVersion", default=1)
+    active: bool = False
+    timeline_hash: str | None = Field(alias="timelineHash", default=None)
     created_at: datetime = Field(alias="createdAt")
+
+
+SegmentReferenceRole = Literal[
+    "anchor_in",
+    "anchor_out",
+    "episode_child",
+    "episode_cat",
+    "pair_scale",
+    "environment",
+    "style_board",
+]
+
+
+class SegmentRepairImageReferenceDto(ContractModel):
+    role: SegmentReferenceRole
+    asset_id: uuid.UUID | None = Field(alias="assetId", default=None)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    frame_number: int | None = Field(alias="frameNumber", default=None, ge=0)
+    derived: bool = False
+
+
+class SegmentRepairVideoReferenceDto(ContractModel):
+    role: Literal["reference_video"]
+    asset_id: uuid.UUID = Field(alias="assetId")
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    range: FrameRange
+
+
+VideoRepairStatus = Literal[
+    "draft",
+    "generating",
+    "candidate_ready",
+    "approved",
+    "rejected",
+    "outdated",
+    "cancelled",
+]
+
+
+class SegmentRepairPreviewCommand(ContractModel):
+    base_video_asset_id: uuid.UUID = Field(alias="baseVideoAssetId")
+    base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
+    issue_range: FrameRange = Field(alias="issueRange")
+    prompt: str = Field(min_length=1, max_length=4_000)
+    validation_run_id: uuid.UUID | None = Field(alias="validationRunId", default=None)
+
+
+class SegmentRepairPreviewDto(ContractModel):
+    repair_id: uuid.UUID = Field(alias="repairId")
+    project_id: uuid.UUID = Field(alias="projectId")
+    base_video_asset_id: uuid.UUID = Field(alias="baseVideoAssetId")
+    base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
+    base_timeline_hash: str = Field(alias="baseTimelineHash", pattern=r"^[a-f0-9]{64}$")
+    frame_rate: RationalFrameRate = Field(alias="frameRate")
+    issue_range: FrameRange = Field(alias="issueRange")
+    generation_range: FrameRange = Field(alias="generationRange")
+    candidate_core_range: FrameRange = Field(alias="candidateCoreRange")
+    provider_duration_seconds: int = Field(alias="providerDurationSeconds", ge=4, le=15)
+    provider: str
+    model: str
+    capability_revision: str = Field(alias="capabilityRevision")
+    prompt: str
+    negative_prompt: str = Field(alias="negativePrompt")
+    image_references: list[SegmentRepairImageReferenceDto] = Field(alias="imageReferences")
+    video_reference: SegmentRepairVideoReferenceDto = Field(alias="videoReference")
+    expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
+    cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
+    input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
+
+
+class VideoRepairDto(ContractModel):
+    id: uuid.UUID
+    project_id: uuid.UUID = Field(alias="projectId")
+    base_video_asset_id: uuid.UUID = Field(alias="baseVideoAssetId")
+    base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
+    base_timeline_hash: str = Field(alias="baseTimelineHash")
+    frame_rate: RationalFrameRate = Field(alias="frameRate")
+    issue_range: FrameRange = Field(alias="issueRange")
+    generation_range: FrameRange = Field(alias="generationRange")
+    candidate_core_range: FrameRange = Field(alias="candidateCoreRange")
+    provider_duration_seconds: int = Field(alias="providerDurationSeconds")
+    prompt: str
+    negative_prompt: str = Field(alias="negativePrompt")
+    input_hash: str = Field(alias="inputHash")
+    status: VideoRepairStatus
+    candidate_asset_id: uuid.UUID | None = Field(alias="candidateAssetId", default=None)
+    approved_candidate_asset_id: uuid.UUID | None = Field(
+        alias="approvedCandidateAssetId", default=None
+    )
+    approved_edit_version_id: uuid.UUID | None = Field(alias="approvedEditVersionId", default=None)
+    approval_idempotency_key: str | None = Field(alias="approvalIdempotencyKey", default=None)
+    preview: SegmentRepairPreviewDto
+    created_at: datetime = Field(alias="createdAt")
+    approved_at: datetime | None = Field(alias="approvedAt", default=None)
+
+
+class SegmentRepairCreateCommand(ContractModel):
+    repair_id: uuid.UUID = Field(alias="repairId")
+    expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
+    expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None, ge=0)
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+    validation_run_id: uuid.UUID | None = Field(alias="validationRunId", default=None)
+    paid_confirmation: Literal[True] = Field(alias="paidConfirmation")
+
+
+class SegmentRepairTransitionCommand(ContractModel):
+    type: Literal["cut", "dissolve"]
+    duration_frames: Literal[0, 2, 4, 6] = Field(alias="durationFrames")
+
+
+class SegmentRepairApproveCommand(ContractModel):
+    candidate_asset_id: uuid.UUID = Field(alias="candidateAssetId")
+    candidate_source_range: FrameRange = Field(alias="candidateSourceRange")
+    transition: SegmentRepairTransitionCommand
+    expected_base_timeline_hash: str = Field(
+        alias="expectedBaseTimelineHash", pattern=r"^[a-f0-9]{64}$"
+    )
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+    quality_checks: dict[str, Literal["pass", "warning", "fail"]] = Field(alias="qualityChecks")
+    seam_checks: dict[str, Literal["pass", "warning", "fail"]] = Field(alias="seamChecks")
 
 
 class ExportCommand(ContractModel):
@@ -488,9 +639,7 @@ class StudioRepository(Protocol):
         byte_size: int,
     ) -> StoredAssetDto: ...
 
-    def publish_canon_revision(
-        self, command: CanonRevisionCreateCommand
-    ) -> CanonProfileDto: ...
+    def publish_canon_revision(self, command: CanonRevisionCreateCommand) -> CanonProfileDto: ...
 
     def create_validation_run(self, preview: ValidationRunPreviewDto) -> ValidationRunDto: ...
 
@@ -560,6 +709,7 @@ class StudioRepository(Protocol):
         storage_key: str,
         byte_size: int,
         producing_job_id: uuid.UUID | None,
+        metadata: dict[str, Any] | None = None,
     ) -> StoredAssetDto: ...
 
     def select_asset(
@@ -601,6 +751,34 @@ class StudioRepository(Protocol):
         edl: EditDecisionListDto,
     ) -> EditVersionDto: ...
 
+    def active_edit(self, project_id: uuid.UUID) -> EditVersionDto | None: ...
+
+    def create_video_repair(self, repair: VideoRepairDto) -> VideoRepairDto: ...
+
+    def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None: ...
+
+    def list_video_repairs(self, project_id: uuid.UUID) -> list[VideoRepairDto]: ...
+
+    def set_video_repair_status(
+        self,
+        repair_id: uuid.UUID,
+        *,
+        status: VideoRepairStatus,
+        candidate_asset_id: uuid.UUID | None = None,
+    ) -> VideoRepairDto: ...
+
+    def approve_video_repair(
+        self,
+        repair_id: uuid.UUID,
+        *,
+        edl: EditDecisionListV2,
+        source_selection_hash: str,
+        parent_edit_version_id: uuid.UUID | None,
+        candidate_asset_id: uuid.UUID,
+        candidate_source_range: FrameRange,
+        idempotency_key: str,
+    ) -> EditVersionDto: ...
+
     def list_edits(self, project_id: uuid.UUID) -> list[EditVersionDto]: ...
 
     def get_edit(self, edit_id: uuid.UUID) -> EditVersionDto | None: ...
@@ -625,19 +803,34 @@ class StudioService:
             "diagnostic": self._provider_runtime.diagnostic_model,
             "video": self._provider_runtime.video_model,
         }
+        blocking_reasons = tuple(
+            reason
+            for reason in (self._provider_runtime.segment_repair_block_reason,)
+            if reason is not None
+        )
         document = {
             "topics": manifest.topics,
             "durationSeconds": manifest.duration_seconds,
             "resolution": manifest.resolution,
             "aspectRatio": manifest.aspect_ratio,
             "targetBudgetCny": manifest.target_budget_cny,
-            "callLimits": {
-                kind.value: limit for kind, limit in manifest.call_limits.items()
-            },
+            "callLimits": {kind.value: limit for kind, limit in manifest.call_limits.items()},
             "provider": self._provider_runtime.provider,
             "models": models,
             "capabilityRevision": self._provider_runtime.capability_revision,
             "canon": canon.model_dump(mode="json", by_alias=True),
+            "repair": {
+                "topic": manifest.repair_topic,
+                "issueRange": {
+                    "startFrame": manifest.repair_start_frame,
+                    "endFrame": manifest.repair_end_frame,
+                },
+                "prompt": manifest.repair_prompt,
+            },
+            "segmentRepairCapability": {
+                "supported": not blocking_reasons,
+                "blockingReasons": blocking_reasons,
+            },
         }
         return ValidationRunPreviewDto(
             manifestHash=_hash_document(document),
@@ -648,24 +841,37 @@ class StudioService:
             targetBudgetCny=manifest.target_budget_cny,
             callLimits=dict(manifest.call_limits),
             totalCallLimit=manifest.total_call_limit,
-            maximumVideoCalls=manifest.call_limits[ValidationCallKind.GENERATE_VIDEO],
+            maximumVideoCalls=(
+                manifest.call_limits[ValidationCallKind.GENERATE_VIDEO]
+                + manifest.call_limits[ValidationCallKind.REGENERATE_VIDEO_SEGMENT]
+            ),
             provider=self._provider_runtime.provider,
             models=models,
             capabilityRevision=self._provider_runtime.capability_revision,
             costEstimateStatus="unmetered_paid",
+            authorizationReady=not blocking_reasons,
+            blockingReasons=blocking_reasons,
             canon=canon,
+            repair={
+                "topic": manifest.repair_topic,
+                "issueRange": {
+                    "startFrame": manifest.repair_start_frame,
+                    "endFrame": manifest.repair_end_frame,
+                },
+                "prompt": manifest.repair_prompt,
+            },
         )
 
     @property
     def provider_runtime(self) -> ProviderRuntime:
         return self._provider_runtime
 
-    def authorize_validation_run(
-        self, command: ValidationRunCreateCommand
-    ) -> ValidationRunDto:
+    def authorize_validation_run(self, command: ValidationRunCreateCommand) -> ValidationRunDto:
         preview = self.preview_validation_run()
         if not self._provider_runtime.paid_calls_enabled:
             raise StudioConflictError("paid provider calls are disabled")
+        if not preview.authorization_ready:
+            raise StudioConflictError("; ".join(preview.blocking_reasons))
         if command.expected_manifest_hash != preview.manifest_hash:
             raise StudioConflictError("validation manifest changed")
         return self._repository.create_validation_run(preview)
@@ -717,9 +923,7 @@ class StudioService:
             byte_size=byte_size,
         )
 
-    def publish_canon_revision(
-        self, command: CanonRevisionCreateCommand
-    ) -> CanonProfileDto:
+    def publish_canon_revision(self, command: CanonRevisionCreateCommand) -> CanonProfileDto:
         return self._repository.publish_canon_revision(command)
 
     def list_projects(self) -> list[ProjectDto]:
@@ -771,9 +975,7 @@ class StudioService:
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
             validationRunId=command.validation_run_id,
-            expectedCostMicros=(
-                None if self._provider_runtime.provider == "ark" else 0
-            ),
+            expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
             frozenInput={
                 "text": command.text,
                 "contextRevision": snapshot.context_revision,
@@ -853,6 +1055,7 @@ class StudioService:
         storage_key: str | None = None,
         byte_size: int = 1,
         producing_job_id: uuid.UUID | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AssetDto:
         self._require_project(project_id)
         return self._repository.register_asset(
@@ -863,6 +1066,7 @@ class StudioService:
             storage_key=storage_key or f"test/{sha256}",
             byte_size=byte_size,
             producing_job_id=producing_job_id,
+            metadata=metadata,
         )
 
     def select_asset(
@@ -908,6 +1112,9 @@ class StudioService:
             "style_board",
         }
         latest_video_job = self._repository.latest_job(project_id, kind="generate_video")
+        latest_repair_job = self._repository.latest_job(
+            project_id, kind="regenerate_video_segment"
+        )
         return {
             "eventCursor": event_cursor,
             "project": project.model_dump(mode="json", by_alias=True),
@@ -927,13 +1134,20 @@ class StudioService:
                 None,
             ),
             "selections": {
-                slot: asset.model_dump(mode="json", by_alias=True)
+                slot: asset.model_dump(
+                    mode="json", by_alias=True, exclude={"storage_key"}
+                )
                 for slot, asset in selections.items()
             },
             "selectionHash": self.current_selection_hash(project_id),
             "latestVideoJob": (
                 latest_video_job.model_dump(mode="json", by_alias=True)
                 if latest_video_job is not None
+                else None
+            ),
+            "latestRepairJob": (
+                latest_repair_job.model_dump(mode="json", by_alias=True)
+                if latest_repair_job is not None
                 else None
             ),
         }
@@ -1230,9 +1444,7 @@ class StudioService:
                 provider=self._provider_runtime.provider,
                 model=self._provider_runtime.diagnostic_model,
                 validationRunId=command.validation_run_id,
-                expectedCostMicros=(
-                    None if self._provider_runtime.provider == "ark" else 0
-                ),
+                expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
                 frozenInput=frozen_input,
                 resultAssetIds=[],
                 createdAt=now,
@@ -1304,9 +1516,7 @@ class StudioService:
         roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
         missing = [role for role in roles if role not in selections]
         if missing:
-            raise StudioConflictError(
-                f"missing video diagnosis references: {', '.join(missing)}"
-            )
+            raise StudioConflictError(f"missing video diagnosis references: {', '.join(missing)}")
         frozen_input = {
             "videoAssetId": str(video.id),
             "videoSha256": video.sha256,
@@ -1332,15 +1542,356 @@ class StudioService:
                 model=self._provider_runtime.diagnostic_model,
                 validationRunId=command.validation_run_id,
                 parentJobId=video.producing_job_id,
-                expectedCostMicros=(
-                    None if self._provider_runtime.provider == "ark" else 0
-                ),
+                expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
                 frozenInput=frozen_input,
                 resultAssetIds=[],
                 createdAt=now,
                 updatedAt=now,
             )
         )
+
+    def preview_video_repair(
+        self, project_id: uuid.UUID, command: SegmentRepairPreviewCommand
+    ) -> SegmentRepairPreviewDto:
+        self._require_project(project_id)
+        if reason := self._provider_runtime.segment_repair_block_reason:
+            raise StudioConflictError(reason)
+        base_video, active_edit, timeline, timeline_hash = self._repair_base_timeline(
+            project_id,
+            base_video_asset_id=command.base_video_asset_id,
+            expected_edit_version_id=command.base_edit_version_id,
+        )
+        frame_rate = timeline.frame_rate
+        if frame_rate.numerator != 24 or frame_rate.denominator != 1:
+            raise StudioConflictError("video repairs require a 24 fps editing timeline")
+        try:
+            window = expand_generation_window(
+                command.issue_range,
+                total_frames=timeline.total_frames,
+                frame_rate=frame_rate,
+            )
+        except ValueError as exc:
+            raise StudioConflictError(str(exc)) from exc
+
+        selections = self._repository.current_selections(project_id)
+        canon_roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
+        missing = [role for role in canon_roles if role not in selections]
+        if missing:
+            raise StudioConflictError(f"missing segment repair references: {', '.join(missing)}")
+        anchor_in_sha = _hash_document(
+            {"sourceSha256": base_video.sha256, "frame": command.issue_range.start_frame}
+        )
+        anchor_out_sha = _hash_document(
+            {"sourceSha256": base_video.sha256, "frame": command.issue_range.end_frame - 1}
+        )
+        image_references = [
+            SegmentRepairImageReferenceDto(
+                role="anchor_in",
+                sha256=anchor_in_sha,
+                frameNumber=command.issue_range.start_frame,
+                derived=True,
+            ),
+            SegmentRepairImageReferenceDto(
+                role="anchor_out",
+                sha256=anchor_out_sha,
+                frameNumber=command.issue_range.end_frame - 1,
+                derived=True,
+            ),
+            *[
+                SegmentRepairImageReferenceDto(
+                    role=role, assetId=selections[role].id, sha256=selections[role].sha256
+                )
+                for role in canon_roles
+            ],
+        ]
+        video_reference = SegmentRepairVideoReferenceDto(
+            role="reference_video",
+            assetId=base_video.id,
+            sha256=base_video.sha256,
+            range=window.generation_range,
+        )
+        negative_prompt = (
+            "真实摄影，3D塑料质感，身份漂移，儿童年龄或发型变化，猫咪毛色或虎斑变化，"
+            "额外肢体，融脸，断尾，错误四足，动作双影，背景或光线跳变，文字，Logo，水印，"
+            "静止停帧，原地互看，循环动作填充时长，叶片微距摄影污染"
+        )
+        document = {
+            "projectId": str(project_id),
+            "baseVideoAssetId": str(base_video.id),
+            "baseVideoSha256": base_video.sha256,
+            "baseEditVersionId": str(active_edit.id) if active_edit is not None else None,
+            "baseTimelineHash": timeline_hash,
+            "frameRate": frame_rate.model_dump(mode="json", by_alias=True),
+            "issueRange": command.issue_range.model_dump(mode="json", by_alias=True),
+            "generationRange": window.generation_range.model_dump(mode="json", by_alias=True),
+            "candidateCoreRange": window.candidate_core_range.model_dump(
+                mode="json", by_alias=True
+            ),
+            "providerDurationSeconds": window.provider_duration_seconds,
+            "prompt": command.prompt,
+            "negativePrompt": negative_prompt,
+            "imageReferences": [
+                item.model_dump(mode="json", by_alias=True) for item in image_references
+            ],
+            "videoReference": video_reference.model_dump(mode="json", by_alias=True),
+            "provider": self._provider_runtime.provider,
+            "model": self._provider_runtime.video_model,
+            "capabilityRevision": self._provider_runtime.capability_revision,
+        }
+        repair_id = uuid.uuid4()
+        preview = SegmentRepairPreviewDto(
+            repairId=repair_id,
+            projectId=project_id,
+            baseVideoAssetId=base_video.id,
+            baseEditVersionId=active_edit.id if active_edit is not None else None,
+            baseTimelineHash=timeline_hash,
+            frameRate=frame_rate,
+            issueRange=command.issue_range,
+            generationRange=window.generation_range,
+            candidateCoreRange=window.candidate_core_range,
+            providerDurationSeconds=window.provider_duration_seconds,
+            provider=self._provider_runtime.provider,
+            model=self._provider_runtime.video_model,
+            capabilityRevision=self._provider_runtime.capability_revision,
+            prompt=command.prompt,
+            negativePrompt=negative_prompt,
+            imageReferences=image_references,
+            videoReference=video_reference,
+            expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
+            costEstimateStatus=(
+                "unmetered_paid" if self._provider_runtime.provider == "ark" else "priced"
+            ),
+            inputHash=_hash_document(document),
+        )
+        self._repository.create_video_repair(
+            VideoRepairDto(
+                id=repair_id,
+                projectId=project_id,
+                baseVideoAssetId=base_video.id,
+                baseEditVersionId=active_edit.id if active_edit is not None else None,
+                baseTimelineHash=timeline_hash,
+                frameRate=frame_rate,
+                issueRange=command.issue_range,
+                generationRange=window.generation_range,
+                candidateCoreRange=window.candidate_core_range,
+                providerDurationSeconds=window.provider_duration_seconds,
+                prompt=command.prompt,
+                negativePrompt=negative_prompt,
+                inputHash=preview.input_hash,
+                status="draft",
+                preview=preview,
+                createdAt=datetime.now(UTC),
+            )
+        )
+        return preview
+
+    def create_video_repair_job(
+        self, project_id: uuid.UUID, command: SegmentRepairCreateCommand
+    ) -> JobDto:
+        project = self._require_project(project_id)
+        repair = self.get_video_repair(command.repair_id)
+        if repair.project_id != project_id:
+            raise StudioNotFoundError("video repair not found")
+        if repair.input_hash != command.expected_input_hash:
+            raise StudioConflictError("segment repair input hash changed")
+        if repair.preview.expected_cost_micros != command.expected_cost_micros:
+            raise StudioConflictError("segment repair expected cost changed")
+        if repair.status not in {"draft", "generating"}:
+            raise StudioConflictError("video repair can no longer be submitted")
+        self._require_paid_authorization(
+            project, command.validation_run_id, command.paid_confirmation
+        )
+        if self._provider_runtime.provider == "ark":
+            if command.validation_run_id is None:
+                raise StudioConflictError("authorized validation run is required")
+            run = self.get_validation_run(command.validation_run_id)
+            if (
+                project.theme != run.repair.topic
+                or repair.issue_range != run.repair.issue_range
+                or repair.prompt != run.repair.prompt
+            ):
+                raise StudioConflictError(
+                    "segment repair topic, frame range, or prompt differs from the "
+                    "authorized manifest"
+                )
+        now = datetime.now(UTC)
+        image_references = repair.preview.image_references
+        job = self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=project_id,
+                kind="regenerate_video_segment",
+                status="queued",
+                inputHash=repair.input_hash,
+                idempotencyKey=command.idempotency_key,
+                provider=repair.preview.provider,
+                model=repair.preview.model,
+                validationRunId=command.validation_run_id,
+                videoRepairId=repair.id,
+                expectedCostMicros=repair.preview.expected_cost_micros,
+                frozenInput={
+                    "baseVideoAssetId": str(repair.base_video_asset_id),
+                    "baseEditVersionId": (
+                        str(repair.base_edit_version_id)
+                        if repair.base_edit_version_id is not None
+                        else None
+                    ),
+                    "baseTimelineHash": repair.base_timeline_hash,
+                    "issueRange": repair.issue_range.model_dump(mode="json", by_alias=True),
+                    "generationRange": repair.generation_range.model_dump(
+                        mode="json", by_alias=True
+                    ),
+                    "candidateCoreRange": repair.candidate_core_range.model_dump(
+                        mode="json", by_alias=True
+                    ),
+                    "providerDurationSeconds": repair.provider_duration_seconds,
+                    "prompt": repair.prompt,
+                    "negativePrompt": repair.negative_prompt,
+                    "imageReferences": [
+                        item.model_dump(mode="json", by_alias=True) for item in image_references
+                    ],
+                    "videoReference": repair.preview.video_reference.model_dump(
+                        mode="json", by_alias=True
+                    ),
+                    "referenceAssetIds": [
+                        str(item.asset_id) for item in image_references if item.asset_id is not None
+                    ],
+                    "referenceRoles": [item.role for item in image_references],
+                    "capabilityRevision": repair.preview.capability_revision,
+                    "durationSeconds": repair.provider_duration_seconds,
+                    "resolution": "480p",
+                    "aspectRatio": "9:16",
+                },
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+        self._repository.set_video_repair_status(repair.id, status="generating")
+        return job
+
+    def mark_video_repair_candidate_ready(
+        self, repair_id: uuid.UUID, candidate_asset_id: uuid.UUID
+    ) -> VideoRepairDto:
+        repair = self.get_video_repair(repair_id)
+        candidate = self.get_asset(candidate_asset_id)
+        if (
+            candidate.project_id != repair.project_id
+            or candidate.role != "repair_candidate"
+            or candidate.media_type != "video"
+        ):
+            raise StudioConflictError("repair candidate does not belong to the repair project")
+        job = (
+            self._repository.get_job(candidate.producing_job_id)
+            if candidate.producing_job_id is not None
+            else None
+        )
+        if job is None or job.video_repair_id != repair_id:
+            raise StudioConflictError("repair candidate is not produced by this repair job")
+        return self._repository.set_video_repair_status(
+            repair_id, status="candidate_ready", candidate_asset_id=candidate_asset_id
+        )
+
+    def list_video_repairs(self, project_id: uuid.UUID) -> list[VideoRepairDto]:
+        self._require_project(project_id)
+        return self._repository.list_video_repairs(project_id)
+
+    def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto:
+        repair = self._repository.get_video_repair(repair_id)
+        if repair is None:
+            raise StudioNotFoundError("video repair not found")
+        return repair
+
+    def approve_video_repair(
+        self,
+        project_id: uuid.UUID,
+        repair_id: uuid.UUID,
+        command: SegmentRepairApproveCommand,
+    ) -> EditVersionDto:
+        self._require_project(project_id)
+        repair = self.get_video_repair(repair_id)
+        if repair.project_id != project_id:
+            raise StudioNotFoundError("video repair not found")
+        _, active_edit, timeline, current_hash = self._repair_base_timeline(
+            project_id,
+            base_video_asset_id=repair.base_video_asset_id,
+            expected_edit_version_id=repair.base_edit_version_id,
+        )
+        if (
+            command.expected_base_timeline_hash != repair.base_timeline_hash
+            or current_hash != repair.base_timeline_hash
+        ):
+            self._repository.set_video_repair_status(repair_id, status="outdated")
+            raise StudioConflictError("base timeline changed")
+        if repair.status != "candidate_ready" or repair.candidate_asset_id is None:
+            raise StudioConflictError("video repair has no candidate ready for approval")
+        required_quality = {
+            "child_identity",
+            "cat_identity",
+            "pair_scale",
+            "style",
+            "structure",
+            "motion_continuity",
+            "causal_chain",
+        }
+        if set(command.quality_checks) != required_quality or any(
+            value != "pass" for value in command.quality_checks.values()
+        ):
+            raise StudioConflictError("all seven quality checks must pass")
+        if set(command.seam_checks) != {"in", "out"} or any(
+            value != "pass" for value in command.seam_checks.values()
+        ):
+            raise StudioConflictError("both seam checks must pass")
+        if command.candidate_asset_id != repair.candidate_asset_id:
+            raise StudioConflictError("approved candidate changed")
+        candidate = self.get_asset(command.candidate_asset_id)
+        total_candidate_frames = candidate.metadata.get("durationFrames")
+        if not isinstance(total_candidate_frames, int):
+            raise StudioConflictError("repair candidate has no frame metadata")
+        if command.candidate_source_range.end_frame > total_candidate_frames:
+            raise StudioConflictError("candidate source range exceeds the candidate video")
+        handle_frames = command.transition.duration_frames
+        if handle_frames and (
+            command.candidate_source_range.start_frame < handle_frames
+            or total_candidate_frames - command.candidate_source_range.end_frame < handle_frames
+            or repair.issue_range.start_frame < handle_frames
+            or timeline.total_frames - repair.issue_range.end_frame < handle_frames
+        ):
+            raise StudioConflictError(
+                "candidate or original video has insufficient dissolve handles"
+            )
+        transition = EditTransitionV2(
+            afterSegmentIndex=0,
+            type=command.transition.type,
+            durationFrames=command.transition.duration_frames,
+        )
+        try:
+            repaired_timeline = splice_repair_candidate(
+                timeline,
+                issue_range=repair.issue_range,
+                candidate_asset_id=candidate.id,
+                candidate_sha256=candidate.sha256,
+                candidate_source_range=command.candidate_source_range,
+                repair_id=repair.id,
+                transition=transition,
+            )
+        except ValueError as exc:
+            raise StudioConflictError(str(exc)) from exc
+        return self._repository.approve_video_repair(
+            repair.id,
+            edl=repaired_timeline,
+            source_selection_hash=self.current_delivery_selection_hash(project_id),
+            parent_edit_version_id=active_edit.id if active_edit is not None else None,
+            candidate_asset_id=candidate.id,
+            candidate_source_range=command.candidate_source_range,
+            idempotency_key=command.idempotency_key,
+        )
+
+    def reject_video_repair(self, project_id: uuid.UUID, repair_id: uuid.UUID) -> VideoRepairDto:
+        repair = self.get_video_repair(repair_id)
+        if repair.project_id != project_id:
+            raise StudioNotFoundError("video repair not found")
+        return self._repository.set_video_repair_status(repair_id, status="rejected")
 
     def get_job(self, job_id: uuid.UUID) -> JobDto:
         job = self._repository.get_job(job_id)
@@ -1377,6 +1928,45 @@ class StudioService:
             edl=command.edl,
         )
 
+    def _repair_base_timeline(
+        self,
+        project_id: uuid.UUID,
+        *,
+        base_video_asset_id: uuid.UUID,
+        expected_edit_version_id: uuid.UUID | None,
+    ) -> tuple[AssetDto, EditVersionDto | None, EditDecisionListV2, str]:
+        selections = self._repository.current_selections(project_id)
+        selected_video = selections.get("video")
+        if selected_video is None or selected_video.id != base_video_asset_id:
+            raise StudioConflictError("base timeline changed")
+        total_frames = selected_video.metadata.get("durationFrames")
+        if not isinstance(total_frames, int) or total_frames <= 0:
+            raise StudioConflictError("selected video has no valid frame metadata")
+        active_edit = self._repository.active_edit(project_id)
+        if expected_edit_version_id is not None and (
+            active_edit is None or active_edit.id != expected_edit_version_id
+        ):
+            raise StudioConflictError("base timeline changed")
+        if active_edit is not None and active_edit.format_version == 2:
+            if not isinstance(active_edit.edl, EditDecisionListV2):
+                raise StudioConflictError("active edit has an invalid v2 timeline")
+            timeline = active_edit.edl
+        else:
+            timeline = build_base_timeline(
+                asset_id=selected_video.id,
+                sha256=selected_video.sha256,
+                total_frames=total_frames,
+            )
+        timeline_hash = _hash_document(
+            {
+                "selectedVideoAssetId": str(selected_video.id),
+                "selectedVideoSha256": selected_video.sha256,
+                "activeEditVersionId": str(active_edit.id) if active_edit is not None else None,
+                "timeline": timeline.model_dump(mode="json", by_alias=True),
+            }
+        )
+        return selected_video, active_edit, timeline, timeline_hash
+
     def list_edits(self, project_id: uuid.UUID) -> list[EditVersionDto]:
         self._require_project(project_id)
         return self._repository.list_edits(project_id)
@@ -1405,7 +1995,7 @@ class StudioService:
                 inputHash=input_hash,
                 idempotencyKey=command.idempotency_key,
                 provider="local_ffmpeg",
-                model="ffmpeg-edl-v1",
+                model=f"ffmpeg-edl-v{edit.format_version}",
                 expectedCostMicros=0,
                 frozenInput={
                     "editVersionId": str(edit.id),
@@ -1461,11 +2051,7 @@ class StudioService:
         selected = self._repository.current_selections(project.id)
         for reference in run.canon.references:
             asset = selected.get(reference.role)
-            if (
-                asset is None
-                or asset.id != reference.asset_id
-                or asset.sha256 != reference.sha256
-            ):
+            if asset is None or asset.id != reference.asset_id or asset.sha256 != reference.sha256:
                 raise StudioConflictError(
                     "project Canon references changed after validation authorization"
                 )
@@ -1511,9 +2097,7 @@ def _validation_canon_snapshot(profile: CanonProfileDto) -> ValidationCanonSnaps
     if not isinstance(child, dict):
         raise StudioConflictError("the active Canon profile has no child authority")
     if child.get("age") != "6-7" or child.get("heightCm") != 120:
-        raise StudioConflictError(
-            "the active Canon must define a 6-7 year-old child at 120 cm"
-        )
+        raise StudioConflictError("the active Canon must define a 6-7 year-old child at 120 cm")
     return ValidationCanonSnapshotDto(
         profileId=profile.id,
         version=profile.version,
@@ -1663,9 +2247,7 @@ def _video_prompt(
             else f"孩子{shot.child_action}"
         )
         cat_action = (
-            shot.cat_action
-            if shot.cat_action.startswith("猫咪")
-            else f"猫咪{shot.cat_action}"
+            shot.cat_action if shot.cat_action.startswith("猫咪") else f"猫咪{shot.cat_action}"
         )
         direction_parts.append(
             f"镜头{shot.order}（{shot.duration_seconds}秒，{shot.framing}）："
@@ -1673,17 +2255,13 @@ def _video_prompt(
         )
     directions = "；".join(direction_parts)
     active_endings = {
-        "雨天擦爪": (
-            "孩子拿起并折好毛巾，猫咪沿脚垫向室内走两步，尾巴自然摆动；"
-            "禁止原地互看"
-        ),
+        "雨天擦爪": ("孩子拿起并折好毛巾，猫咪沿脚垫向室内走两步，尾巴自然摆动；禁止原地互看"),
         "浇花": (
             "孩子将水壶放回一侧并轻推托盘归位，猫咪绕花盆走一小步、尾巴轻摆；"
             "植物必须是柔和数字插画，不能有真实叶片摄影质感"
         ),
         "寻找滚落线团": (
-            "孩子将线团放进篮子并提起篮子，猫咪跟着向前走两步；"
-            "禁止用静止凝视补足时长"
+            "孩子将线团放进篮子并提起篮子，猫咪跟着向前走两步；禁止用静止凝视补足时长"
         ),
     }
     active_ending = active_endings.get(project.theme, story.micro_event.warm_ending)

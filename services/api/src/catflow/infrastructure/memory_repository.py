@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from catflow.application.service import (
     FIXED_CANON_ROLES,
@@ -11,6 +12,7 @@ from catflow.application.service import (
     CanonProfileDto,
     CanonRevisionCreateCommand,
     EditDecisionListDto,
+    EditDecisionListV2,
     EditVersionDto,
     EnvironmentPresetDto,
     FixedCanonRole,
@@ -33,6 +35,8 @@ from catflow.application.service import (
     StudioNotFoundError,
     ValidationRunDto,
     ValidationRunPreviewDto,
+    VideoRepairDto,
+    VideoRepairStatus,
 )
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
 from catflow.domain.validation import (
@@ -40,6 +44,7 @@ from catflow.domain.validation import (
     first_release_manifest,
     reserve_validation_call,
 )
+from catflow.domain.video_repairs import FrameRange
 
 
 class MemoryStudioRepository:
@@ -106,6 +111,8 @@ class MemoryStudioRepository:
         self._jobs_by_idempotency: dict[str, uuid.UUID] = {}
         self._job_events: list[JobEventDto] = []
         self._edits: dict[uuid.UUID, list[EditVersionDto]] = {}
+        self._video_repairs: dict[uuid.UUID, VideoRepairDto] = {}
+        self._repair_approvals_by_idempotency: dict[str, uuid.UUID] = {}
         self._validation_runs: dict[uuid.UUID, ValidationRunDto] = {}
         self._environment_presets: list[EnvironmentPresetDto] = []
 
@@ -502,6 +509,7 @@ class MemoryStudioRepository:
         storage_key: str,
         byte_size: int,
         producing_job_id: uuid.UUID | None,
+        metadata: dict[str, Any] | None = None,
     ) -> StoredAssetDto:
         existing = next(
             (
@@ -522,7 +530,7 @@ class MemoryStudioRepository:
             storageKey=storage_key,
             sha256=sha256,
             byteSize=byte_size,
-            metadata={},
+            metadata=metadata or {},
             createdAt=datetime.now(UTC),
         )
         self._assets[asset.id] = asset
@@ -689,6 +697,16 @@ class MemoryStudioRepository:
         edl: EditDecisionListDto,
     ) -> EditVersionDto:
         project_edits = self._edits.setdefault(project_id, [])
+        for index, existing in enumerate(project_edits):
+            if existing.active:
+                project_edits[index] = existing.model_copy(update={"active": False})
+        timeline_hash = hashlib.sha256(
+            json.dumps(
+                edl.model_dump(mode="json", by_alias=True),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         edit = EditVersionDto(
             id=uuid.uuid4(),
             projectId=project_id,
@@ -696,6 +714,9 @@ class MemoryStudioRepository:
             sourceSelectionHash=source_selection_hash,
             edl=edl,
             status="draft",
+            formatVersion=1,
+            active=True,
+            timelineHash=timeline_hash,
             createdAt=datetime.now(UTC),
         )
         project_edits.append(edit)
@@ -714,6 +735,115 @@ class MemoryStudioRepository:
             ),
             None,
         )
+
+    def active_edit(self, project_id: uuid.UUID) -> EditVersionDto | None:
+        return next(
+            (
+                edit
+                for edit in reversed(self._edits.get(project_id, []))
+                if edit.active
+            ),
+            None,
+        )
+
+    def create_video_repair(self, repair: VideoRepairDto) -> VideoRepairDto:
+        self._video_repairs[repair.id] = repair
+        return repair
+
+    def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None:
+        return self._video_repairs.get(repair_id)
+
+    def list_video_repairs(self, project_id: uuid.UUID) -> list[VideoRepairDto]:
+        return list(
+            reversed(
+                [
+                    repair
+                    for repair in self._video_repairs.values()
+                    if repair.project_id == project_id
+                ]
+            )
+        )
+
+    def set_video_repair_status(
+        self,
+        repair_id: uuid.UUID,
+        *,
+        status: VideoRepairStatus,
+        candidate_asset_id: uuid.UUID | None = None,
+    ) -> VideoRepairDto:
+        repair = self._video_repairs.get(repair_id)
+        if repair is None:
+            raise StudioNotFoundError("video repair not found")
+        changes: dict[str, object] = {"status": status}
+        if candidate_asset_id is not None:
+            changes["candidate_asset_id"] = candidate_asset_id
+        updated = repair.model_copy(update=changes)
+        self._video_repairs[repair_id] = updated
+        return updated
+
+    def approve_video_repair(
+        self,
+        repair_id: uuid.UUID,
+        *,
+        edl: EditDecisionListV2,
+        source_selection_hash: str,
+        parent_edit_version_id: uuid.UUID | None,
+        candidate_asset_id: uuid.UUID,
+        candidate_source_range: FrameRange,
+        idempotency_key: str,
+    ) -> EditVersionDto:
+        existing_edit_id = self._repair_approvals_by_idempotency.get(idempotency_key)
+        if existing_edit_id is not None:
+            existing = self.get_edit(existing_edit_id)
+            if existing is None:
+                raise StudioConflictError("repair approval idempotency record is invalid")
+            repair = self._video_repairs.get(repair_id)
+            if repair is None or repair.approved_edit_version_id != existing.id:
+                raise StudioConflictError(
+                    "repair approval idempotency key belongs to different input"
+                )
+            return existing
+        repair = self._video_repairs.get(repair_id)
+        if repair is None:
+            raise StudioNotFoundError("video repair not found")
+        project_edits = self._edits.setdefault(repair.project_id, [])
+        for index, existing in enumerate(project_edits):
+            if existing.active:
+                project_edits[index] = existing.model_copy(update={"active": False})
+        timeline_hash = hashlib.sha256(
+            json.dumps(
+                edl.model_dump(mode="json", by_alias=True),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        edit = EditVersionDto(
+            id=uuid.uuid4(),
+            projectId=repair.project_id,
+            revision=len(project_edits) + 1,
+            sourceSelectionHash=source_selection_hash,
+            edl=edl,
+            status="draft",
+            parentEditVersionId=parent_edit_version_id,
+            formatVersion=2,
+            active=True,
+            timelineHash=timeline_hash,
+            createdAt=datetime.now(UTC),
+        )
+        project_edits.append(edit)
+        approved = repair.model_copy(
+            update={
+                "status": "approved",
+                "candidate_core_range": candidate_source_range,
+                "approved_candidate_asset_id": candidate_asset_id,
+                "approved_edit_version_id": edit.id,
+                "approval_idempotency_key": idempotency_key,
+                "approved_at": datetime.now(UTC),
+            }
+        )
+        self._video_repairs[repair_id] = approved
+        self._repair_approvals_by_idempotency[idempotency_key] = edit.id
+        return edit
 
     def _existing_job(self, idempotency_key: str, *, input_hash: str) -> JobDto | None:
         existing_id = self._jobs_by_idempotency.get(idempotency_key)
