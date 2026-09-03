@@ -12,7 +12,7 @@ from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import AssetRecord, JobRecord
 
 from .ark_results import ArkResultLandingService
-from .media_jobs import MediaJobExecutor
+from .media_jobs import LocalMediaJobExecutor
 
 
 class AssetMediaResolver:
@@ -280,7 +280,7 @@ class JobResultDispatcher:
         self,
         sessions: sessionmaker[Session],
         *,
-        local: MediaJobExecutor,
+        local: LocalMediaJobExecutor,
         ark: ArkResultLandingService | None,
     ) -> None:
         self._sessions = sessions
@@ -294,7 +294,7 @@ class JobResultDispatcher:
                 raise ValueError("job not found")
             provider = job.provider
             kind = job.kind
-        if kind == "render_export" or provider in {"fake", "local_ffmpeg"}:
+        if kind == "render_export" or provider == "local_ffmpeg":
             self._local.store_result(job_id)
             return
         if provider == "ark" and self._ark is not None:

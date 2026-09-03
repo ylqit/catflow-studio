@@ -1,8 +1,6 @@
 [CmdletBinding()]
 param(
     [switch]$SkipWebBuild,
-    [ValidateSet('environment', 'fake')]
-    [string]$Provider = 'environment',
     [switch]$NoBrowser
 )
 
@@ -20,10 +18,6 @@ foreach ($line in Get-Content -LiteralPath $environmentFile) {
     }
 }
 $env:CATFLOW_ROOT = $projectRoot
-if ($Provider -eq 'fake') {
-    $env:CATFLOW_PROVIDER = 'fake'
-    $env:CATFLOW_PAID_CALLS_ENABLED = 'false'
-}
 $catflowPort = if ($env:CATFLOW_PORT) { [int]$env:CATFLOW_PORT } else { 8877 }
 . (Join-Path $PSScriptRoot 'runtime-paths.ps1')
 $runtimePaths = Get-CatFlowRuntimePaths -ProjectRoot $projectRoot
@@ -67,7 +61,7 @@ $apiExecutable = Join-Path $projectRoot '.venv\Scripts\catflow.exe'
 $workerExecutable = Join-Path $projectRoot '.venv\Scripts\catflow-worker.exe'
 $apiStart = @{
     FilePath = $apiExecutable
-    ArgumentList = @('--port', $catflowPort.ToString())
+    ArgumentList = @('serve', '--port', $catflowPort.ToString())
     WorkingDirectory = $projectRoot
     WindowStyle = 'Hidden'
     RedirectStandardOutput = (Join-Path $logDirectory 'api.out.log')

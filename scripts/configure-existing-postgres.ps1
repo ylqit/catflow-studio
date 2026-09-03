@@ -45,7 +45,6 @@ $targetLines = @(
     'CATFLOW_CANON_ROOT=assets/canon/v4',
     'CATFLOW_LOG_ROOT=var/logs',
     'CATFLOW_BACKUP_ROOT=var/backups',
-    'CATFLOW_PROVIDER=fake',
     'CATFLOW_PAID_CALLS_ENABLED=false'
 )
 

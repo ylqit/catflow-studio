@@ -4,7 +4,6 @@ import { createRouter, createWebHistory } from "vue-router";
 const ProjectListView = () => import("./views/ProjectListView.vue");
 const WorkspaceView = () => import("./views/WorkspaceView.vue");
 const RuntimeSettingsView = () => import("./views/RuntimeSettingsView.vue");
-const FirstValidationView = () => import("./views/FirstValidationView.vue");
 
 export const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/projects" },
@@ -40,7 +39,6 @@ export const routes: RouteRecordRaw[] = [
     props: { step: "delivery" },
   },
   { path: "/settings", name: "settings", component: RuntimeSettingsView },
-  { path: "/validation/first-three", name: "first-validation", component: FirstValidationView },
   { path: "/:pathMatch(.*)*", redirect: "/projects" },
 ];
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import delete
 
+from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     ProjectCreate,
     SegmentRepairApproveCommand,
@@ -30,7 +31,20 @@ def test_postgres_recovers_repair_job_and_approves_one_active_edit_version() -> 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(PostgresStudioRepository(sessions))
+    service = StudioService(
+        PostgresStudioRepository(sessions),
+        provider_runtime=ProviderRuntime(
+            provider="ark",
+            planning_model="planning",
+            image_model="image",
+            video_model="video",
+            diagnostic_model="diagnostic",
+            capability_revision="ark-seedance-2.0-v1",
+            paid_calls_enabled=True,
+            maximum_video_references=5,
+            segment_reference_publishing_ready=True,
+        ),
+    )
     project = service.create_project(
         ProjectCreate(title="PostgreSQL 片段修复", theme="雨天擦爪", targetDurationSeconds=12)
     )

@@ -52,17 +52,11 @@ from catflow.application.service import (
     StudioConflictError,
     StudioNotFoundError,
     ValidationRunDto,
-    ValidationRunPreviewDto,
     VideoRepairDto,
     VideoRepairStatus,
 )
 from catflow.domain.billing import rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
-from catflow.domain.validation import (
-    ValidationCallKind,
-    first_release_manifest,
-    reserve_validation_call,
-)
 from catflow.domain.video_repairs import FrameRange
 
 
@@ -266,45 +260,11 @@ class MemoryStudioRepository:
         self._canon_profile_id = profile.id
         return profile
 
-    def create_validation_run(self, preview: ValidationRunPreviewDto) -> ValidationRunDto:
-        now = datetime.now(UTC)
-        run = ValidationRunDto(
-            **preview.model_dump(by_alias=True),
-            id=uuid.uuid4(),
-            status="authorized",
-            usage=dict.fromkeys(preview.call_limits, 0),
-            createdAt=now,
-            authorizedAt=now,
-        )
-        self._validation_runs[run.id] = run
-        return run
-
     def get_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto | None:
         return self._validation_runs.get(run_id)
 
     def latest_validation_run(self) -> ValidationRunDto | None:
         return next(reversed(self._validation_runs.values()), None)
-
-    def set_validation_run_status(self, run_id: uuid.UUID, status: str) -> ValidationRunDto:
-        run = self._validation_runs.get(run_id)
-        if run is None:
-            raise StudioNotFoundError("validation run not found")
-        updated = run.model_copy(update={"status": status})
-        self._validation_runs[run_id] = updated
-        return updated
-
-    def reserve_validation_call(
-        self, run_id: uuid.UUID, kind: ValidationCallKind
-    ) -> ValidationRunDto:
-        run = self._validation_runs.get(run_id)
-        if run is None:
-            raise StudioNotFoundError("validation run not found")
-        if run.status != "authorized":
-            raise StudioConflictError("validation run is not authorized")
-        usage = reserve_validation_call(first_release_manifest(), run.usage, kind)
-        updated = run.model_copy(update={"usage": usage})
-        self._validation_runs[run_id] = updated
-        return updated
 
     def create_project(self, draft: ProjectCreate, *, canon_profile_id: uuid.UUID) -> ProjectDto:
         now = datetime.now(UTC)
@@ -1004,20 +964,6 @@ class MemoryStudioRepository:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
             return existing
-        if job.validation_run_id is not None:
-            duplicate = next(
-                (
-                    item
-                    for item in self._jobs.values()
-                    if item.validation_run_id == job.validation_run_id
-                    and item.project_id == job.project_id
-                    and item.kind == job.kind
-                ),
-                None,
-            )
-            if duplicate is not None:
-                raise StudioConflictError("validation run already has this project call")
-            self.reserve_validation_call(job.validation_run_id, ValidationCallKind(job.kind))
         self._jobs[job.id] = job
         self._jobs_by_idempotency[job.idempotency_key] = job.id
         self._record_event(job, "job.queued")

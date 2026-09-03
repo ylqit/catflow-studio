@@ -142,40 +142,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/validation-runs/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Validation Run */
-        post: operations["preview_validation_run_api_v1_validation_runs_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/validation-runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Authorize Validation Run */
-        post: operations["authorize_validation_run_api_v1_validation_runs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/validation-runs/current": {
         parameters: {
             query?: never;
@@ -204,23 +170,6 @@ export interface paths {
         get: operations["get_validation_run_api_v1_validation_runs__run_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/validation-runs/{run_id}/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pause Validation Run */
-        post: operations["pause_validation_run_api_v1_validation_runs__run_id__pause_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -822,104 +771,6 @@ export interface paths {
         put?: never;
         /** Reject Video Edit */
         post: operations["reject_video_edit_api_v1_projects__project_id__video_edits__edit_id__reject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/video-repairs/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Video Repair
-         * @deprecated
-         */
-        post: operations["preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/video-repairs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Video Repairs */
-        get: operations["video_repairs_api_v1_projects__project_id__video_repairs_get"];
-        put?: never;
-        /**
-         * Create Video Repair
-         * @deprecated
-         */
-        post: operations["create_video_repair_api_v1_projects__project_id__video_repairs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/video-repairs/{repair_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Video Repair */
-        get: operations["video_repair_api_v1_projects__project_id__video_repairs__repair_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve Video Repair
-         * @deprecated
-         */
-        post: operations["approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject Video Repair
-         * @deprecated
-         */
-        post: operations["reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1795,7 +1646,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
+            kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
             /**
              * Status
              * @enum {string}
@@ -2857,11 +2708,6 @@ export interface components {
              */
             createdAt: string;
         };
-        /**
-         * ValidationCallKind
-         * @enum {string}
-         */
-        ValidationCallKind: "plan_story" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment";
         /** ValidationCanonReferenceDto */
         ValidationCanonReferenceDto: {
             /**
@@ -2924,16 +2770,6 @@ export interface components {
             issueRange: components["schemas"]["FrameRange"];
             /** Prompt */
             prompt: string;
-        };
-        /** ValidationRunCreateCommand */
-        ValidationRunCreateCommand: {
-            /** Expectedmanifesthash */
-            expectedManifestHash: string;
-            /**
-             * Paidcallacknowledged
-             * @constant
-             */
-            paidCallAcknowledged: true;
         };
         /** ValidationRunDto */
         ValidationRunDto: {
@@ -3003,54 +2839,6 @@ export interface components {
             createdAt: string;
             /** Authorizedat */
             authorizedAt?: string | null;
-        };
-        /** ValidationRunPreviewDto */
-        ValidationRunPreviewDto: {
-            /** Manifesthash */
-            manifestHash: string;
-            /** Topics */
-            topics: string[];
-            /** Durationseconds */
-            durationSeconds: number;
-            /** Resolution */
-            resolution: string;
-            /** Aspectratio */
-            aspectRatio: string;
-            /** Targetbudgetcny */
-            targetBudgetCny: number;
-            /** Calllimits */
-            callLimits: {
-                [key: string]: number;
-            };
-            /** Totalcalllimit */
-            totalCallLimit: number;
-            /** Maximumvideocalls */
-            maximumVideoCalls: number;
-            /** Provider */
-            provider: string;
-            /** Models */
-            models: {
-                [key: string]: string;
-            };
-            /** Capabilityrevision */
-            capabilityRevision: string;
-            /**
-             * Costestimatestatus
-             * @enum {string}
-             */
-            costEstimateStatus: "priced" | "unmetered_paid";
-            /**
-             * Authorizationready
-             * @default true
-             */
-            authorizationReady: boolean;
-            /**
-             * Blockingreasons
-             * @default []
-             */
-            blockingReasons: string[];
-            canon: components["schemas"]["ValidationCanonSnapshotDto"];
-            repair: components["schemas"]["ValidationRepairSnapshotDto"];
         };
         /** VideoDiagnosisCommand */
         VideoDiagnosisCommand: {
@@ -3401,74 +3189,6 @@ export interface operations {
             };
         };
     };
-    preview_validation_run_api_v1_validation_runs_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationRunPreviewDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    authorize_validation_run_api_v1_validation_runs_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ValidationRunCreateCommand"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationRunDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     current_validation_run_api_v1_validation_runs_current_get: {
         parameters: {
             query?: never;
@@ -3499,43 +3219,6 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationRunDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pause_validation_run_api_v1_validation_runs__run_id__pause_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -4903,213 +4586,6 @@ export interface operations {
             path: {
                 project_id: string;
                 edit_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoRepairDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_video_repair_api_v1_projects__project_id__video_repairs_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SegmentRepairPreviewCommand"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SegmentRepairPreviewDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    video_repairs_api_v1_projects__project_id__video_repairs_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoRepairDto"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_video_repair_api_v1_projects__project_id__video_repairs_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SegmentRepairCreateCommand"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    video_repair_api_v1_projects__project_id__video_repairs__repair_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-                repair_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoRepairDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    approve_video_repair_api_v1_projects__project_id__video_repairs__repair_id__approve_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-                repair_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SegmentRepairApproveCommand"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EditVersionDto"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reject_video_repair_api_v1_projects__project_id__video_repairs__repair_id__reject_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-                repair_id: string;
             };
             cookie?: never;
         };

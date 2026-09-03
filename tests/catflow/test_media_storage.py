@@ -40,7 +40,7 @@ def test_upload_rejects_extension_mime_and_file_header_disagreement(tmp_path) ->
     with pytest.raises(InvalidMediaError, match="decode"):
         store.save_upload(
             b"not an image",
-            filename="fake.png",
+            filename="mislabeled.png",
             declared_content_type="image/png",
             role="episode_child",
         )
@@ -48,7 +48,7 @@ def test_upload_rejects_extension_mime_and_file_header_disagreement(tmp_path) ->
     with pytest.raises(InvalidMediaError, match="extension"):
         store.save_upload(
             _png(),
-            filename="fake.jpg",
+            filename="mislabeled.jpg",
             declared_content_type="image/png",
             role="episode_child",
         )

@@ -39,7 +39,11 @@ function workspace(activeShotPlan: WorkspaceDto["activeShotPlan"]): WorkspaceDto
 
 function mountStoryboard(activeShotPlan: WorkspaceDto["activeShotPlan"]) {
   return mount(StoryboardStep, {
-    props: { projectId: "project-1", workspace: workspace(activeShotPlan) },
+    props: {
+      projectId: "project-1",
+      workspace: workspace(activeShotPlan),
+      runtime: { provider: { apiKeyConfigured: true, paidCallsEnabled: true } },
+    },
     global: { stubs: { RouterLink: true } },
   });
 }

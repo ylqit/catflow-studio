@@ -43,7 +43,7 @@ CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界
 apps/web/                 Vue/Vite 唯一正式前端
 assets/canon/v4/          四张可提交 Provider 的正式 Canon 生产包
 services/api/             FastAPI 模块化单体与新 Alembic 基线
-services/worker/          Durable Worker、fake gateway 与 FFmpeg
+services/worker/          Durable Worker、Ark typed gateway 与 FFmpeg
 packages/contracts/       OpenAPI 生成的 TypeScript 契约
 scripts/                  本机配置、启动、停止及迁移脚本
 tests/catflow/            新领域、仓储、Worker、媒体测试
@@ -52,7 +52,7 @@ var/                      媒体、工作文件、日志和备份（Git 忽略�
 风格定稿/                 历史设计源和审计材料，不直接进入 Provider
 ```
 
-仓库根目录保留从 `cat-video-generator@43b1213` 复制来的旧 `src/`、`web/`、旧 Alembic 与历史测试，作为迁移参考。新构建、测试和运行入口只使用上面的 CatFlow 目录；旧 43 表 Schema 和旧 API 不会连接到 `catflow_studio`。
+旧 `cat-video-generator` 业务包、前端、迁移链和历史测试已经从本仓库移除。当前构建、测试和运行入口只使用上面的 CatFlow 目录；旧 43 表 Schema 和旧 API 不会连接到 `catflow_studio`。
 
 ## PostgreSQL 配置
 
@@ -68,7 +68,7 @@ catflow_studio
 .\scripts\configure-existing-postgres.ps1
 ```
 
-脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；截至 `0017_project_library` 有 19 张业务表，`catflow.alembic_version` 是额外的迁移版本表。
+脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；截至 `0018_remove_obsolete_job_kinds` 有 19 张业务表，`catflow.alembic_version` 是额外的迁移版本表。
 
 ## 本机启动
 
@@ -104,7 +104,7 @@ npm run build
 
 如果端口 `8765` 仍被旧项目占用，启动脚本会报告 PID 并停止，不会擅自终止旧服务。
 
-## 备份、恢复与旧资产导入
+## 备份、恢复与维护清理
 
 创建包含业务表和 `CATFLOW_MEDIA_ROOT` 所指相对媒体目录的本机备份：
 
@@ -119,7 +119,18 @@ npm run build
 .\scripts\restore-local.ps1 -Archive .\var\backups\catflow-YYYYMMDD-HHMMSS.zip -Replace
 ```
 
-旧数据导入器默认只做只读 dry-run：
+生产清理必须先生成只读计划，再使用计划哈希显式执行：
+
+```powershell
+.\.venv\Scripts\catflow.exe cleanup audit --output .\var\backups\cleanup-plan.json
+.\.venv\Scripts\catflow.exe cleanup execute --manifest .\var\backups\cleanup-plan.json --manifest-sha256 <sha256>
+```
+
+执行命令会拒绝运行中的 API、Worker 和活跃任务；它先创建完整逻辑数据库/媒体备份，再逐文件校验并隔离待删媒体。隔离副本至少保留 7 天，`purge-quarantine` 会再次检查数据库引用后才删除清单中的精确文件。
+
+### 遗留资产迁移（临时兼容）
+
+旧数据导入器已收敛到 `scripts/legacy/`，只为尚未完成的一次性资产迁移保留，计划在下一次清理版本移除。它默认只做只读 dry-run：
 
 ```powershell
 .\scripts\import-legacy-assets.ps1
@@ -136,8 +147,8 @@ npm run build
 - Provider Key、数据库凭据、磁盘路径和进程环境不进入 Renderer。
 - 相同幂等键与输入返回同一个 Job；输入变化返回 `409`。
 - Provider task ID 持久化后，Worker 重启只能继续轮询、存储、取消或对账。
-- 正式 Ark 片段修复通过应用拥有的 S3 兼容发布器，把本地上下文 MP4 流式上传为私有临时对象，再向 Ark 提交 2 小时只读预签名 HTTPS URL。首发使用 TOS 北京区 S3 兼容 Endpoint、私有 Bucket `test-vedio-ylq` 和 VirtualHostStyle；后续切换 MinIO 只改对象存储配置，不改 Ark Gateway、Job 或 Repair 生命周期。2026-09-02 的一次性 Web 探针已确认 Seedance 会以 HTTP 400 拒绝 `data:video/mp4;base64,...`，正式流程不会再发送视频 Data URL。历史证据见 [Base64 视频传输报告](output/playwright/base64-video-probe/report.md)。
-- 是否允许真实付费由 `.env` 中的 `CATFLOW_PROVIDER` 与 `CATFLOW_PAID_CALLS_ENABLED` 明确控制；浏览器不会接收 Ark Key。
+- 正式 Ark 片段修复通过应用拥有的 S3 兼容发布器，把本地上下文 MP4 流式上传为私有临时对象，再向 Ark 提交 2 小时只读预签名 HTTPS URL。首发使用 TOS 北京区 S3 兼容 Endpoint、私有 Bucket `test-vedio-ylq` 和 VirtualHostStyle；后续切换 MinIO 只改对象存储配置，不改 Ark Gateway、Job 或 Repair 生命周期。2026-09-02 的一次性 Web 探针已确认 Seedance 会以 HTTP 400 拒绝 `data:video/mp4;base64,...`，正式流程不会再发送视频 Data URL。该探针报告已随本轮生产清理进入 7 天隔离备份，不再作为正式项目文档入口。
+- 正式运行只使用 Ark；是否允许新的真实付费提交由 `.env` 中的 `CATFLOW_PAID_CALLS_ENABLED` 明确控制。Ark Key 未配置或开关关闭时，历史项目仍可查看、播放和本地导出，但所有模型生成入口都会拒绝提交；浏览器不会接收 Ark Key。
 - 上传图片会校验扩展名、MIME、文件头和 Pillow 解码结果，媒体磁盘路径不直接暴露。
 - 数据库只保存相对 `storage_key`；API、Worker、备份和恢复通过同一个 `RuntimePaths` 在项目根内解析，拒绝绝对路径与越界路径。
 
@@ -180,5 +191,3 @@ Provider 上限不足时按上述优先级裁剪并记录 `omittedReason`。`sty
 剪辑页以恒定 24 fps 和 `[startFrame, endFrame)` 表示正式区间。用户可通过 I/O 键、逐帧/十帧步进和时间线拖动选择 4–15 秒区间，左右边界不能越过源视频，也不能交叉。Provider 可以在合法问题区间两侧增加连续性上下文，但最终候选核心段始终与原问题区间等长。每次明确生成只创建一个 `regenerate_video_segment` Job，候选完成后不会自动替换。
 
 批准候选必须完成七项质量检查和入/出点接缝检查。服务端随后基于当前时间线哈希创建新的不可变 `EditVersion`（EDL v2），原视频、旧 EditVersion、失败候选和 Provider task ID 全部保留。正式导出使用 FFmpeg 合成前段、批准的候选核心段和后段；默认硬切，可显式选择 2/4/6 帧叠化，输出总帧数保持不变，候选音轨永不进入正式成片，根视频无音轨时继续保持无音轨。
-
-Fake Web 黑盒证据保存在 [片段修复报告](output/playwright/segment-repair-fake/report.md)。

@@ -30,6 +30,7 @@ const workspace: WorkspaceDto = {
 };
 
 describe("AssetsStep", () => {
+  const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     client.assets.mockResolvedValue([]);
@@ -44,7 +45,7 @@ describe("AssetsStep", () => {
 
   it("generates an environment directly without a validation-run confirmation", async () => {
     const wrapper = mount(AssetsStep, {
-      props: { projectId: "project-1", workspace },
+      props: { projectId: "project-1", workspace, runtime },
       global: { plugins: [createPinia()] },
     });
     await flushPromises();

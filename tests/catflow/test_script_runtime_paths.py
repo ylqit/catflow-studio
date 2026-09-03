@@ -54,3 +54,11 @@ def test_start_script_discards_stale_worker_readiness_before_launch() -> None:
 
     assert ready_path < remove_ready < launch_worker
     assert "ArgumentList = @('run')" in script
+
+
+def test_start_script_invokes_the_serve_subcommand_before_its_port_option() -> None:
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "start-local.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert "ArgumentList = @('serve', '--port', $catflowPort.ToString())" in script

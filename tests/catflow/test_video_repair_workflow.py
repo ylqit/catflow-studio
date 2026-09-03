@@ -20,6 +20,17 @@ from catflow.infrastructure.memory_repository import MemoryStudioRepository
 def _prepared_project(
     *, provider_runtime: ProviderRuntime | None = None
 ) -> tuple[StudioService, uuid.UUID, uuid.UUID]:
+    provider_runtime = provider_runtime or ProviderRuntime(
+        provider="ark",
+        planning_model="planning",
+        image_model="image",
+        video_model="video",
+        diagnostic_model="diagnostic",
+        capability_revision="ark-seedance-2.0-v1",
+        paid_calls_enabled=True,
+        maximum_video_references=5,
+        segment_reference_publishing_ready=True,
+    )
     service = StudioService(MemoryStudioRepository(), provider_runtime=provider_runtime)
     project = service.create_project(
         ProjectCreate(title="片段修复", theme="雨天擦爪", targetDurationSeconds=12)

@@ -21,11 +21,6 @@ from catflow.domain.models import (
     ShotSpec,
 )
 from catflow.domain.references import CompiledReference, ProviderReference, compile_references
-from catflow.domain.validation import (
-    ValidationCallKind,
-    ValidationLimitError,
-    first_release_manifest,
-)
 from catflow.domain.video_repairs import (
     MAX_ISSUE_FRAMES,
     MIN_ISSUE_FRAMES,
@@ -72,11 +67,6 @@ class StudioNotFoundError(LookupError):
     pass
 
 
-class ValidationRunCreateCommand(ContractModel):
-    expected_manifest_hash: str = Field(alias="expectedManifestHash", pattern=r"^[a-f0-9]{64}$")
-    paid_call_acknowledged: Literal[True] = Field(alias="paidCallAcknowledged")
-
-
 class ValidationCanonReferenceDto(ContractModel):
     role: Literal["episode_child", "episode_cat", "pair_scale", "style_board"]
     asset_id: uuid.UUID = Field(alias="assetId")
@@ -105,7 +95,7 @@ class ValidationRunPreviewDto(ContractModel):
     resolution: str
     aspect_ratio: str = Field(alias="aspectRatio")
     target_budget_cny: int = Field(alias="targetBudgetCny")
-    call_limits: dict[ValidationCallKind, int] = Field(alias="callLimits")
+    call_limits: dict[str, int] = Field(alias="callLimits")
     total_call_limit: int = Field(alias="totalCallLimit")
     maximum_video_calls: int = Field(alias="maximumVideoCalls")
     provider: str
@@ -122,7 +112,7 @@ class ValidationRunDto(ValidationRunPreviewDto):
     canon: ValidationCanonSnapshotDto | None = None
     id: uuid.UUID
     status: Literal["draft", "authorized", "paused", "completed", "cancelled"]
-    usage: dict[ValidationCallKind, int]
+    usage: dict[str, int]
     created_at: datetime = Field(alias="createdAt")
     authorized_at: datetime | None = Field(alias="authorizedAt", default=None)
 
@@ -450,7 +440,6 @@ class JobDto(ContractModel):
         "diagnose_image",
         "generate_video",
         "diagnose_video",
-        "probe_segment_video_data_url",
         "regenerate_video_segment",
         "render_export",
     ]
@@ -815,19 +804,9 @@ class StudioRepository(Protocol):
 
     def publish_canon_revision(self, command: CanonRevisionCreateCommand) -> CanonProfileDto: ...
 
-    def create_validation_run(self, preview: ValidationRunPreviewDto) -> ValidationRunDto: ...
-
     def get_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto | None: ...
 
     def latest_validation_run(self) -> ValidationRunDto | None: ...
-
-    def set_validation_run_status(
-        self, run_id: uuid.UUID, status: Literal["authorized", "paused", "cancelled"]
-    ) -> ValidationRunDto: ...
-
-    def reserve_validation_call(
-        self, run_id: uuid.UUID, kind: ValidationCallKind
-    ) -> ValidationRunDto: ...
 
     def create_project(
         self, draft: ProjectCreate, *, canon_profile_id: uuid.UUID
@@ -971,7 +950,9 @@ class StudioService:
         project_library_repository: ProjectLibraryRepository | None = None,
     ) -> None:
         self._repository = repository
-        self._provider_runtime = provider_runtime or ProviderRuntime.fake()
+        self._provider_runtime = provider_runtime or ProviderRuntime.from_env(
+            segment_reference_publishing_ready=False
+        )
         if project_library_repository is not None:
             self._project_library_repository: ProjectLibraryRepository | None = (
                 project_library_repository
@@ -980,74 +961,6 @@ class StudioService:
             self._project_library_repository = repository
         else:
             self._project_library_repository = None
-
-    def preview_validation_run(self) -> ValidationRunPreviewDto:
-        manifest = first_release_manifest()
-        canon = _validation_canon_snapshot(self._repository.current_canon_profile())
-        models = {
-            "planning": self._provider_runtime.planning_model,
-            "image": self._provider_runtime.image_model,
-            "diagnostic": self._provider_runtime.diagnostic_model,
-            "video": self._provider_runtime.video_model,
-        }
-        blocking_reasons = tuple(
-            reason
-            for reason in (self._provider_runtime.segment_repair_block_reason,)
-            if reason is not None
-        )
-        document = {
-            "topics": manifest.topics,
-            "durationSeconds": manifest.duration_seconds,
-            "resolution": manifest.resolution,
-            "aspectRatio": manifest.aspect_ratio,
-            "targetBudgetCny": manifest.target_budget_cny,
-            "callLimits": {kind.value: limit for kind, limit in manifest.call_limits.items()},
-            "provider": self._provider_runtime.provider,
-            "models": models,
-            "capabilityRevision": self._provider_runtime.capability_revision,
-            "canon": canon.model_dump(mode="json", by_alias=True),
-            "repair": {
-                "topic": manifest.repair_topic,
-                "issueRange": {
-                    "startFrame": manifest.repair_start_frame,
-                    "endFrame": manifest.repair_end_frame,
-                },
-                "prompt": manifest.repair_prompt,
-            },
-            "segmentRepairCapability": {
-                "supported": not blocking_reasons,
-                "blockingReasons": blocking_reasons,
-            },
-        }
-        return ValidationRunPreviewDto(
-            manifestHash=_hash_document(document),
-            topics=manifest.topics,
-            durationSeconds=manifest.duration_seconds,
-            resolution=manifest.resolution,
-            aspectRatio=manifest.aspect_ratio,
-            targetBudgetCny=manifest.target_budget_cny,
-            callLimits=dict(manifest.call_limits),
-            totalCallLimit=manifest.total_call_limit,
-            maximumVideoCalls=(
-                manifest.call_limits[ValidationCallKind.GENERATE_VIDEO]
-                + manifest.call_limits[ValidationCallKind.REGENERATE_VIDEO_SEGMENT]
-            ),
-            provider=self._provider_runtime.provider,
-            models=models,
-            capabilityRevision=self._provider_runtime.capability_revision,
-            costEstimateStatus="unmetered_paid",
-            authorizationReady=not blocking_reasons,
-            blockingReasons=blocking_reasons,
-            canon=canon,
-            repair={
-                "topic": manifest.repair_topic,
-                "issueRange": {
-                    "startFrame": manifest.repair_start_frame,
-                    "endFrame": manifest.repair_end_frame,
-                },
-                "prompt": manifest.repair_prompt,
-            },
-        )
 
     @property
     def provider_runtime(self) -> ProviderRuntime:
@@ -1059,16 +972,6 @@ class StudioService:
     def publish_rate_card(self, command: RateCardRevisionCreateCommand) -> RateCardRevisionDto:
         return self._repository.publish_rate_card(command)
 
-    def authorize_validation_run(self, command: ValidationRunCreateCommand) -> ValidationRunDto:
-        preview = self.preview_validation_run()
-        if not self._provider_runtime.paid_calls_enabled:
-            raise StudioConflictError("paid provider calls are disabled")
-        if not preview.authorization_ready:
-            raise StudioConflictError("; ".join(preview.blocking_reasons))
-        if command.expected_manifest_hash != preview.manifest_hash:
-            raise StudioConflictError("validation manifest changed")
-        return self._repository.create_validation_run(preview)
-
     def get_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto:
         run = self._repository.get_validation_run(run_id)
         if run is None:
@@ -1077,17 +980,6 @@ class StudioService:
 
     def current_validation_run(self) -> ValidationRunDto | None:
         return self._repository.latest_validation_run()
-
-    def pause_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto:
-        return self._repository.set_validation_run_status(run_id, "paused")
-
-    def reserve_validation_call(
-        self, run_id: uuid.UUID, kind: ValidationCallKind
-    ) -> ValidationRunDto:
-        try:
-            return self._repository.reserve_validation_call(run_id, kind)
-        except ValidationLimitError as exc:
-            raise StudioConflictError(str(exc)) from exc
 
     def create_project(self, draft: ProjectCreate) -> ProjectDto:
         return self._repository.create_project(
@@ -1231,7 +1123,7 @@ class StudioService:
             idempotencyKey=command.idempotency_key,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
-            expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
+            expectedCostMicros=None,
             frozenInput={
                 "text": command.text,
                 "contextRevision": snapshot.context_revision,
@@ -1247,10 +1139,7 @@ class StudioService:
             updatedAt=now,
         )
         job = self._with_pricing_snapshot(job)
-        try:
-            return self._repository.enqueue_planner_message(project_id, command, job=job)
-        except ValidationLimitError as exc:
-            raise StudioConflictError(str(exc)) from exc
+        return self._repository.enqueue_planner_message(project_id, command, job=job)
 
     def complete_planner_job(
         self, job_id: uuid.UUID, proposal: LifeStoryProposalDraft
@@ -1369,7 +1258,7 @@ class StudioService:
                 idempotencyKey=command.idempotency_key,
                 provider=self._provider_runtime.provider,
                 model=self._provider_runtime.planning_model,
-                expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
+                expectedCostMicros=None,
                 frozenInput={
                     **document,
                     "clip": clip.model_dump(mode="json", by_alias=True),
@@ -1619,10 +1508,8 @@ class StudioService:
                 "禁止身体比例超过约5头身，禁止儿童身高与猫咪比例失真"
             ),
             references=compiled.references,
-            expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
-            costEstimateStatus=(
-                "unmetered_paid" if self._provider_runtime.provider == "ark" else "priced"
-            ),
+            expectedCostMicros=None,
+            costEstimateStatus="unmetered_paid",
             storyVersionId=story.id,
             shotPlanVersionId=shot_plan.id,
             selectionHash=selection_hash,
@@ -1686,10 +1573,8 @@ class StudioService:
                 "禁止儿童身高与猫咪比例失真"
             ),
             references=compiled.references,
-            expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
-            costEstimateStatus=(
-                "unmetered_paid" if self._provider_runtime.provider == "ark" else "priced"
-            ),
+            expectedCostMicros=None,
+            costEstimateStatus="unmetered_paid",
         )
 
     def create_asset_generation_job(
@@ -1795,7 +1680,7 @@ class StudioService:
                 idempotencyKey=command.idempotency_key,
                 provider=self._provider_runtime.provider,
                 model=self._provider_runtime.diagnostic_model,
-                expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
+                expectedCostMicros=None,
                 frozenInput=frozen_input,
                 resultAssetIds=[],
                 createdAt=now,
@@ -1884,7 +1769,7 @@ class StudioService:
                 provider=self._provider_runtime.provider,
                 model=self._provider_runtime.diagnostic_model,
                 parentJobId=video.producing_job_id,
-                expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
+                expectedCostMicros=None,
                 frozenInput=frozen_input,
                 resultAssetIds=[],
                 createdAt=now,
@@ -2006,10 +1891,8 @@ class StudioService:
             negativePrompt=negative_prompt,
             imageReferences=image_references,
             videoReference=video_reference,
-            expectedCostMicros=(None if self._provider_runtime.provider == "ark" else 0),
-            costEstimateStatus=(
-                "unmetered_paid" if self._provider_runtime.provider == "ark" else "priced"
-            ),
+            expectedCostMicros=None,
+            costEstimateStatus="unmetered_paid",
             inputHash=_hash_document(document),
         )
         return preview.model_copy(
@@ -2399,17 +2282,12 @@ class StudioService:
         return project
 
     def _require_paid_calls_enabled(self) -> None:
-        if self._provider_runtime.provider != "ark":
-            return
         if not self._provider_runtime.paid_calls_enabled:
             raise StudioConflictError("paid provider calls are disabled")
 
     def _create_job(self, job: JobDto) -> JobDto:
         job = self._with_pricing_snapshot(job)
-        try:
-            return self._repository.create_job(job)
-        except ValidationLimitError as exc:
-            raise StudioConflictError(str(exc)) from exc
+        return self._repository.create_job(job)
 
     def _with_pricing_snapshot(self, job: JobDto) -> JobDto:
         if job.provider is not None and job.model is not None and job.pricing_snapshot is None:
@@ -2478,33 +2356,6 @@ def _hash_document(document: object) -> str:
     return hashlib.sha256(
         json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-
-
-def _validation_canon_snapshot(profile: CanonProfileDto) -> ValidationCanonSnapshotDto:
-    if set(profile.fixed_assets) != set(FIXED_CANON_ROLES):
-        raise StudioConflictError(
-            "publish all four production Canon assets before previewing a validation run"
-        )
-    child = profile.profile.get("child")
-    if not isinstance(child, dict):
-        raise StudioConflictError("the active Canon profile has no child authority")
-    if child.get("age") != "6-7" or child.get("heightCm") != 120:
-        raise StudioConflictError("the active Canon must define a 6-7 year-old child at 120 cm")
-    return ValidationCanonSnapshotDto(
-        profileId=profile.id,
-        version=profile.version,
-        profileHash=profile.profile_hash,
-        childAge="6-7",
-        childHeightCm=120,
-        references=tuple(
-            ValidationCanonReferenceDto(
-                role=role,
-                assetId=profile.fixed_assets[role].id,
-                sha256=profile.fixed_assets[role].sha256,
-            )
-            for role in FIXED_CANON_ROLES
-        ),
-    )
 
 
 def _planner_output_schema() -> dict[str, Any]:

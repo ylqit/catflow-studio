@@ -27,7 +27,7 @@ import {
   type RepairVerdict,
 } from "../../videoRepair";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
+import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason } from "../../presentation";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -83,11 +83,8 @@ const notes = ref("");
 const activeEdit = computed(() => edits.value.find((item) => item.active) ?? null);
 const activeRepair = computed(() => repairs.value.find((item) => ["generating", "candidate_ready"].includes(item.status)) ?? null);
 const candidate = computed(() => assets.value.find((item) => item.id === activeRepair.value?.candidateAssetId) ?? null);
-const isArkProvider = computed(() => runtime.value?.provider.name === "ark");
-const providerNotice = computed(() => isArkProvider.value
-  ? "本次操作会产生模型费用，完成后显示实际用量。"
-  : "测试模式，不会产生模型费用。");
-const generateButtonLabel = computed(() => isArkProvider.value ? "生成修改结果" : "生成测试候选");
+const providerNotice = "本次操作会产生模型费用，完成后显示实际用量。";
+const generateButtonLabel = "生成修改结果";
 const currentJobPresentation = computed(() => currentJob.value ? jobPresentation(currentJob.value.status) : null);
 const currentBillingPresentation = computed(() => currentJob.value
   ? billingPresentation(currentJob.value.billingStatus, currentJob.value.actualCostMicros, currentJob.value.provider)
@@ -129,7 +126,9 @@ const submitDisabledReason = computed(() => {
   if (!prompt.value.trim()) return "请先填写修改要求。";
   if (previewing.value || !previewIsCurrent.value) return "正在更新当前输入预览。";
   if (activeRepair.value?.status === "generating") return "已有修改任务正在生成。";
-  if (isArkProvider.value && !referencePublisherReady.value) return "对象发布器未就绪，无法提交 Ark。";
+  const paidBlockedReason = paidModelBlockedReason(runtime.value);
+  if (paidBlockedReason) return paidBlockedReason;
+  if (!referencePublisherReady.value) return "临时视频发布尚未就绪，请先到运行设置检查。";
   return "";
 });
 const canApprove = computed(() => {

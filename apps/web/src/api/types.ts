@@ -24,7 +24,7 @@ export interface RuntimeBootstrapDto {
   ffprobeReady: boolean;
   objectPublisher: ObjectPublisherRuntimeDto;
   provider: {
-    name: "fake" | "ark";
+    name: "ark";
     planningModel: string;
     imageModel: string;
     videoModel: string;
@@ -41,61 +41,7 @@ export interface RuntimeBootstrapDto {
   };
 }
 
-export type ValidationCallKind =
-  | "plan_story"
-  | "generate_image"
-  | "diagnose_image"
-  | "generate_video"
-  | "diagnose_video"
-  | "regenerate_video_segment";
-
 export type FixedCanonRole = "episode_child" | "episode_cat" | "pair_scale" | "style_board";
-
-export interface ValidationCanonSnapshotDto {
-  profileId: string;
-  version: number;
-  profileHash: string;
-  childAge: "6-7";
-  childHeightCm: 120;
-  references: Array<{
-    role: FixedCanonRole;
-    assetId: string;
-    sha256: string;
-  }>;
-}
-
-export interface ValidationRunPreviewDto {
-  manifestHash: string;
-  topics: string[];
-  durationSeconds: 12;
-  resolution: "480p";
-  aspectRatio: "9:16";
-  targetBudgetCny: number;
-  callLimits: Record<ValidationCallKind, number>;
-  totalCallLimit: number;
-  maximumVideoCalls: number;
-  provider: string;
-  models: Record<string, string>;
-  capabilityRevision: string;
-  costEstimateStatus: "priced" | "unmetered_paid";
-  authorizationReady: boolean;
-  blockingReasons: string[];
-  canon: ValidationCanonSnapshotDto;
-  repair: {
-    topic: "雨天擦爪";
-    issueRange: FrameRangeDto;
-    prompt: string;
-  };
-}
-
-export interface ValidationRunDto extends Omit<ValidationRunPreviewDto, "canon"> {
-  canon: ValidationCanonSnapshotDto | null;
-  id: string;
-  status: "draft" | "authorized" | "paused" | "completed" | "cancelled";
-  usage: Record<ValidationCallKind, number>;
-  createdAt: string;
-  authorizedAt?: string;
-}
 
 export interface ProjectCreate {
   title: string;
@@ -192,7 +138,7 @@ export type GenerationInputSnapshotDto = components["schemas"]["GenerationInputS
 export interface JobDto {
   id: string;
   projectId: string;
-  kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "probe_segment_video_data_url" | "regenerate_video_segment" | "render_export";
+  kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
   status:
     | "queued"
     | "submitting"

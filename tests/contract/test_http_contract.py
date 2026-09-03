@@ -51,8 +51,6 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
         "/api/v1/health",
         "/api/v1/runtime/bootstrap",
         "/api/v1/runtime/object-publisher/check",
-        "/api/v1/validation-runs/preview",
-        "/api/v1/validation-runs",
         "/api/v1/validation-runs/{run_id}",
         "/api/v1/canon/current",
         "/api/v1/projects",
@@ -74,11 +72,6 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
         "/api/v1/projects/{project_id}/asset-generations",
         "/api/v1/projects/{project_id}/video-generations/preview",
         "/api/v1/projects/{project_id}/video-generations",
-        "/api/v1/projects/{project_id}/video-repairs/preview",
-        "/api/v1/projects/{project_id}/video-repairs",
-        "/api/v1/projects/{project_id}/video-repairs/{repair_id}",
-        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve",
-        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject",
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/cancel",
         "/api/v1/jobs/{job_id}/resume-storage",
@@ -90,6 +83,9 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
     } <= paths
     assert all("/api/v2" not in path for path in paths)
     assert all("segment-reference-probe" not in path for path in paths)
+    assert "/api/v1/validation-runs/preview" not in paths
+    assert "/api/v1/validation-runs" not in paths
+    assert all("/video-repairs" not in path for path in paths)
 
 
 def test_runtime_bootstrap_exposes_only_non_secret_object_publisher_status() -> None:
@@ -121,32 +117,6 @@ def test_runtime_bootstrap_exposes_only_non_secret_object_publisher_status() -> 
         headers=WRITE_HEADERS,
     )
     assert checked.status_code == 503
-
-
-def test_validation_run_http_flow_only_authorizes_the_frozen_manifest() -> None:
-    service, client = _app_client()
-
-    preview = client.post(
-        "/api/v1/validation-runs/preview",
-        json={},
-        headers=WRITE_HEADERS,
-    )
-    assert preview.status_code == 200
-    assert preview.json()["totalCallLimit"] == 10
-    assert preview.json()["maximumVideoCalls"] == 4
-
-    authorized = client.post(
-        "/api/v1/validation-runs",
-        json={
-            "expectedManifestHash": preview.json()["manifestHash"],
-            "paidCallAcknowledged": True,
-        },
-        headers=WRITE_HEADERS,
-    )
-    assert authorized.status_code == 201
-    run_id = authorized.json()["id"]
-    assert client.get(f"/api/v1/validation-runs/{run_id}").json()["status"] == "authorized"
-    assert service.list_projects() == []
 
 
 def test_video_repair_http_preview_and_create_only_enqueue_one_candidate() -> None:

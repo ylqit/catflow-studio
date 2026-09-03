@@ -2,14 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import { api } from "../../api/client";
-import type { AssetDto, GenerationPreviewDto, JobDto, ProjectUsageSummaryDto, RuntimeBootstrapDto, WorkspaceDto } from "../../api/types";
+import type { AssetDto, GenerationPreviewDto, JobDto, ProjectUsageSummaryDto, WorkspaceDto } from "../../api/types";
 import { buildAcceptanceEvidence } from "../../acceptanceEvidence";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
+import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 import { projectJobEvent } from "../../projectJobEvents";
 import { useUiStore } from "../../stores/ui";
 
-const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
+const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const store = useUiStore();
 const preview = ref<GenerationPreviewDto | null>(null);
@@ -17,7 +17,6 @@ const currentJob = ref<JobDto | null>(null);
 const reviewVideoJob = ref<JobDto | null>(null);
 const diagnosisJob = ref<JobDto | null>(null);
 const videos = ref<AssetDto[]>([]);
-const runtime = ref<RuntimeBootstrapDto | null>(null);
 const usageSummary = ref<ProjectUsageSummaryDto | null>(null);
 const loadingPreview = ref(false);
 const submitting = ref(false);
@@ -57,16 +56,27 @@ const previewSummary = computed(() => {
   const value = preview.value?.prompt ?? "";
   return value.length > 180 ? `${value.slice(0, 180)}…` : value;
 });
-const generationButtonLabel = computed(() => runtime.value?.provider.name === "ark"
-  ? "生成视频"
-  : "生成测试视频");
-const generationProviderNotice = computed(() => runtime.value?.provider.name === "ark"
-  ? "本次生成会产生模型费用，完成后显示实际用量。"
-  : "测试模式，不会产生模型费用。");
+const generationButtonLabel = "生成视频";
+const generationProviderNotice = "本次生成会产生模型费用，完成后显示实际用量。";
 const currentJobPresentation = computed(() => currentJob.value ? jobPresentation(currentJob.value.status) : null);
 const currentBillingPresentation = computed(() => currentJob.value
   ? billingPresentation(currentJob.value.billingStatus, currentJob.value.actualCostMicros, currentJob.value.provider)
   : null);
+const paidBlockedReason = computed(() => paidModelBlockedReason(props.runtime));
+const unresolvedCostJobs = computed(() => usageSummary.value?.jobs.filter((job) =>
+  job.billingStatus !== "calculated" && job.billingStatus !== "provider_adjusted",
+) ?? []);
+const hasCalculatedCost = computed(() => usageSummary.value?.jobs.some((job) =>
+  job.billingStatus === "calculated" || job.billingStatus === "provider_adjusted",
+) ?? false);
+const projectCostSummary = computed(() => {
+  if (hasCalculatedCost.value && usageSummary.value) {
+    return `¥${(usageSummary.value.calculatedCostMicros / 1_000_000).toFixed(4)}`;
+  }
+  if (unresolvedCostJobs.value.some((job) => job.billingStatus === "unpriced")) return "费用待核价";
+  if (unresolvedCostJobs.value.length > 0) return "费用计算中";
+  return "暂无费用";
+});
 
 const referenceLabels: Record<string, string> = {
   episode_child: "儿童角色",
@@ -91,9 +101,8 @@ function setVideoElement(assetId: string, element: HTMLVideoElement | null) {
 }
 
 async function load() {
-  [videos.value, runtime.value, usageSummary.value] = await Promise.all([
+  [videos.value, usageSummary.value] = await Promise.all([
     api.assets(props.projectId).then((items) => items.filter((asset) => asset.mediaType === "video")),
-    api.runtime(),
     api.projectUsageSummary(props.projectId),
   ]);
   if (!currentJob.value && props.workspace.latestVideoJob) {
@@ -121,7 +130,7 @@ async function refreshPreview() {
 }
 
 async function generateVideo() {
-  if (loadingPreview.value || submitting.value || !preview.value) return;
+  if (loadingPreview.value || submitting.value || !preview.value || paidBlockedReason.value) return;
   const prepared = preview.value;
   if (prepared.references.some((reference) => !reference.included)) {
     error.value = "视频生成要求五类参考完整；当前 Provider 能力存在省略，未提交任务。";
@@ -322,7 +331,7 @@ watch(
   <section class="generation-layout">
     <div class="generation-main">
       <div class="preview-card card">
-        <header><div><p class="eyebrow">本次生成</p><h2>生成视频</h2><p class="paid-hint">{{ generationProviderNotice }}<br>生成任务会自动保存，可以放心离开此页面。</p></div><button class="primary" :disabled="loadingPreview || submitting || !preview" @click="generateVideo"><span v-if="loadingPreview || submitting" class="spinner" />{{ generationButtonLabel }}</button></header>
+        <header><div><p class="eyebrow">本次生成</p><h2>生成视频</h2><p class="paid-hint">{{ paidBlockedReason || generationProviderNotice }}<br>生成任务会自动保存，可以放心离开此页面。</p></div><button class="primary" :disabled="loadingPreview || submitting || !preview || Boolean(paidBlockedReason)" @click="generateVideo"><span v-if="loadingPreview || submitting" class="spinner" />{{ generationButtonLabel }}</button></header>
         <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
         <div v-if="!preview" class="empty preview-empty"><div>▦</div><p>{{ loadingPreview ? "正在整理本次画面内容……" : "请先完成故事、分镜和五张参考图；完成后会自动生成画面描述。" }}</p></div>
         <template v-else>
@@ -363,7 +372,7 @@ watch(
         <div class="review-actions"><button v-if="workspace.project.theme === '雨天擦爪'" class="secondary" @click="diagnoseVideo">Ark 抽帧诊断（仅雨天擦爪使用）</button><button class="secondary" @click="exportJson">导出 JSON</button><button class="secondary" @click="exportMarkdown">导出 Markdown</button><button class="primary" :disabled="!allPass" @click="chooseVideo">七项全部通过后选择此视频</button></div>
       </section>
     </div>
-    <aside v-if="usageSummary" class="generation-aside"><section class="usage-card card"><p class="eyebrow">本项目费用</p><h2>用量概览</h2><dl><div v-for="(value, metric) in usageSummary.totals" :key="metric"><dt>{{ usageLabels[String(metric)] ?? metric }}</dt><dd>{{ value }}</dd></div><div><dt>已计算费用</dt><dd>¥{{ (usageSummary.calculatedCostMicros / 1_000_000).toFixed(4) }}</dd></div><div><dt>待核价任务</dt><dd>{{ usageSummary.unpricedJobCount }}</dd></div></dl><details><summary>费用说明</summary><small>本地剪辑不计入模型费用；最终账单可能由模型服务调整。</small></details></section></aside>
+    <aside v-if="usageSummary" class="generation-aside"><section class="usage-card card"><p class="eyebrow">本项目费用</p><h2>用量概览</h2><dl><div v-for="(value, metric) in usageSummary.totals" :key="metric"><dt>{{ usageLabels[String(metric)] ?? metric }}</dt><dd>{{ value }}</dd></div><div><dt>{{ hasCalculatedCost ? "已计算费用" : "费用状态" }}</dt><dd>{{ projectCostSummary }}</dd></div><div><dt>待处理计费任务</dt><dd>{{ unresolvedCostJobs.length }}</dd></div></dl><details><summary>费用说明</summary><small>本地剪辑不计入模型费用；只有已完成核价的任务才会计入金额，最终账单可能由模型服务调整。</small></details></section></aside>
   </section>
 </template>
 

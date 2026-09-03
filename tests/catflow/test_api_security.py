@@ -168,13 +168,11 @@ def test_rate_card_publication_creates_an_immutable_revision_visible_to_settings
     assert listing.json() == [response.json()]
 
 
-def test_video_edit_product_routes_exist_while_legacy_repair_writes_are_deprecated() -> None:
+def test_video_edit_product_routes_exist_and_legacy_repair_routes_are_removed() -> None:
     schema = _client().get("/openapi.json").json()
     paths = schema["paths"]
 
     assert "/api/v1/projects/{project_id}/video-edits/preview" in paths
     assert "/api/v1/projects/{project_id}/video-edits" in paths
     assert "/api/v1/projects/{project_id}/video-edits/{edit_id}/approve" in paths
-    assert paths["/api/v1/projects/{project_id}/video-repairs/preview"]["post"][
-        "deprecated"
-    ] is True
+    assert all("/video-repairs" not in path for path in paths)

@@ -1,5 +1,12 @@
 import type { JobDto } from "./api/types";
 
+export interface PaidModelRuntime {
+  provider: {
+    apiKeyConfigured: boolean;
+    paidCallsEnabled: boolean;
+  };
+}
+
 export type PresentationTone = "neutral" | "active" | "good" | "warn" | "danger";
 
 export interface StatusPresentation {
@@ -76,6 +83,15 @@ export function jobPresentation(status: JobDto["status"]): StatusPresentation {
   return JOB_PRESENTATIONS[status];
 }
 
+export function paidModelBlockedReason(
+  runtime: PaidModelRuntime | null | undefined,
+): string {
+  if (!runtime) return "正在检查模型服务，请稍候。";
+  if (!runtime.provider.apiKeyConfigured) return "尚未配置模型服务密钥，请先前往运行设置。";
+  if (!runtime.provider.paidCallsEnabled) return "新的模型调用当前已关闭，请先在运行设置中启用。";
+  return "";
+}
+
 export type BillingStatus = NonNullable<JobDto["billingStatus"]>;
 
 export interface BillingPresentation {
@@ -124,11 +140,8 @@ export function errorPresentation(reason: unknown, fallback: string): ErrorPrese
 export function billingPresentation(
   status: BillingStatus | undefined,
   costMicros: number | null | undefined,
-  provider?: string,
+  _provider?: string,
 ): BillingPresentation {
-  if (provider === "fake") {
-    return { label: "测试任务", detail: "测试模式不产生模型费用。" };
-  }
   const formattedCost = costMicros == null ? null : `¥${(costMicros / 1_000_000).toFixed(4)}`;
 
   if (status === "calculated" && formattedCost) {

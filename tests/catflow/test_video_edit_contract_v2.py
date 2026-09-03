@@ -6,6 +6,7 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
+from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     ProjectCreate,
     SegmentRepairCreateCommand,
@@ -17,7 +18,20 @@ from catflow.infrastructure.memory_repository import MemoryStudioRepository
 
 
 def _prepared_project() -> tuple[StudioService, uuid.UUID, uuid.UUID]:
-    service = StudioService(MemoryStudioRepository())
+    service = StudioService(
+        MemoryStudioRepository(),
+        provider_runtime=ProviderRuntime(
+            provider="ark",
+            planning_model="planning",
+            image_model="image",
+            video_model="video",
+            diagnostic_model="diagnostic",
+            capability_revision="ark-seedance-2.0-v1",
+            paid_calls_enabled=True,
+            maximum_video_references=5,
+            segment_reference_publishing_ready=True,
+        ),
+    )
     project = service.create_project(
         ProjectCreate(title="无类型局部编辑", theme="雨天擦爪", targetDurationSeconds=12)
     )

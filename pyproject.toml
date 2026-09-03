@@ -60,7 +60,7 @@ include = [
   "tests/e2e/**/*.py",
   "tests/consistency/**/*.py",
   "scripts/export_openapi.py",
-  "scripts/import_legacy_assets.py",
+  "scripts/legacy/import_legacy_assets.py",
   "scripts/local_backup.py",
 ]
 

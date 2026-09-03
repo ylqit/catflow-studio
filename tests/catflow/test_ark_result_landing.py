@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from PIL import Image
 from sqlalchemy import delete, select
 
+from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     PlannerMessageCommand,
     ProjectCreate,
@@ -33,6 +34,20 @@ from catflow_worker.ark_results import ArkResultLandingService
 from catflow_worker.provider_media import LandedProviderMedia, ProviderMediaDownloader
 
 
+def _ark_runtime() -> ProviderRuntime:
+    return ProviderRuntime(
+        provider="ark",
+        planning_model="planning",
+        image_model="image",
+        video_model="video",
+        diagnostic_model="diagnostic",
+        capability_revision="ark-seedance-2.0-v1",
+        paid_calls_enabled=True,
+        maximum_video_references=5,
+        segment_reference_publishing_ready=True,
+    )
+
+
 def _png_bytes() -> bytes:
     buffer = BytesIO()
     Image.new("RGB", (480, 854), "#D8C2A8").save(buffer, format="PNG")
@@ -45,7 +60,7 @@ def test_ark_result_landing_creates_planner_proposal_from_persisted_result(
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(PostgresStudioRepository(sessions))
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
     project = service.create_project(
         ProjectCreate(title="规划落地", theme="雨天擦爪", targetDurationSeconds=12)
     )
@@ -108,7 +123,7 @@ def test_ark_result_landing_downloads_image_and_removes_signed_url_from_job(
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(PostgresStudioRepository(sessions))
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
     project = service.create_project(
         ProjectCreate(title="环境落地", theme="共享暖光室内", targetDurationSeconds=12)
     )
@@ -180,7 +195,7 @@ def test_video_diagnosis_landing_keeps_its_provider_ids_separate_from_video_ids(
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(PostgresStudioRepository(sessions))
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
     project = service.create_project(
         ProjectCreate(title="诊断证据", theme="雨天擦爪", targetDurationSeconds=12)
     )
@@ -279,7 +294,7 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_database_engine(DatabaseSettings.from_env())
     sessions = create_session_factory(engine)
-    service = StudioService(PostgresStudioRepository(sessions))
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
     project = service.create_project(
         ProjectCreate(title="Ark 片段落地", theme="雨天擦爪", targetDurationSeconds=12)
     )

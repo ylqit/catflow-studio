@@ -4,9 +4,9 @@ import { computed, reactive, ref, watch } from "vue";
 import { api } from "../../api/client";
 import type { JobDto, ShotSpecDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
+import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 
-const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
+const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const saving = ref(false);
 const generating = ref(false);
@@ -22,6 +22,7 @@ const directorJobPresentation = computed(() => displayedDirectorJob.value
 const directorBillingPresentation = computed(() => displayedDirectorJob.value
   ? billingPresentation(displayedDirectorJob.value.billingStatus, displayedDirectorJob.value.actualCostMicros, displayedDirectorJob.value.provider)
   : null);
+const paidBlockedReason = computed(() => paidModelBlockedReason(props.runtime));
 
 function compactStoryTitle(title: string) {
   return title.length > 20 ? `${title.slice(0, 18)}…` : title;
@@ -38,7 +39,7 @@ watch(
 );
 
 async function generateDirectorPlan() {
-  if (generating.value) return;
+  if (generating.value || paidBlockedReason.value) return;
   generating.value = true;
   error.value = "";
   const scope = `director:${props.projectId}`;
@@ -114,8 +115,8 @@ async function save() {
     <div v-if="!workspace.activeShotPlan" class="director-empty card">
       <p class="eyebrow">分镜建议</p><h2>把故事拆成可拍的镜头</h2>
       <p>根据当前故事生成 1–4 个镜头，安排机位、构图、孩子与猫咪的动作、画面变化和前后衔接。生成后仍可逐项修改。</p>
-      <div class="paid-note"><b>本次会使用付费模型，完成后显示实际用量。</b><span>离开页面后仍会继续，完成时会自动保存。</span></div>
-      <button data-testid="generate-director-plan" class="primary" :disabled="generating" @click="generateDirectorPlan"><span v-if="generating" class="spinner" />生成分镜</button>
+      <div class="paid-note"><b>{{ paidBlockedReason || "本次会使用付费模型，完成后显示实际用量。" }}</b><span>离开页面后仍会继续，完成时会自动保存。</span></div>
+      <button data-testid="generate-director-plan" class="primary" :disabled="generating || Boolean(paidBlockedReason)" @click="generateDirectorPlan"><span v-if="generating" class="spinner" />生成分镜</button>
       <section v-if="displayedDirectorJob && directorJobPresentation" class="notice director-job" :class="{ error: ['warn', 'danger'].includes(directorJobPresentation.tone) }"><b>{{ directorJobPresentation.label }}</b><span>{{ displayedDirectorJob.error?.message || directorJobPresentation.description }}</span><details><summary>查看生成记录</summary><p>任务编号：<code>{{ displayedDirectorJob.id }}</code></p><p>原始状态：{{ displayedDirectorJob.status }}</p><p v-if="displayedDirectorJob.actualUsage">实际用量：{{ JSON.stringify(displayedDirectorJob.actualUsage) }}</p><p v-if="directorBillingPresentation">费用：{{ directorBillingPresentation.label }} · {{ directorBillingPresentation.detail }}</p></details></section>
       <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
     </div>
@@ -123,7 +124,7 @@ async function save() {
     <div v-else class="shot-editor card">
       <header class="editor-head">
         <div><p class="eyebrow">分镜方案 · 版本 {{ workspace.activeShotPlan.revision }}</p><h2>分镜设计</h2><details class="plan-technical"><summary>查看生成记录</summary><small>{{ workspace.activeShotPlan.directorModel ?? "历史手工版本" }} · {{ workspace.activeShotPlan.directorPromptRevision ?? "旧版本未记录生成指令" }}<br>{{ workspace.activeShotPlan.directorInputHash ?? "旧版本未记录输入标识" }}</small></details></div>
-        <div class="head-actions"><button class="secondary" :disabled="generating" @click="generateDirectorPlan">重新生成分镜</button><button class="primary" :disabled="saving" @click="save"><span v-if="saving" class="spinner" />保存新版本</button></div>
+        <div class="head-actions"><button class="secondary" :disabled="generating || Boolean(paidBlockedReason)" @click="generateDirectorPlan">重新生成分镜</button><button class="primary" :disabled="saving" @click="save"><span v-if="saving" class="spinner" />保存新版本</button></div>
       </header>
       <div v-if="error" class="notice error editor-error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div><section v-if="displayedDirectorJob && directorJobPresentation" class="notice editor-error director-job" :class="{ error: ['warn', 'danger'].includes(directorJobPresentation.tone) }"><b>{{ directorJobPresentation.label }}</b><span>{{ displayedDirectorJob.error?.message || directorJobPresentation.description }}</span><details><summary>查看生成记录</summary><p>任务编号：<code>{{ displayedDirectorJob.id }}</code> · 原始状态：{{ displayedDirectorJob.status }}</p></details></section>
       <div class="timeline-ruler"><span v-for="tick in 6" :key="tick">{{ Math.round(((tick - 1) / 5) * workspace.activeStory.targetDurationSeconds) }}s</span></div>

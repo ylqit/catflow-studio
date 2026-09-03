@@ -30,8 +30,6 @@ import type {
   ShotPlanVersionDto,
   StoryVersionDto,
   WorkspaceDto,
-  ValidationRunDto,
-  ValidationRunPreviewDto,
   VideoRepairDto,
 } from "./types";
 import { buildLibraryQuery } from "../projectLibrary";
@@ -82,25 +80,6 @@ export class CatFlowClient {
 
   publishCanon(fixedAssets: Record<string, string>): Promise<CanonProfileDto> {
     return this.json("/api/v1/canon/revisions", "POST", { fixedAssets });
-  }
-
-  previewValidationRun(): Promise<ValidationRunPreviewDto> {
-    return this.json("/api/v1/validation-runs/preview", "POST", {});
-  }
-
-  authorizeValidationRun(expectedManifestHash: string): Promise<ValidationRunDto> {
-    return this.json("/api/v1/validation-runs", "POST", {
-      expectedManifestHash,
-      paidCallAcknowledged: true,
-    });
-  }
-
-  currentValidationRun(): Promise<ValidationRunDto | null> {
-    return this.request("/api/v1/validation-runs/current");
-  }
-
-  pauseValidationRun(runId: string): Promise<ValidationRunDto> {
-    return this.json(`/api/v1/validation-runs/${runId}/pause`, "POST", {});
   }
 
   projects(): Promise<ProjectDto[]> {

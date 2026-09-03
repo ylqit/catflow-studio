@@ -107,7 +107,7 @@ describe("VideoRepairWorkspace", () => {
     client.assets.mockResolvedValue([]);
     client.edits.mockResolvedValue([]);
     client.runtime.mockResolvedValue({
-      provider: { name: "ark" },
+      provider: { name: "ark", apiKeyConfigured: true, paidCallsEnabled: true },
       objectPublisher: {
         configured: true,
         ready: true,
@@ -218,11 +218,7 @@ describe("VideoRepairWorkspace", () => {
     wrapper.unmount();
   });
 
-  it("labels fake execution honestly and keeps approved repairs in history only", async () => {
-    client.runtime.mockResolvedValue({
-      provider: { name: "fake", videoModel: "catflow-fake-video-v1" },
-      objectPublisher: { configured: false, ready: false },
-    });
+  it("keeps approved Ark repairs in history instead of reopening candidate review", async () => {
     client.videoRepairs.mockResolvedValue([{
       ...preview,
       id: "repair-approved",
@@ -249,8 +245,8 @@ describe("VideoRepairWorkspace", () => {
     });
     await flushPromises();
 
-    expect(wrapper.text()).toContain("测试模式，不会产生模型费用");
-    expect(wrapper.text()).toContain("生成测试候选");
+    expect(wrapper.text()).toContain("本次操作会产生模型费用");
+    expect(wrapper.text()).toContain("生成修改结果");
     expect(wrapper.find('[data-testid="repair-candidate-review"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("repair-approved");
     expect(wrapper.text()).toContain("已创建新视频版本");

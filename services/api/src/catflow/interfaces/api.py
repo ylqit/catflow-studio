@@ -70,9 +70,7 @@ from catflow.application.service import (
     StudioNotFoundError,
     StudioService,
     StudioValidationError,
-    ValidationRunCreateCommand,
     ValidationRunDto,
-    ValidationRunPreviewDto,
     VideoDiagnosisCommand,
     VideoRepairDto,
 )
@@ -200,15 +198,9 @@ def create_app(
     def runtime_bootstrap() -> dict[str, object]:
         provider = service.provider_runtime
         publisher_status = publisher_runtime.status
-        segment_repair_supported = provider.segment_repair_supported and (
-            provider.provider != "ark" or publisher_status.ready
-        )
+        segment_repair_supported = provider.segment_repair_supported and publisher_status.ready
         segment_repair_blocked_reason = provider.segment_repair_block_reason
-        if (
-            provider.provider == "ark"
-            and not publisher_status.ready
-            and segment_repair_blocked_reason is None
-        ):
+        if not publisher_status.ready and segment_repair_blocked_reason is None:
             segment_repair_blocked_reason = (
                 publisher_status.error or {"message": "object publisher is not ready"}
             )["message"]
@@ -304,23 +296,6 @@ def create_app(
     def publish_canon_revision(command: CanonRevisionCreateCommand) -> CanonProfileDto:
         return service.publish_canon_revision(command)
 
-    @app.post(
-        "/api/v1/validation-runs/preview",
-        response_model=ValidationRunPreviewDto,
-    )
-    def preview_validation_run(
-        _payload: dict[str, Any] = Body(default={}),
-    ) -> ValidationRunPreviewDto:
-        return service.preview_validation_run()
-
-    @app.post(
-        "/api/v1/validation-runs",
-        response_model=ValidationRunDto,
-        status_code=status.HTTP_201_CREATED,
-    )
-    def authorize_validation_run(command: ValidationRunCreateCommand) -> ValidationRunDto:
-        return service.authorize_validation_run(command)
-
     @app.get("/api/v1/validation-runs/current", response_model=ValidationRunDto | None)
     def current_validation_run() -> ValidationRunDto | None:
         return service.current_validation_run()
@@ -328,12 +303,6 @@ def create_app(
     @app.get("/api/v1/validation-runs/{run_id}", response_model=ValidationRunDto)
     def get_validation_run(run_id: uuid.UUID) -> ValidationRunDto:
         return service.get_validation_run(run_id)
-
-    @app.post("/api/v1/validation-runs/{run_id}/pause", response_model=ValidationRunDto)
-    def pause_validation_run(
-        run_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
-    ) -> ValidationRunDto:
-        return service.pause_validation_run(run_id)
 
     @app.get("/api/v1/projects", response_model=list[ProjectDto])
     def list_projects() -> list[ProjectDto]:
@@ -694,67 +663,6 @@ def create_app(
         _payload: dict[str, Any] = Body(default={}),
     ) -> VideoRepairDto:
         return service.reject_video_repair(project_id, edit_id)
-
-    @app.post(
-        "/api/v1/projects/{project_id}/video-repairs/preview",
-        response_model=SegmentRepairPreviewDto,
-        deprecated=True,
-    )
-    def preview_video_repair(
-        project_id: uuid.UUID, command: SegmentRepairPreviewCommand
-    ) -> SegmentRepairPreviewDto:
-        return service.preview_video_repair(project_id, command)
-
-    @app.post(
-        "/api/v1/projects/{project_id}/video-repairs",
-        response_model=JobDto,
-        status_code=status.HTTP_202_ACCEPTED,
-        deprecated=True,
-    )
-    def create_video_repair(project_id: uuid.UUID, command: SegmentRepairCreateCommand) -> JobDto:
-        return service.create_video_repair_job(project_id, command)
-
-    @app.get(
-        "/api/v1/projects/{project_id}/video-repairs",
-        response_model=list[VideoRepairDto],
-    )
-    def video_repairs(project_id: uuid.UUID) -> list[VideoRepairDto]:
-        return service.list_video_repairs(project_id)
-
-    @app.get(
-        "/api/v1/projects/{project_id}/video-repairs/{repair_id}",
-        response_model=VideoRepairDto,
-    )
-    def video_repair(project_id: uuid.UUID, repair_id: uuid.UUID) -> VideoRepairDto:
-        repair = service.get_video_repair(repair_id)
-        if repair.project_id != project_id:
-            raise StudioNotFoundError("video repair not found")
-        return repair
-
-    @app.post(
-        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/approve",
-        response_model=EditVersionDto,
-        status_code=status.HTTP_201_CREATED,
-        deprecated=True,
-    )
-    def approve_video_repair(
-        project_id: uuid.UUID,
-        repair_id: uuid.UUID,
-        command: SegmentRepairApproveCommand,
-    ) -> EditVersionDto:
-        return service.approve_video_repair(project_id, repair_id, command)
-
-    @app.post(
-        "/api/v1/projects/{project_id}/video-repairs/{repair_id}/reject",
-        response_model=VideoRepairDto,
-        deprecated=True,
-    )
-    def reject_video_repair(
-        project_id: uuid.UUID,
-        repair_id: uuid.UUID,
-        _payload: dict[str, Any] = Body(default={}),
-    ) -> VideoRepairDto:
-        return service.reject_video_repair(project_id, repair_id)
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobDto)
     def job(job_id: uuid.UUID) -> JobDto:

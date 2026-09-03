@@ -22,7 +22,9 @@ from catflow.infrastructure.models import Base
 TABLE_ORDER = (
     "canon_profiles",
     "provider_rate_cards",
+    "project_collections",
     "projects",
+    "project_tags",
     "validation_runs",
     "life_planner_sessions",
     "life_planner_messages",
@@ -35,6 +37,8 @@ TABLE_ORDER = (
     "project_selections",
     "job_events",
     "edit_versions",
+    "video_repairs",
+    "media_publications",
 )
 
 
@@ -123,23 +127,39 @@ def restore(engine: Any, paths: RuntimePaths, archive: Path, *, replace: bool) -
                 for name in reversed(TABLE_ORDER):
                     connection.execute(Base.metadata.tables[f"catflow.{name}"].delete())
 
-            supersedes: list[tuple[uuid.UUID, uuid.UUID]] = []
+            deferred_job_links: list[tuple[uuid.UUID, str, uuid.UUID]] = []
+            deferred_edit_parents: list[tuple[uuid.UUID, uuid.UUID]] = []
             for name in TABLE_ORDER:
                 table = Base.metadata.tables[f"catflow.{name}"]
                 rows = [_decode_row(table, row) for row in document[name]]
                 if name == "jobs":
                     for row in rows:
-                        if row.get("supersedes_job_id") is not None:
-                            supersedes.append((row["id"], row["supersedes_job_id"]))
-                            row["supersedes_job_id"] = None
+                        for field in ("parent_job_id", "supersedes_job_id", "video_repair_id"):
+                            if row.get(field) is not None:
+                                deferred_job_links.append((row["id"], field, row[field]))
+                                row[field] = None
+                if name == "edit_versions":
+                    for row in rows:
+                        if row.get("parent_edit_version_id") is not None:
+                            deferred_edit_parents.append(
+                                (row["id"], row["parent_edit_version_id"])
+                            )
+                            row["parent_edit_version_id"] = None
                 if rows:
                     connection.execute(table.insert(), rows)
             jobs = Base.metadata.tables["catflow.jobs"]
-            for job_id, supersedes_job_id in supersedes:
+            for job_id, field, target_id in deferred_job_links:
                 connection.execute(
                     jobs.update()
                     .where(jobs.c.id == job_id)
-                    .values(supersedes_job_id=supersedes_job_id)
+                    .values({field: target_id})
+                )
+            edits = Base.metadata.tables["catflow.edit_versions"]
+            for edit_id, parent_id in deferred_edit_parents:
+                connection.execute(
+                    edits.update()
+                    .where(edits.c.id == edit_id)
+                    .values(parent_edit_version_id=parent_id)
                 )
             if document["job_events"]:
                 maximum_event_id = max(row["id"] for row in document["job_events"])

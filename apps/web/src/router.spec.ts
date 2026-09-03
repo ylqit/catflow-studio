@@ -17,4 +17,8 @@ describe("CatFlow web routes", () => {
     expect(paths.some((path) => path.includes("canvas"))).toBe(false);
     expect(paths.some((path) => path.includes("studio"))).toBe(false);
   });
+
+  it("does not expose the retired first-three validation workflow", () => {
+    expect(routes.some((route) => route.path === "/validation/first-three")).toBe(false);
+  });
 });

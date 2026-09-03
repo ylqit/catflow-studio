@@ -24,6 +24,7 @@ const workspace: WorkspaceDto = {
 };
 
 describe("GenerationStep", () => {
+  const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     client.assets.mockResolvedValue([]);
@@ -40,7 +41,7 @@ describe("GenerationStep", () => {
 
   it("submits one paid video job directly and shows no custom quota", async () => {
     const wrapper = mount(GenerationStep, {
-      props: { projectId: "project-1", workspace },
+      props: { projectId: "project-1", workspace, runtime },
       global: { plugins: [createPinia()] },
     });
     await flushPromises();
@@ -63,7 +64,7 @@ describe("GenerationStep", () => {
 
   it("shows the non-paying prompt preview as soon as the step opens", async () => {
     const wrapper = mount(GenerationStep, {
-      props: { projectId: "project-1", workspace },
+      props: { projectId: "project-1", workspace, runtime },
       global: { plugins: [createPinia()] },
     });
     await flushPromises();
@@ -73,6 +74,35 @@ describe("GenerationStep", () => {
     expect(wrapper.text()).toContain("画面描述");
     expect(wrapper.text()).toContain("查看完整生成指令");
     expect(wrapper.text()).toContain("专业镜头提示词");
+    wrapper.unmount();
+  });
+
+  it("does not present unresolved Ark usage as a calculated zero cost", async () => {
+    client.projectUsageSummary.mockResolvedValue({
+      projectId: "project-1",
+      jobs: [{
+        jobId: "job-usage-1",
+        provider: "ark",
+        model: "seedance",
+        totalTokens: 1168,
+        providerUsage: { totalTokens: 1168 },
+        billingStatus: "pending",
+        currency: "CNY",
+      }],
+      totals: { totalTokens: 1168 },
+      calculatedCostMicros: 0,
+      unpricedJobCount: 0,
+      currency: "CNY",
+    });
+
+    const wrapper = mount(GenerationStep, {
+      props: { projectId: "project-1", workspace, runtime },
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("费用计算中");
+    expect(wrapper.text()).not.toContain("已计算费用¥0.0000");
     wrapper.unmount();
   });
 });

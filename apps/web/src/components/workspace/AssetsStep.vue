@@ -2,20 +2,19 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { api } from "../../api/client";
-import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, JobDto, RuntimeBootstrapDto, WorkspaceDto } from "../../api/types";
+import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, JobDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
+import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 import { projectJobEvent } from "../../projectJobEvents";
 import { useUiStore } from "../../stores/ui";
 
-const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
+const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const store = useUiStore();
 const assets = ref<AssetDto[]>([]);
 const busySlot = ref<AssetSlot | null>(null);
 const error = ref("");
 const errorDetail = ref("");
-const runtime = ref<RuntimeBootstrapDto | null>(null);
 const generationPreview = ref<AssetGenerationPreviewDto | null>(null);
 const currentJob = ref<JobDto | null>(null);
 let events: EventSource | null = null;
@@ -34,6 +33,7 @@ const currentJobPresentation = computed(() => currentJob.value ? jobPresentation
 const currentBillingPresentation = computed(() => currentJob.value
   ? billingPresentation(currentJob.value.billingStatus, currentJob.value.actualCostMicros, currentJob.value.provider)
   : null);
+const paidBlockedReason = computed(() => paidModelBlockedReason(props.runtime));
 
 function inheritedLabel(slot: AssetGenerationKind) {
   if (slot === "episode_child" || slot === "episode_cat") return "已使用固定角色";
@@ -43,10 +43,7 @@ function inheritedLabel(slot: AssetGenerationKind) {
 
 async function load() {
   try {
-    [assets.value, runtime.value] = await Promise.all([
-      api.assets(props.projectId),
-      api.runtime(),
-    ]);
+    assets.value = await api.assets(props.projectId);
   } catch (reason) {
     const failure = errorPresentation(reason, "角色与画风暂时无法读取");
     error.value = failure.message;
@@ -88,7 +85,7 @@ async function select(slot: AssetSlot, assetId: string) {
 }
 
 async function generateEnvironment() {
-  if (busySlot.value) return;
+  if (busySlot.value || paidBlockedReason.value) return;
   busySlot.value = "environment";
   error.value = "";
   try {
@@ -111,7 +108,7 @@ async function generateEnvironment() {
 }
 
 async function diagnose(asset: AssetDto) {
-  if (busySlot.value) return;
+  if (busySlot.value || paidBlockedReason.value) return;
   error.value = "";
   busySlot.value = asset.role as AssetGenerationKind;
   const scope = `asset-diagnosis:${props.projectId}:${asset.id}`;
@@ -197,17 +194,17 @@ onBeforeUnmount(() => events?.close());
             <div v-for="asset in grouped[slot.id].filter((candidate) => candidate.id !== workspace.selections[slot.id]?.id)" :key="asset.id" class="candidate">
               <img :src="`/api/v1/assets/${asset.id}/content`" :alt="slot.title" />
               <span v-if="reportStatus(asset)" class="quality-badge">诊断 {{ reportStatus(asset) }}</span>
-              <button class="diagnose-button" :disabled="busySlot === slot.id" @click="diagnose(asset)">诊断</button>
+              <button class="diagnose-button" :disabled="busySlot === slot.id || Boolean(paidBlockedReason)" @click="diagnose(asset)">诊断</button>
               <button v-if="workspace.selections[slot.id]?.id !== asset.id" class="secondary" :disabled="busySlot === slot.id" @click="select(slot.id, asset.id)">选择</button>
             </div>
             <label class="upload-candidate" :class="{ busy: busySlot === slot.id }">
               <input type="file" accept="image/png,image/jpeg,image/webp" @change="upload(slot.id, $event)" />
               <b>{{ busySlot === slot.id ? "处理中…" : "＋" }}</b><span>上传候选</span>
             </label>
-            <button class="generate-candidate" :disabled="busySlot === slot.id" @click="generateEnvironment"><b>✦</b><span>生成环境候选</span></button>
+            <button class="generate-candidate" :disabled="busySlot === slot.id || Boolean(paidBlockedReason)" @click="generateEnvironment"><b>✦</b><span>生成环境候选</span></button>
           </div>
           <section v-if="slot.id === 'environment'" class="paid-model-note">
-            <b>{{ runtime?.provider.name === "ark" ? "本次会使用付费模型，完成后显示实际用量。" : "测试模式，不会产生模型费用。" }}</b>
+            <b>{{ paidBlockedReason || "本次会使用付费模型，完成后显示实际用量。" }}</b>
             <span>生成或检查只会创建一次任务，离开页面后仍会继续。</span>
             <details v-if="generationPreview"><summary>查看完整生成指令</summary><p>{{ generationPreview.prompt }}</p><p><b>需要避免的问题</b><br>{{ generationPreview.negativePrompt }}</p><details class="technical-details"><summary>技术详情</summary><p>{{ generationPreview.provider }} · {{ generationPreview.model }} · {{ generationPreview.capabilityRevision }}</p><code>{{ generationPreview.inputHash }}</code></details></details>
           </section>

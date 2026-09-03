@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { billingPresentation, errorPresentation, jobPresentation } from "./presentation";
+import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason } from "./presentation";
 
 describe("creator-facing presentation", () => {
   it.each([
@@ -33,11 +33,17 @@ describe("creator-facing presentation", () => {
     });
   });
 
-  it("labels a fake-provider task as a test instead of pending billing", () => {
-    expect(billingPresentation(undefined, null, "fake")).toEqual({
-      label: "测试任务",
-      detail: "测试模式不产生模型费用。",
+  it("keeps pending billing provider-neutral", () => {
+    expect(billingPresentation(undefined, null, "ark")).toEqual({
+      label: "费用计算中",
+      detail: "任务完成后会根据实际用量更新费用。",
     });
+  });
+
+  it("explains why a real model submission is unavailable", () => {
+    expect(paidModelBlockedReason({ provider: { apiKeyConfigured: false, paidCallsEnabled: true } })).toContain("密钥");
+    expect(paidModelBlockedReason({ provider: { apiKeyConfigured: true, paidCallsEnabled: false } })).toContain("已关闭");
+    expect(paidModelBlockedReason({ provider: { apiKeyConfigured: true, paidCallsEnabled: true } })).toBe("");
   });
 
   it("turns stale production input into a creator action", () => {

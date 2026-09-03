@@ -539,7 +539,7 @@ def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> 
         AssetGenerationCommand(
             kind="episode_cat",
             expectedInputHash=preview.input_hash,
-            idempotencyKey="asset-cat-fake-1",
+            idempotencyKey="asset-cat-sample-1",
         ),
     )
 

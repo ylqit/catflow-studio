@@ -13,6 +13,7 @@ const client = vi.hoisted(() => ({
 vi.mock("../../api/client", () => ({ api: client }));
 
 describe("PlannerStep", () => {
+  const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
     client.planner.mockResolvedValue({
       sessionId: "session-1",
@@ -31,7 +32,7 @@ describe("PlannerStep", () => {
   });
 
   it("submits the paid Ark planning job directly without a validation quota prompt", async () => {
-    const wrapper = mount(PlannerStep, { props: { projectId: "project-1" } });
+    const wrapper = mount(PlannerStep, { props: { projectId: "project-1", runtime } });
     await flushPromises();
 
     await wrapper.get("textarea").setValue("雨天擦爪");
@@ -70,7 +71,7 @@ describe("PlannerStep", () => {
       },
     });
 
-    const wrapper = mount(PlannerStep, { props: { projectId: "project-1" } });
+    const wrapper = mount(PlannerStep, { props: { projectId: "project-1", runtime } });
     await flushPromises();
 
     expect(wrapper.get('[data-testid="planner-job-summary"]').text()).toContain("已完成");
@@ -98,12 +99,26 @@ describe("PlannerStep", () => {
       }],
     });
 
-    const wrapper = mount(PlannerStep, { props: { projectId: "project-1" } });
+    const wrapper = mount(PlannerStep, { props: { projectId: "project-1", runtime } });
     await flushPromises();
 
     const history = wrapper.get('[data-testid="planner-conversation-history"]');
     expect(history.attributes("open")).toBeUndefined();
     expect(history.get("summary").text()).toContain("查看历史对话");
     expect(wrapper.text()).toContain("擦干小猫爪");
+  });
+
+  it("does not submit when Ark credentials are unavailable", async () => {
+    const wrapper = mount(PlannerStep, {
+      props: {
+        projectId: "project-1",
+        runtime: { provider: { apiKeyConfigured: false, paidCallsEnabled: true } },
+      },
+    });
+    await flushPromises();
+    await wrapper.get("textarea").setValue("雨天擦爪");
+
+    expect(wrapper.get("button.primary").attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("尚未配置模型服务密钥");
   });
 });

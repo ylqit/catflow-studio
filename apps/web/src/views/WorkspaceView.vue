@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import { api } from "../api/client";
-import type { WorkspaceDto } from "../api/types";
+import type { RuntimeBootstrapDto, WorkspaceDto } from "../api/types";
 import AssetsStep from "../components/workspace/AssetsStep.vue";
 import DeliveryStep from "../components/workspace/DeliveryStep.vue";
 import GenerationStep from "../components/workspace/GenerationStep.vue";
@@ -16,6 +16,7 @@ const props = defineProps<{ step: "planner" | "assets" | "storyboard" | "generat
 const route = useRoute();
 const store = useUiStore();
 const workspace = ref<WorkspaceDto | null>(null);
+const runtime = ref<RuntimeBootstrapDto | null>(null);
 const loading = ref(true);
 const error = ref("");
 const projectId = computed(() => String(route.params.projectId));
@@ -31,7 +32,12 @@ const steps = [
 
 async function loadWorkspace() {
   try {
-    workspace.value = await api.workspace(projectId.value);
+    const [nextWorkspace, nextRuntime] = await Promise.all([
+      api.workspace(projectId.value),
+      api.runtime().catch(() => null),
+    ]);
+    workspace.value = nextWorkspace;
+    runtime.value = nextRuntime;
     store.lastEventId = Math.max(store.lastEventId, workspace.value.eventCursor);
     store.setProject(projectId.value);
     error.value = "";
@@ -77,10 +83,10 @@ onBeforeUnmount(() => { eventSource?.close(); store.sseConnected = false; });
         </RouterLink>
       </nav>
       <section class="workspace-content">
-        <PlannerStep v-if="step === 'planner'" :project-id="projectId" @changed="loadWorkspace" />
-        <AssetsStep v-else-if="step === 'assets'" :project-id="projectId" :workspace="workspace" @changed="loadWorkspace" />
-        <StoryboardStep v-else-if="step === 'storyboard'" :project-id="projectId" :workspace="workspace" @changed="loadWorkspace" />
-        <GenerationStep v-else-if="step === 'generation'" :project-id="projectId" :workspace="workspace" @changed="loadWorkspace" />
+        <PlannerStep v-if="step === 'planner'" :project-id="projectId" :runtime="runtime" @changed="loadWorkspace" />
+        <AssetsStep v-else-if="step === 'assets'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
+        <StoryboardStep v-else-if="step === 'storyboard'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
+        <GenerationStep v-else-if="step === 'generation'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
         <DeliveryStep v-else :project-id="projectId" :workspace="workspace" @changed="loadWorkspace" />
       </section>
     </template>

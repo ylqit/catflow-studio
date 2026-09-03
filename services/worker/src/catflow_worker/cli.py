@@ -24,8 +24,7 @@ from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from .ark_gateway import ArkGatewaySettings, ArkTypedGateway
 from .ark_job_gateway import ArkProviderJobGateway
 from .ark_results import ArkResultLandingService
-from .fake_provider import FakeProviderGateway
-from .media_jobs import MediaJobExecutor
+from .media_jobs import LocalMediaJobExecutor
 from .project_posters import ProjectPosterGenerator
 from .provider_media import ProviderMediaDownloader
 from .runner import DurableJobWorker
@@ -40,7 +39,7 @@ def run_worker(
     once: bool = typer.Option(False, help="Process at most one available lifecycle step."),
     poll_interval: float = typer.Option(1.0, min=0.1, max=30),
 ) -> None:
-    """Run the durable planning, fake-media and FFmpeg worker."""
+    """Run the durable Ark and FFmpeg worker."""
     project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
     load_dotenv(project_root / ".env", override=False)
     paths = RuntimePaths.from_env(project_root)
@@ -59,50 +58,43 @@ def run_worker(
         media_store,
         ffmpeg_path=ffmpeg_path,
     )
-    local_results = MediaJobExecutor(
+    local_results = LocalMediaJobExecutor(
         sessions,
         media_store,
         ffmpeg_path=ffmpeg_path,
         ffprobe_path=ffprobe_path,
         poster_generator=poster_generator,
     )
-    if provider_runtime.provider == "ark":
-        typed_gateway = ArkTypedGateway(ArkGatewaySettings.from_env())
-        resolver = AssetMediaResolver(
-            sessions,
-            media_store,
-            ffmpeg_path=ffmpeg_path,
-        )
-        segment_publisher = (
-            SegmentReferencePublisher(sessions, object_publisher_runtime.store)
-            if object_publisher_runtime.status.ready and object_publisher_runtime.store is not None
-            else None
-        )
-        provider = ArkProviderJobGateway(
-            typed_gateway,
-            resolve_asset_paths=resolver.resolve_paths,
-            extract_video_frames=resolver.extract_video_frames,
-            prepare_segment_media=resolver.prepare_segment_media,
-            publish_segment_reference=segment_publisher,
-        )
-        ark_results = ArkResultLandingService(
-            sessions,
-            media_store,
-            studio_service=service,
-            downloader=ProviderMediaDownloader(),
-            ffprobe_path=ffprobe_path,
-            poster_generator=poster_generator,
-        )
-    else:
-        provider = FakeProviderGateway()
-        ark_results = None
-        segment_publisher = None
+    typed_gateway = ArkTypedGateway(ArkGatewaySettings.from_env())
+    resolver = AssetMediaResolver(
+        sessions,
+        media_store,
+        ffmpeg_path=ffmpeg_path,
+    )
+    segment_publisher = (
+        SegmentReferencePublisher(sessions, object_publisher_runtime.store)
+        if object_publisher_runtime.status.ready and object_publisher_runtime.store is not None
+        else None
+    )
+    provider = ArkProviderJobGateway(
+        typed_gateway,
+        resolve_asset_paths=resolver.resolve_paths,
+        extract_video_frames=resolver.extract_video_frames,
+        prepare_segment_media=resolver.prepare_segment_media,
+        publish_segment_reference=segment_publisher,
+    )
+    ark_results = ArkResultLandingService(
+        sessions,
+        media_store,
+        studio_service=service,
+        downloader=ProviderMediaDownloader(),
+        ffprobe_path=ffprobe_path,
+        poster_generator=poster_generator,
+    )
     worker = DurableJobWorker(
         sessions,
         provider,
         worker_id=f"{socket.gethostname()}-{os.getpid()}",
-        provider_name=provider_runtime.provider,
-        studio_service=service,
         result_handler=JobResultDispatcher(
             sessions,
             local=local_results,

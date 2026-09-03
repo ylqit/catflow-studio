@@ -42,17 +42,11 @@ from catflow.application.service import (
     StudioConflictError,
     StudioNotFoundError,
     ValidationRunDto,
-    ValidationRunPreviewDto,
     VideoRepairDto,
     VideoRepairStatus,
 )
 from catflow.domain.billing import RateCardItem, rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
-from catflow.domain.validation import (
-    ValidationCallKind,
-    ValidationManifest,
-    reserve_validation_call,
-)
 from catflow.domain.video_repairs import FrameRange, RationalFrameRate
 
 from .database import canon_v4_document, ensure_canon_v4
@@ -252,31 +246,6 @@ class PostgresStudioRepository:
             session.flush()
             return _canon_profile_dto(session, record)
 
-    def create_validation_run(self, preview: ValidationRunPreviewDto) -> ValidationRunDto:
-        now = datetime.now(UTC)
-        with self._sessions.begin() as session:
-            record = ValidationRunRecord(
-                status="authorized",
-                manifest_hash=preview.manifest_hash,
-                topics_json=list(preview.topics),
-                duration_seconds=preview.duration_seconds,
-                resolution=preview.resolution,
-                aspect_ratio=preview.aspect_ratio,
-                target_budget_cny=preview.target_budget_cny,
-                call_limits_json={kind.value: limit for kind, limit in preview.call_limits.items()},
-                usage_json={kind.value: 0 for kind in preview.call_limits},
-                provider=preview.provider,
-                models_json=preview.models,
-                capability_revision=preview.capability_revision,
-                cost_estimate_status=preview.cost_estimate_status,
-                canon_snapshot_json=preview.canon.model_dump(mode="json", by_alias=True),
-                repair_snapshot_json=preview.repair.model_dump(mode="json", by_alias=True),
-                authorized_at=now,
-            )
-            session.add(record)
-            session.flush()
-            return _validation_run_dto(record)
-
     def get_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto | None:
         with self._sessions() as session:
             record = session.get(ValidationRunRecord, run_id)
@@ -290,27 +259,6 @@ class PostgresStudioRepository:
                 )
             )
             return _validation_run_dto(record) if record is not None else None
-
-    def set_validation_run_status(self, run_id: uuid.UUID, status: str) -> ValidationRunDto:
-        with self._sessions.begin() as session:
-            record = session.scalar(
-                select(ValidationRunRecord)
-                .where(ValidationRunRecord.id == run_id)
-                .with_for_update()
-            )
-            if record is None:
-                raise StudioNotFoundError("validation run not found")
-            record.status = status
-            session.flush()
-            return _validation_run_dto(record)
-
-    def reserve_validation_call(
-        self, run_id: uuid.UUID, kind: ValidationCallKind
-    ) -> ValidationRunDto:
-        with self._sessions.begin() as session:
-            record = _reserve_validation_call_in_session(session, run_id, kind)
-            session.flush()
-            return _validation_run_dto(record)
 
     def create_project(self, draft: ProjectCreate, *, canon_profile_id: uuid.UUID) -> ProjectDto:
         with self._sessions.begin() as session:
@@ -441,14 +389,6 @@ class PostgresStudioRepository:
             if existing is not None:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
-
-            if job.validation_run_id is not None:
-                _require_unique_validation_job(session, job)
-                _reserve_validation_call_in_session(
-                    session,
-                    job.validation_run_id,
-                    ValidationCallKind.PLAN_STORY,
-                )
 
             planner_session = session.scalar(
                 select(LifePlannerSessionRecord)
@@ -929,13 +869,6 @@ class PostgresStudioRepository:
             if existing is not None:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
-            if job.validation_run_id is not None:
-                _require_unique_validation_job(session, job)
-                _reserve_validation_call_in_session(
-                    session,
-                    job.validation_run_id,
-                    ValidationCallKind(job.kind),
-                )
             record = _new_job_record(job)
             session.add(record)
             session.flush()
@@ -1276,7 +1209,7 @@ def _project_dto(record: ProjectRecord) -> ProjectDto:
 
 
 def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
-    call_limits = {ValidationCallKind(key): value for key, value in record.call_limits_json.items()}
+    call_limits = dict(record.call_limits_json)
     return ValidationRunDto(
         id=record.id,
         status=record.status,
@@ -1289,8 +1222,8 @@ def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
         callLimits=call_limits,
         totalCallLimit=sum(call_limits.values()),
         maximumVideoCalls=(
-            call_limits[ValidationCallKind.GENERATE_VIDEO]
-            + call_limits.get(ValidationCallKind.REGENERATE_VIDEO_SEGMENT, 0)
+            call_limits.get("generate_video", 0)
+            + call_limits.get("regenerate_video_segment", 0)
         ),
         provider=record.provider,
         models=record.models_json,
@@ -1298,7 +1231,7 @@ def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
         costEstimateStatus=record.cost_estimate_status,
         canon=record.canon_snapshot_json,
         repair=record.repair_snapshot_json,
-        usage={ValidationCallKind(key): value for key, value in record.usage_json.items()},
+        usage=dict(record.usage_json),
         createdAt=record.created_at,
         authorizedAt=record.authorized_at,
     )
@@ -1501,52 +1434,6 @@ def _new_video_repair_record(repair: VideoRepairDto) -> VideoRepairRecord:
 
 def _job_by_idempotency(session: Session, key: str) -> JobRecord | None:
     return session.scalar(select(JobRecord).where(JobRecord.idempotency_key == key))
-
-
-def _reserve_validation_call_in_session(
-    session: Session,
-    run_id: uuid.UUID,
-    kind: ValidationCallKind,
-) -> ValidationRunRecord:
-    """Lock and consume one paid-call allowance in the caller's job transaction."""
-    record = session.scalar(
-        select(ValidationRunRecord).where(ValidationRunRecord.id == run_id).with_for_update()
-    )
-    if record is None:
-        raise StudioNotFoundError("validation run not found")
-    if record.status != "authorized":
-        raise StudioConflictError("validation run is not authorized")
-    manifest = ValidationManifest(
-        topics=tuple(record.topics_json),
-        duration_seconds=record.duration_seconds,
-        resolution=record.resolution,
-        aspect_ratio=record.aspect_ratio,
-        target_budget_cny=record.target_budget_cny,
-        repair_topic=str(record.repair_snapshot_json["topic"]),
-        repair_start_frame=int(record.repair_snapshot_json["issueRange"]["startFrame"]),
-        repair_end_frame=int(record.repair_snapshot_json["issueRange"]["endFrame"]),
-        repair_prompt=str(record.repair_snapshot_json["prompt"]),
-        call_limits={
-            ValidationCallKind(key): value for key, value in record.call_limits_json.items()
-        },
-    )
-    usage = {ValidationCallKind(key): value for key, value in record.usage_json.items()}
-    record.usage_json = {
-        key.value: value for key, value in reserve_validation_call(manifest, usage, kind).items()
-    }
-    return record
-
-
-def _require_unique_validation_job(session: Session, job: JobDto) -> None:
-    duplicate = session.scalar(
-        select(JobRecord.id).where(
-            JobRecord.validation_run_id == job.validation_run_id,
-            JobRecord.project_id == job.project_id,
-            JobRecord.kind == job.kind,
-        )
-    )
-    if duplicate is not None:
-        raise StudioConflictError("validation run already has this project call")
 
 
 def _edit_dto(record: EditVersionRecord) -> EditVersionDto:

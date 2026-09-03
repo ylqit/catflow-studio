@@ -21,8 +21,11 @@ from catflow.infrastructure.object_storage import ObjectPublisherRuntime
 from catflow.infrastructure.postgres_project_library import PostgresProjectLibraryRepository
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow.interfaces.api import AppSettings, create_app
+from catflow.maintenance.cleanup import CleanupService
 
 app = typer.Typer(no_args_is_help=True)
+cleanup_app = typer.Typer(no_args_is_help=True, help="Audit and execute reviewed data cleanup.")
+app.add_typer(cleanup_app, name="cleanup")
 
 
 def validate_loopback_host(host: str) -> str:
@@ -80,3 +83,67 @@ def serve(
 def _configured_tool_ready(environment_name: str) -> bool:
     value = os.environ.get(environment_name, "")
     return bool(value and Path(value).is_file())
+
+
+@cleanup_app.command("audit")
+def cleanup_audit(
+    output: Path = typer.Option(..., dir_okay=False),
+) -> None:
+    """Create a read-only, hashed cleanup manifest."""
+    project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
+    load_dotenv(project_root / ".env", override=False)
+    paths = RuntimePaths.from_env(project_root)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    try:
+        document = CleanupService(create_session_factory(engine), paths).audit(output)
+        typer.echo(f"Cleanup manifest: {output.resolve()}")
+        typer.echo(f"Manifest SHA256: {document['manifestSha256']}")
+    finally:
+        engine.dispose()
+
+
+@cleanup_app.command("execute")
+def cleanup_execute(
+    manifest: Path = typer.Option(..., exists=True, dir_okay=False),
+    manifest_sha256: str = typer.Option(..., "--manifest-sha256"),
+) -> None:
+    """Back up, quarantine, and transactionally execute a reviewed manifest."""
+    project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
+    load_dotenv(project_root / ".env", override=False)
+    paths = RuntimePaths.from_env(project_root)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    try:
+        run_root = CleanupService(create_session_factory(engine), paths).execute(
+            manifest, manifest_sha256
+        )
+        typer.echo(f"Cleanup completed: {run_root}")
+    finally:
+        engine.dispose()
+
+
+@cleanup_app.command("restore")
+def cleanup_restore(run_id: str = typer.Option(..., "--run-id")) -> None:
+    """Back up the current state, then restore a completed cleanup backup."""
+    project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
+    load_dotenv(project_root / ".env", override=False)
+    paths = RuntimePaths.from_env(project_root)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    try:
+        CleanupService(create_session_factory(engine), paths).restore(run_id)
+        typer.echo(f"Cleanup run restored: {run_id}")
+    finally:
+        engine.dispose()
+
+
+@cleanup_app.command("purge-quarantine")
+def cleanup_purge_quarantine(run_id: str = typer.Option(..., "--run-id")) -> None:
+    """Purge exact quarantined files after the seven-day reference recheck."""
+    project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
+    load_dotenv(project_root / ".env", override=False)
+    paths = RuntimePaths.from_env(project_root)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    try:
+        removed = CleanupService(create_session_factory(engine), paths).purge_quarantine(run_id)
+        typer.echo(f"Purged {removed} quarantined files for cleanup run {run_id}")
+    finally:
+        engine.dispose()

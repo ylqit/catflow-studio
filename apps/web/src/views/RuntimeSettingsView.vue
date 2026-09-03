@@ -119,7 +119,7 @@ onMounted(load);
 
 <template>
   <main class="page settings-page">
-    <section class="page-heading"><div><p class="eyebrow">运行设置</p><h1>模型与运行设置</h1><p class="subtitle">先确认各项服务可用；连接地址、版本和校验信息可在高级配置中查看。</p></div><RouterLink class="primary" to="/validation/first-three">进入发布质量验收</RouterLink></section>
+    <section class="page-heading"><div><p class="eyebrow">运行设置</p><h1>模型与运行设置</h1><p class="subtitle">先确认各项服务可用；连接地址、版本和校验信息可在高级配置中查看。</p></div></section>
     <p v-if="error" class="notice error">{{ error }}</p>
     <div v-if="runtime" class="settings-grid">
       <section class="card settings-card"><p class="eyebrow">运行状态</p><h2>本机服务</h2><dl><div><dt>Web 服务</dt><dd><span class="pill good">可用</span></dd></div><div><dt>数据库</dt><dd><span class="pill" :class="{ good: runtime.databaseReady }">{{ runtime.databaseReady ? "可用" : "不可用" }}</span></dd></div><div><dt>后台任务</dt><dd><span class="pill" :class="{ good: runtime.workerReady }">{{ runtime.workerReady ? "可用" : "不可用" }}</span></dd></div><div><dt>视频工具</dt><dd><span class="pill" :class="{ good: runtime.ffmpegReady && runtime.ffprobeReady }">{{ runtime.ffmpegReady && runtime.ffprobeReady ? "可用" : "不可用" }}</span></dd></div></dl><details class="advanced-details"><summary>查看连接信息</summary><p>正式地址：<span data-testid="runtime-address">{{ runtime.baseUrl }}</span></p><p>数据库：PostgreSQL · 后台任务：Worker · 视频工具：FFmpeg / ffprobe</p></details></section>

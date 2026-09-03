@@ -2,11 +2,11 @@
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../../api/client";
-import type { LifeStoryProposalDto, PlannerSnapshotDto, RuntimeBootstrapDto } from "../../api/types";
+import type { LifeStoryProposalDto, PlannerSnapshotDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { billingPresentation, errorPresentation, jobPresentation } from "../../presentation";
+import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const snapshot = ref<PlannerSnapshotDto | null>(null);
 const message = ref("");
@@ -14,7 +14,6 @@ const sending = ref(false);
 const adopting = ref<string | null>(null);
 const error = ref("");
 const errorDetail = ref("");
-const runtime = ref<RuntimeBootstrapDto | null>(null);
 
 const latestJobPresentation = computed(() => snapshot.value?.latestJob
   ? jobPresentation(snapshot.value.latestJob.status)
@@ -22,6 +21,7 @@ const latestJobPresentation = computed(() => snapshot.value?.latestJob
 const latestBillingPresentation = computed(() => snapshot.value?.latestJob
   ? billingPresentation(snapshot.value.latestJob.billingStatus, snapshot.value.latestJob.actualCostMicros, snapshot.value.latestJob.provider)
   : null);
+const paidBlockedReason = computed(() => paidModelBlockedReason(props.runtime));
 
 function proposalStatus(status: "draft" | "adopted" | "outdated") {
   return { draft: "待采用", adopted: "已采用", outdated: "已过期" }[status];
@@ -40,10 +40,7 @@ function isRedundantSummary(proposal: LifeStoryProposalDto) {
 async function load() {
   error.value = "";
   try {
-    [snapshot.value, runtime.value] = await Promise.all([
-      api.planner(props.projectId),
-      api.runtime(),
-    ]);
+    snapshot.value = await api.planner(props.projectId);
   } catch (reason) {
     const failure = errorPresentation(reason, "故事灵感暂时无法读取");
     error.value = failure.message;
@@ -52,7 +49,7 @@ async function load() {
 }
 
 async function sendMessage() {
-  if (!snapshot.value || !message.value.trim()) return;
+  if (!snapshot.value || !message.value.trim() || paidBlockedReason.value) return;
   sending.value = true;
   error.value = "";
   const text = message.value.trim();
@@ -136,7 +133,7 @@ onMounted(load);
       </div>
       <form class="composer" @submit.prevent="sendMessage">
         <textarea v-model="message" rows="3" maxlength="4000" placeholder="例如：雨停后，孩子发现猫咪在门口留下一串湿脚印……" @keydown.ctrl.enter="sendMessage" />
-        <div><small>Ctrl + Enter · {{ runtime?.provider.name === "ark" ? "本次会使用付费模型，完成后显示实际用量。" : "测试模式，不会产生模型费用。" }}</small><button class="primary" :disabled="sending || !message.trim()"><span v-if="sending" class="spinner" />生成提案</button></div>
+        <div><small>{{ paidBlockedReason || "Ctrl + Enter · 本次会使用付费模型，完成后显示实际用量。" }}</small><button class="primary" :disabled="sending || !message.trim() || Boolean(paidBlockedReason)"><span v-if="sending" class="spinner" />生成提案</button></div>
       </form>
     </div>
 

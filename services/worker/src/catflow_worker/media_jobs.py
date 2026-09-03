@@ -6,7 +6,6 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from PIL import Image, ImageDraw
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -15,15 +14,14 @@ from catflow.infrastructure.models import (
     AssetRecord,
     EditVersionRecord,
     JobRecord,
-    ShotPlanVersionRecord,
     VideoRepairRecord,
 )
 
 from .project_posters import ProjectPosterGenerator
 
 
-class MediaJobExecutor:
-    """Materialize fake video candidates and formal EDL exports as immutable MP4 assets."""
+class LocalMediaJobExecutor:
+    """Render immutable EDL exports and their local project posters."""
 
     def __init__(
         self,
@@ -49,12 +47,9 @@ class MediaJobExecutor:
             job = session.get(JobRecord, job_id)
             if job is None:
                 raise ValueError("job not found")
-            expected_role = {
-                "generate_image": str(job.frozen_input_json.get("role", "")),
-                "generate_video": "video",
-                "regenerate_video_segment": "repair_candidate",
-                "render_export": "final",
-            }.get(job.kind)
+            if job.kind != "render_export":
+                raise ValueError(f"job kind is not a local media job: {job.kind}")
+            expected_role = "final"
             existing = (
                 session.scalar(
                     select(AssetRecord).where(
@@ -69,228 +64,16 @@ class MediaJobExecutor:
                 if existing.role in {"video", "final"}:
                     self._poster_generator.ensure_for_asset(existing.id)
                 return
-            kind = job.kind
-        if kind == "diagnose_image":
-            self._store_fake_diagnosis(job_id)
-        elif kind == "diagnose_video":
-            self._store_fake_video_diagnosis(job_id)
-        elif kind == "generate_image":
-            self._create_fake_image(job_id)
-        elif kind == "generate_video":
-            self._create_fake_video(job_id)
-        elif kind == "regenerate_video_segment":
-            self._create_fake_video(job_id, repair_candidate=True)
-        elif kind == "render_export":
-            self._render_edit(job_id)
-        else:
-            raise ValueError(f"job kind does not produce media: {kind}")
-        if kind in {"generate_video", "render_export"}:
-            with self._sessions() as session:
-                primary = session.scalar(
-                    select(AssetRecord).where(
-                        AssetRecord.producing_job_id == job_id,
-                        AssetRecord.role == ("video" if kind == "generate_video" else "final"),
-                    )
-                )
-                if primary is not None:
-                    self._poster_generator.ensure_for_asset(primary.id)
-
-    def _store_fake_diagnosis(self, job_id: uuid.UUID) -> None:
-        with self._sessions.begin() as session:
-            job = session.get(JobRecord, job_id)
-            if job is None:
-                raise ValueError("job not found")
-            candidate_id = uuid.UUID(str(job.frozen_input_json["candidateAssetId"]))
-            candidate = session.get(AssetRecord, candidate_id)
-            if candidate is None or candidate.project_id != job.project_id:
-                raise ValueError("diagnosis candidate not found")
-            identity: dict[str, str] = {}
-            if candidate.role in {"episode_child", "pair_scale"}:
-                identity["childMatch"] = "pass"
-            if candidate.role in {"episode_cat", "pair_scale"}:
-                identity["catMatch"] = "pass"
-            if candidate.role == "pair_scale":
-                identity["pairScale"] = "pass"
-            metadata = dict(candidate.metadata_json)
-            metadata["qualityReport"] = {
-                "identity": identity,
-                "style": "pass",
-                "anatomy": "pass",
-                "technical": "pass",
-                "warnings": [],
-            }
-            metadata["diagnosedByJobId"] = str(job.id)
-            candidate.metadata_json = metadata
-
-    def _store_fake_video_diagnosis(self, job_id: uuid.UUID) -> None:
-        with self._sessions.begin() as session:
-            job = session.get(JobRecord, job_id)
-            if job is None:
-                raise ValueError("job not found")
-            asset_id = uuid.UUID(str(job.frozen_input_json["videoAssetId"]))
-            video = session.get(AssetRecord, asset_id)
-            if video is None or video.project_id != job.project_id:
-                raise ValueError("video diagnosis target not found")
-            metadata = dict(video.metadata_json)
-            metadata["videoDiagnosis"] = {
-                "childIdentity": "pass",
-                "catIdentity": "pass",
-                "pairScale": "pass",
-                "styleConsistency": "pass",
-                "anatomy": "pass",
-                "technical": "pass",
-                "causalChainAndActiveEnding": "pass",
-                "warnings": [],
-            }
-            metadata["videoDiagnosisJobId"] = str(job.id)
-            video.metadata_json = metadata
-
-    def _create_fake_image(self, job_id: uuid.UUID) -> None:
+        self._render_edit(job_id)
         with self._sessions() as session:
-            job = session.get(JobRecord, job_id)
-            if job is None:
-                raise ValueError("job not found")
-            role = str(job.frozen_input_json["role"])
-            project_id = job.project_id
-        storage_key = f"generated/{project_id}/image/{job_id}.png"
-        destination = self._media_store.resolve(storage_key)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        canvas = Image.new("RGB", (720, 1280), "#e7d8c7")
-        draw = ImageDraw.Draw(canvas)
-        draw.ellipse((90, 100, 630, 640), fill="#f1e5d4")
-        if role in {"episode_child", "pair_scale"}:
-            draw.ellipse((155, 330, 340, 515), fill="#d7a187", outline="#786c63", width=5)
-            draw.rounded_rectangle(
-                (175, 480, 325, 910), radius=55, fill="#bc7664", outline="#786c63", width=5
-            )
-        if role in {"episode_cat", "pair_scale"}:
-            draw.ellipse((385, 590, 585, 805), fill="#d9d7d0", outline="#786c63", width=5)
-            draw.polygon([(410, 625), (440, 540), (480, 630)], fill="#b9b6ae")
-            draw.polygon([(500, 625), (545, 545), (565, 650)], fill="#b9b6ae")
-            draw.arc((500, 710, 650, 950), 250, 90, fill="#786c63", width=18)
-        if role == "environment":
-            draw.rectangle((80, 210, 640, 1070), fill="#c9b89f", outline="#786c63", width=5)
-            draw.rectangle((150, 300, 570, 730), fill="#e9d8b6", outline="#786c63", width=5)
-            draw.ellipse((250, 850, 470, 1060), fill="#9aaa92")
-        if role == "style_board":
-            palette = ("#d78368", "#869c88", "#d8b893", "#80776e", "#eee3d2")
-            for index, color in enumerate(palette):
-                top = 210 + index * 160
-                draw.rounded_rectangle((120, top, 600, top + 120), radius=35, fill=color)
-        canvas.save(destination, format="PNG", optimize=True)
-        self._persist_asset(
-            job_id,
-            role=role,
-            storage_key=storage_key,
-            path=destination,
-            media_type="image",
-            metadata={"width": 720, "height": 1280, "generator": "fake-image-v1"},
-        )
-
-    def _create_fake_video(self, job_id: uuid.UUID, *, repair_candidate: bool = False) -> None:
-        with self._sessions() as session:
-            job = session.get(JobRecord, job_id)
-            if job is None:
-                raise ValueError("job not found")
-            shot_plan_id = job.frozen_input_json.get("shotPlanVersionId")
-            shot_plan = (
-                session.get(ShotPlanVersionRecord, uuid.UUID(str(shot_plan_id)))
-                if shot_plan_id
-                else None
-            )
-            duration_seconds = (
-                int(job.frozen_input_json.get("providerDurationSeconds", 0))
-                if repair_candidate
-                else int(
-                    job.frozen_input_json.get("durationSeconds")
-                    or (shot_plan.total_duration_seconds if shot_plan is not None else 8)
+            primary = session.scalar(
+                select(AssetRecord).where(
+                    AssetRecord.producing_job_id == job_id,
+                    AssetRecord.role == "final",
                 )
             )
-            if repair_candidate and not 4 <= duration_seconds <= 15:
-                raise ValueError("repair candidate duration must be between 4 and 15 seconds")
-            project_id = job.project_id
-            video_repair_id = job.video_repair_id
-            include_fake_audio = bool(job.frozen_input_json.get("includeFakeAudio", False))
-        storage_key = (
-            f"generated/{project_id}/video-repairs/{job_id}/candidate.mp4"
-            if repair_candidate
-            else f"generated/{project_id}/video/{job_id}.mp4"
-        )
-        destination = self._media_store.resolve(storage_key)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name(f"{destination.stem}.partial.mp4")
-        command = [
-            str(self._ffmpeg_path),
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"color=c=0xE4D2BC:s=480x854:r=24:d={duration_seconds}",
-        ]
-        if include_fake_audio:
-            command.extend(
-                [
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    f"sine=frequency=440:sample_rate=48000:duration={duration_seconds}",
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "1:a:0",
-                ]
-            )
-        command.extend(
-            [
-                "-vf",
-                "format=yuv420p",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-            ]
-        )
-        if include_fake_audio:
-            command.extend(["-c:a", "aac", "-b:a", "96k"])
-        else:
-            command.append("-an")
-        command.extend(["-movflags", "+faststart", str(temporary)])
-        self._run(command)
-        temporary.replace(destination)
-        metadata = self._probe(
-            destination,
-            expected_size=(480, 854),
-            expected_duration_seconds=(duration_seconds if repair_candidate else None),
-        )
-        metadata.update(
-            {
-                "resolution": "480p",
-                "ratio": "9:16",
-                "durationFrames": duration_seconds * 24,
-                "frameRateNumerator": 24,
-                "frameRateDenominator": 1,
-            }
-        )
-        asset_id = self._persist_asset(
-            job_id,
-            role="repair_candidate" if repair_candidate else "video",
-            storage_key=storage_key,
-            path=destination,
-            media_type="video",
-            metadata=metadata,
-        )
-        if repair_candidate:
-            if video_repair_id is None:
-                raise ValueError("repair candidate job has no video repair")
-            with self._sessions.begin() as session:
-                repair = session.get(VideoRepairRecord, video_repair_id)
-                if repair is None or repair.project_id != project_id:
-                    raise ValueError("video repair not found")
-                repair.candidate_asset_id = asset_id
-                repair.status = "candidate_ready"
+            if primary is not None:
+                self._poster_generator.ensure_for_asset(primary.id)
 
     def _render_edit(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:

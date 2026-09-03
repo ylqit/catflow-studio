@@ -179,8 +179,7 @@ class JobRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('plan_story','plan_shots','generate_image','diagnose_image',"
-            "'generate_video','diagnose_video','probe_segment_video_data_url',"
-            "'regenerate_video_segment','render_export')",
+            "'generate_video','diagnose_video','regenerate_video_segment','render_export')",
             name="ck_jobs_kind",
         ),
         CheckConstraint(
