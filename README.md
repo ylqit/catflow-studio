@@ -23,6 +23,20 @@ CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界
 
 浏览器只保存当前项目、查询缓存、面板与 SSE 连接状态。故事、Canon、选择、分镜、Job、Provider task ID、剪辑版本和正式成片全部从 PostgreSQL 投影。
 
+## 项目库
+
+`/projects` 使用适合数百条短片的项目库：每个项目最多属于一个一级收藏夹，并可拥有最多 8 个主题标签；“最近更新、创作中、待处理、已完成、已固定、已归档”均由 PostgreSQL 中的真实故事、分镜、选择、任务和剪辑活动动态投影。项目 `theme` 继续保存创作描述，不被改造成目录。
+
+项目库默认按最近活动日期分组，以 36 条为一页进行游标分页；搜索、收藏夹、标签交集、阶段、日期和排序在服务端完成，不会把数百条项目全部传给浏览器。网格用于快速浏览，管理列表支持批量移动、标签、固定、归档和恢复。归档不会删除媒体或历史，存在运行任务的项目会拒绝归档。
+
+视频或最终成片落盘后，Worker 会幂等提取本地竖屏封面；旧资产可安全补齐：
+
+```powershell
+.\.venv\Scripts\catflow-worker.exe backfill-posters --limit 200
+```
+
+封面失败只会回退到环境图或柔和占位图，不会把已经成功的视频任务改成失败。
+
 ## 项目结构
 
 ```text
@@ -54,7 +68,7 @@ catflow_studio
 .\scripts\configure-existing-postgres.ps1
 ```
 
-脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；截至 `0008_validation_repair_snapshot` 有 15 张业务表，`catflow.alembic_version` 是额外的迁移版本表。
+脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；截至 `0017_project_library` 有 19 张业务表，`catflow.alembic_version` 是额外的迁移版本表。
 
 ## 本机启动
 
@@ -163,7 +177,7 @@ Provider 上限不足时按上述优先级裁剪并记录 `omittedReason`。`sty
 
 ## 逐帧片段修复
 
-剪辑页以恒定 24 fps 和 `[startFrame, endFrame)` 表示正式区间。用户可通过 I/O 键、逐帧/十帧步进和时间线拖动选择任意区间；不足 4 秒的区间会在页面同时显示问题范围与扩展后的 Provider 上下文。每次付费确认只创建一个 `regenerate_video_segment` Job，候选完成后不会自动替换。
+剪辑页以恒定 24 fps 和 `[startFrame, endFrame)` 表示正式区间。用户可通过 I/O 键、逐帧/十帧步进和时间线拖动选择 4–15 秒区间，左右边界不能越过源视频，也不能交叉。Provider 可以在合法问题区间两侧增加连续性上下文，但最终候选核心段始终与原问题区间等长。每次明确生成只创建一个 `regenerate_video_segment` Job，候选完成后不会自动替换。
 
 批准候选必须完成七项质量检查和入/出点接缝检查。服务端随后基于当前时间线哈希创建新的不可变 `EditVersion`（EDL v2），原视频、旧 EditVersion、失败候选和 Provider task ID 全部保留。正式导出使用 FFmpeg 合成前段、批准的候选核心段和后段；默认硬切，可显式选择 2/4/6 帧叠化，输出总帧数保持不变，候选音轨永不进入正式成片，根视频无音轨时继续保持无音轨。
 

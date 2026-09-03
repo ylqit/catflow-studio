@@ -18,6 +18,7 @@ from catflow.infrastructure.database import (
 )
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.object_storage import ObjectPublisherRuntime
+from catflow.infrastructure.postgres_project_library import PostgresProjectLibraryRepository
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow.interfaces.api import AppSettings, create_app
 
@@ -54,7 +55,11 @@ def serve(
     repository = PostgresStudioRepository(sessions)
     repository.active_canon_profile_id()
     application = create_app(
-        StudioService(repository, provider_runtime=provider_runtime),
+        StudioService(
+            repository,
+            provider_runtime=provider_runtime,
+            project_library_repository=PostgresProjectLibraryRepository(sessions),
+        ),
         settings=AppSettings(
             csrf_token=secrets.token_urlsafe(32),
             base_url=runtime.base_url,

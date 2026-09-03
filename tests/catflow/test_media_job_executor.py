@@ -78,14 +78,19 @@ def test_fake_video_result_is_a_valid_immutable_vertical_mp4(tmp_path: Path) -> 
                     select(AssetRecord).where(AssetRecord.producing_job_id == job_id)
                 ).all()
             )
-            assert len(assets) == 1
-            assert assets[0].role == "video"
-            assert assets[0].width == 480
-            assert assets[0].height == 854
-            assert assets[0].metadata_json["resolution"] == "480p"
-            assert assets[0].metadata_json["ratio"] == "9:16"
-            assert 7_900 <= (assets[0].duration_ms or 0) <= 8_100
-            assert (tmp_path / "media" / assets[0].storage_key).is_file()
+            assert {asset.role for asset in assets} == {"video", "project_poster"}
+            video = next(asset for asset in assets if asset.role == "video")
+            poster = next(asset for asset in assets if asset.role == "project_poster")
+            assert video.width == 480
+            assert video.height == 854
+            assert video.metadata_json["resolution"] == "480p"
+            assert video.metadata_json["ratio"] == "9:16"
+            assert 7_900 <= (video.duration_ms or 0) <= 8_100
+            assert poster.width == 360
+            assert poster.height == 640
+            assert poster.metadata_json["sourceAssetId"] == str(video.id)
+            assert (tmp_path / "media" / video.storage_key).is_file()
+            assert (tmp_path / "media" / poster.storage_key).is_file()
     finally:
         with sessions.begin() as session:
             session.execute(
@@ -183,7 +188,9 @@ def test_ffmpeg_export_validates_edl_source_and_records_rendered_asset(tmp_path:
                 )
             )
         executor.store_result(source_job_id)
-        source = service.list_assets(project.id)[0]
+        source = next(
+            asset for asset in service.list_assets(project.id) if asset.role == "video"
+        )
         service.select_asset(project.id, slot="video", asset_id=source.id)
         edit = service.create_edit(
             project.id,

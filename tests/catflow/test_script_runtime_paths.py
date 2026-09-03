@@ -53,3 +53,4 @@ def test_start_script_discards_stale_worker_readiness_before_launch() -> None:
     launch_worker = script.index("$workerProcess = Start-Process @workerStart")
 
     assert ready_path < remove_ready < launch_worker
+    assert "ArgumentList = @('run')" in script

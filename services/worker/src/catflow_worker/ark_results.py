@@ -11,6 +11,7 @@ from catflow.domain.models import DirectorPlanPayload, LifeStoryProposalDraft
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import AssetRecord, JobRecord
 
+from .project_posters import ProjectPosterGenerator
 from .provider_media import LandedProviderMedia, ProviderMediaDownloader
 
 
@@ -25,12 +26,14 @@ class ArkResultLandingService:
         studio_service: StudioService,
         downloader: ProviderMediaDownloader,
         ffprobe_path: Path,
+        poster_generator: ProjectPosterGenerator | None = None,
     ) -> None:
         self._sessions = sessions
         self._media_store = media_store
         self._studio_service = studio_service
         self._downloader = downloader
         self._ffprobe_path = ffprobe_path
+        self._poster_generator = poster_generator
 
     def store_result(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:
@@ -109,9 +112,7 @@ class ArkResultLandingService:
         )
         self._sanitize_result(job_id, asset_id, result)
 
-    def _store_video(
-        self, job_id: uuid.UUID, *, repair_candidate: bool = False
-    ) -> None:
+    def _store_video(self, job_id: uuid.UUID, *, repair_candidate: bool = False) -> None:
         with self._sessions() as session:
             job = session.get(JobRecord, job_id)
             if job is None:
@@ -119,9 +120,7 @@ class ArkResultLandingService:
             existing = session.scalar(
                 select(AssetRecord).where(
                     AssetRecord.producing_job_id == job_id,
-                    AssetRecord.role == (
-                        "repair_candidate" if repair_candidate else "video"
-                    ),
+                    AssetRecord.role == ("repair_candidate" if repair_candidate else "video"),
                 )
             )
             if existing is not None:
@@ -129,6 +128,8 @@ class ArkResultLandingService:
                     self._studio_service.mark_video_repair_candidate_ready(
                         job.video_repair_id, existing.id
                     )
+                elif self._poster_generator is not None:
+                    self._poster_generator.ensure_for_asset(existing.id)
                 return
             project_id = job.project_id
             provider_task_id = job.provider_task_id
@@ -175,9 +176,9 @@ class ArkResultLandingService:
         if repair_candidate:
             if video_repair_id is None:
                 raise ValueError("repair candidate job has no video repair")
-            self._studio_service.mark_video_repair_candidate_ready(
-                video_repair_id, asset_id
-            )
+            self._studio_service.mark_video_repair_candidate_ready(video_repair_id, asset_id)
+        elif self._poster_generator is not None:
+            self._poster_generator.ensure_for_asset(asset_id)
 
     def _store_diagnosis(self, job_id: uuid.UUID, *, metadata_key: str) -> None:
         with self._sessions.begin() as session:

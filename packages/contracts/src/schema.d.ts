@@ -245,6 +245,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/project-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Library */
+        get: operations["project_library_api_v1_project_library_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/project-collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Collections */
+        get: operations["project_collections_api_v1_project_collections_get"];
+        put?: never;
+        /** Create Project Collection */
+        post: operations["create_project_collection_api_v1_project_collections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/project-collections/{collection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Project Collection */
+        patch: operations["update_project_collection_api_v1_project_collections__collection_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/project-collections/{collection_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Project Collection */
+        post: operations["archive_project_collection_api_v1_project_collections__collection_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/project-collections/{collection_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Project Collection */
+        post: operations["restore_project_collection_api_v1_project_collections__collection_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/project-tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Tags */
+        get: operations["project_tags_api_v1_project_tags_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/organization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Organize Project */
+        patch: operations["organize_project_api_v1_projects__project_id__organization_patch"];
+        trace?: never;
+    };
+    "/api/v1/project-library/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Project Library Action */
+        post: operations["project_library_action_api_v1_project_library_actions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}": {
         parameters: {
             query?: never;
@@ -2023,6 +2160,55 @@ export interface components {
             proposals: components["schemas"]["LifeStoryProposalDto"][];
             latestJob?: components["schemas"]["PlannerJobDto"] | null;
         };
+        /** ProjectCollectionCreate */
+        ProjectCollectionCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Colorkey
+             * @default clay
+             * @enum {string}
+             */
+            colorKey: "clay" | "sage" | "sky" | "lavender" | "sand" | "rose";
+        };
+        /** ProjectCollectionDto */
+        ProjectCollectionDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Colorkey
+             * @enum {string}
+             */
+            colorKey: "clay" | "sage" | "sky" | "lavender" | "sand" | "rose";
+            /** Sortorder */
+            sortOrder: number;
+            /** Archived */
+            archived: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** ProjectCollectionPatch */
+        ProjectCollectionPatch: {
+            /** Name */
+            name?: string | null;
+            /** Colorkey */
+            colorKey?: ("clay" | "sage" | "sky" | "lavender" | "sand" | "rose") | null;
+            /** Sortorder */
+            sortOrder?: number | null;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Title */
@@ -2062,6 +2248,121 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** ProjectLibraryBatchActionCommand */
+        ProjectLibraryBatchActionCommand: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "move_collection" | "add_tags" | "remove_tags" | "pin" | "unpin" | "archive" | "restore";
+            /** Projectids */
+            projectIds: string[];
+            /** Collectionid */
+            collectionId?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /** ProjectLibraryBatchResultDto */
+        ProjectLibraryBatchResultDto: {
+            /** Updatedcount */
+            updatedCount: number;
+        };
+        /** ProjectLibraryFacetsDto */
+        ProjectLibraryFacetsDto: {
+            /** Systemviews */
+            systemViews: {
+                [key: string]: number;
+            };
+            /** Stages */
+            stages: {
+                [key: string]: number;
+            };
+            /** Collections */
+            collections: {
+                [key: string]: unknown;
+            }[];
+            /** Tags */
+            tags: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** ProjectLibraryItemDto */
+        ProjectLibraryItemDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Themesummary */
+            themeSummary: string;
+            /** Targetdurationseconds */
+            targetDurationSeconds: number;
+            /** Aspectratio */
+            aspectRatio: string;
+            /** Coverassetid */
+            coverAssetId?: string | null;
+            collection?: components["schemas"]["ProjectCollectionDto"] | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: components["schemas"]["ProjectTagDto"][];
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "story" | "assets" | "storyboard" | "generation" | "editing" | "completed";
+            /**
+             * Attention
+             * @enum {string}
+             */
+            attention: "normal" | "running" | "needs_attention";
+            /**
+             * Attentionreasons
+             * @default []
+             */
+            attentionReasons: string[];
+            /** Pinned */
+            pinned: boolean;
+            /** Archived */
+            archived: boolean;
+            /**
+             * Lastactivityat
+             * Format: date-time
+             */
+            lastActivityAt: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** ProjectLibraryPageDto */
+        ProjectLibraryPageDto: {
+            /** Items */
+            items: components["schemas"]["ProjectLibraryItemDto"][];
+            /** Nextcursor */
+            nextCursor?: string | null;
+            /** Total */
+            total: number;
+            facets: components["schemas"]["ProjectLibraryFacetsDto"];
+        };
+        /** ProjectOrganizationCommand */
+        ProjectOrganizationCommand: {
+            /** Collectionid */
+            collectionId?: string | null;
+            /** Tags */
+            tags?: string[] | null;
+            /** Pinned */
+            pinned?: boolean | null;
+            /** Archived */
+            archived?: boolean | null;
         };
         /** ProjectPatch */
         ProjectPatch: {
@@ -2103,6 +2404,13 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** ProjectTagDto */
+        ProjectTagDto: {
+            /** Name */
+            name: string;
+            /** Normalizedname */
+            normalizedName: string;
         };
         /** ProjectUsageSummaryDto */
         ProjectUsageSummaryDto: {
@@ -3289,6 +3597,310 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_library_api_v1_project_library_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                systemView?: "all" | "recent" | "in_progress" | "needs_attention" | "completed" | "pinned" | "archived";
+                collectionId?: string | null;
+                unassigned?: boolean;
+                tags?: string[] | null;
+                stage?: ("story" | "assets" | "storyboard" | "generation" | "editing" | "completed") | null;
+                dateFrom?: string | null;
+                dateTo?: string | null;
+                sort?: "activity" | "created" | "title" | "stage";
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLibraryPageDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_collections_api_v1_project_collections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCollectionDto"][];
+                };
+            };
+        };
+    };
+    create_project_collection_api_v1_project_collections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCollectionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCollectionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_collection_api_v1_project_collections__collection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCollectionPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCollectionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_project_collection_api_v1_project_collections__collection_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCollectionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_project_collection_api_v1_project_collections__collection_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCollectionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_tags_api_v1_project_tags_get: {
+        parameters: {
+            query?: {
+                query?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    organize_project_api_v1_projects__project_id__organization_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectOrganizationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLibraryItemDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_library_action_api_v1_project_library_actions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectLibraryBatchActionCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLibraryBatchResultDto"];
                 };
             };
             /** @description Validation Error */

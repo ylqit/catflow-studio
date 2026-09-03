@@ -28,6 +28,8 @@ EXPECTED_TABLES = {
     "video_repairs",
     "media_publications",
     "provider_rate_cards",
+    "project_collections",
+    "project_tags",
 }
 
 
@@ -160,6 +162,8 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
         "video_repairs",
         "media_publications",
         "provider_rate_cards",
+        "project_collections",
+        "project_tags",
     }:
         assert f"CREATE TABLE {SCHEMA_NAME}.{table_name}" in sql
     assert "production_runs" not in sql

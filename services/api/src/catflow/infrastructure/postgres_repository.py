@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from catflow.application.project_library import suggested_theme_tags
 from catflow.application.service import (
     FIXED_CANON_ROLES,
     AssetDto,
@@ -68,6 +69,7 @@ from .models import (
     MediaPublicationRecord,
     ProjectRecord,
     ProjectSelectionRecord,
+    ProjectTagRecord,
     ProviderRateCardRecord,
     ShotPlanVersionRecord,
     StoryVersionRecord,
@@ -82,9 +84,7 @@ class PostgresStudioRepository:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
-    def publish_rate_card(
-        self, command: RateCardRevisionCreateCommand
-    ) -> RateCardRevisionDto:
+    def publish_rate_card(self, command: RateCardRevisionCreateCommand) -> RateCardRevisionDto:
         with self._sessions.begin() as session:
             existing_rows = session.scalars(
                 select(ProviderRateCardRecord).where(
@@ -323,6 +323,16 @@ class PostgresStudioRepository:
             )
             session.add(record)
             session.flush()
+            tags = suggested_theme_tags(draft.theme)
+            if tags:
+                session.add_all(
+                    ProjectTagRecord(
+                        project_id=record.id,
+                        name=tag.name,
+                        normalized_name=tag.normalized_name,
+                    )
+                    for tag in tags
+                )
             session.add(LifePlannerSessionRecord(project_id=record.id, context_revision=1))
             session.flush()
             return _project_dto(record)
@@ -1567,9 +1577,11 @@ def _video_repair_dto(record: VideoRepairRecord) -> VideoRepairDto:
         for key, value in record.preview_json.items()
         if key not in {"repairId", "editIntent", "legacyEditIntent"}
     }
-    preview_document.update({
-        "instruction": record.instruction,
-    })
+    preview_document.update(
+        {
+            "instruction": record.instruction,
+        }
+    )
     return VideoRepairDto(
         id=record.id,
         projectId=record.project_id,

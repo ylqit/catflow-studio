@@ -39,6 +39,18 @@ from catflow.domain.video_repairs import (
     validate_issue_range,
 )
 
+from .project_library import (
+    ProjectCollectionCreate,
+    ProjectCollectionDto,
+    ProjectCollectionPatch,
+    ProjectLibraryBatchActionCommand,
+    ProjectLibraryBatchResultDto,
+    ProjectLibraryItemDto,
+    ProjectLibraryPageDto,
+    ProjectLibraryQuery,
+    ProjectLibraryRepository,
+    ProjectOrganizationCommand,
+)
 from .provider_config import ProviderRuntime
 
 
@@ -210,9 +222,7 @@ JobStatus = Literal[
 ]
 
 
-BillingStatus = Literal[
-    "pending", "usage_reported", "calculated", "unpriced", "provider_adjusted"
-]
+BillingStatus = Literal["pending", "usage_reported", "calculated", "unpriced", "provider_adjusted"]
 
 
 class PlannerJobDto(ContractModel):
@@ -360,9 +370,7 @@ class ShotPlanVersionDto(ContractModel):
     director_treatment: DirectorStoryTreatment | None = Field(
         alias="directorTreatment", default=None
     )
-    director_prompt_revision: str | None = Field(
-        alias="directorPromptRevision", default=None
-    )
+    director_prompt_revision: str | None = Field(alias="directorPromptRevision", default=None)
     director_model: str | None = Field(alias="directorModel", default=None)
     director_input_hash: str | None = Field(alias="directorInputHash", default=None)
     active: bool
@@ -378,9 +386,7 @@ class JobPublicationDto(ContractModel):
     id: uuid.UUID
     state: Literal["uploading", "ready", "delete_pending", "deleted", "failed"]
     public_host: str = Field(alias="publicHost")
-    signed_url_expires_at: datetime | None = Field(
-        alias="signedUrlExpiresAt", default=None
-    )
+    signed_url_expires_at: datetime | None = Field(alias="signedUrlExpiresAt", default=None)
     delete_after: datetime = Field(alias="deleteAfter")
 
 
@@ -430,9 +436,7 @@ class GenerationInputSnapshotDto(ContractModel):
     video: GenerationVideoSpecDto
     source: GenerationInputSourceDto
     segment_edit: SegmentEditInputDto | None = Field(alias="segmentEdit", default=None)
-    prompt_compiler_revision: str | None = Field(
-        alias="promptCompilerRevision", default=None
-    )
+    prompt_compiler_revision: str | None = Field(alias="promptCompilerRevision", default=None)
     created_at: datetime = Field(alias="createdAt")
 
 
@@ -553,9 +557,7 @@ class GenerationPreviewDto(ContractModel):
     shot_plan_version_id: uuid.UUID = Field(alias="shotPlanVersionId")
     selection_hash: str = Field(alias="selectionHash")
     duration_seconds: int = Field(alias="durationSeconds", ge=4, le=15)
-    input_snapshot: GenerationInputSnapshotDto | None = Field(
-        alias="inputSnapshot", default=None
-    )
+    input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
     warnings: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -716,9 +718,7 @@ class SegmentRepairPreviewDto(ContractModel):
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
     cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
-    input_snapshot: GenerationInputSnapshotDto | None = Field(
-        alias="inputSnapshot", default=None
-    )
+    input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
 
 
 class VideoRepairDto(ContractModel):
@@ -733,9 +733,9 @@ class VideoRepairDto(ContractModel):
     candidate_core_range: FrameRange = Field(alias="candidateCoreRange")
     provider_duration_seconds: int = Field(alias="providerDurationSeconds")
     selection_policy_version: int = Field(alias="selectionPolicyVersion", ge=1, default=2)
-    legacy_edit_intent: Literal[
-        "action", "character", "object", "environment", "style"
-    ] | None = Field(alias="legacyEditIntent", default=None)
+    legacy_edit_intent: Literal["action", "character", "object", "environment", "style"] | None = (
+        Field(alias="legacyEditIntent", default=None)
+    )
     instruction: str
     prompt: str
     negative_prompt: str = Field(alias="negativePrompt")
@@ -798,9 +798,7 @@ class FinalSelectionCommand(ContractModel):
 class StudioRepository(Protocol):
     def active_canon_profile_id(self) -> uuid.UUID: ...
 
-    def publish_rate_card(
-        self, command: RateCardRevisionCreateCommand
-    ) -> RateCardRevisionDto: ...
+    def publish_rate_card(self, command: RateCardRevisionCreateCommand) -> RateCardRevisionDto: ...
 
     def list_rate_cards(self) -> list[RateCardRevisionDto]: ...
 
@@ -970,9 +968,18 @@ class StudioService:
         repository: StudioRepository,
         *,
         provider_runtime: ProviderRuntime | None = None,
+        project_library_repository: ProjectLibraryRepository | None = None,
     ) -> None:
         self._repository = repository
         self._provider_runtime = provider_runtime or ProviderRuntime.fake()
+        if project_library_repository is not None:
+            self._project_library_repository: ProjectLibraryRepository | None = (
+                project_library_repository
+            )
+        elif isinstance(repository, ProjectLibraryRepository):
+            self._project_library_repository = repository
+        else:
+            self._project_library_repository = None
 
     def preview_validation_run(self) -> ValidationRunPreviewDto:
         manifest = first_release_manifest()
@@ -1049,9 +1056,7 @@ class StudioService:
     def list_rate_cards(self) -> list[RateCardRevisionDto]:
         return self._repository.list_rate_cards()
 
-    def publish_rate_card(
-        self, command: RateCardRevisionCreateCommand
-    ) -> RateCardRevisionDto:
+    def publish_rate_card(self, command: RateCardRevisionCreateCommand) -> RateCardRevisionDto:
         return self._repository.publish_rate_card(command)
 
     def authorize_validation_run(self, command: ValidationRunCreateCommand) -> ValidationRunDto:
@@ -1116,6 +1121,71 @@ class StudioService:
 
     def list_projects(self) -> list[ProjectDto]:
         return self._repository.list_projects()
+
+    def project_library(self, query: ProjectLibraryQuery) -> ProjectLibraryPageDto:
+        return self._require_project_library_repository().list_project_library(query)
+
+    def list_project_collections(self) -> list[ProjectCollectionDto]:
+        return self._require_project_library_repository().list_project_collections()
+
+    def create_project_collection(self, command: ProjectCollectionCreate) -> ProjectCollectionDto:
+        try:
+            return self._require_project_library_repository().create_project_collection(command)
+        except StudioConflictError:
+            raise
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
+
+    def update_project_collection(
+        self, collection_id: uuid.UUID, command: ProjectCollectionPatch
+    ) -> ProjectCollectionDto:
+        try:
+            return self._require_project_library_repository().update_project_collection(
+                collection_id, command
+            )
+        except StudioConflictError:
+            raise
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
+
+    def archive_project_collection(
+        self, collection_id: uuid.UUID, *, archived: bool
+    ) -> ProjectCollectionDto:
+        return self._require_project_library_repository().set_project_collection_archived(
+            collection_id, archived=archived
+        )
+
+    def list_project_tags(self, *, query: str | None = None) -> list[dict[str, object]]:
+        try:
+            return self._require_project_library_repository().list_project_tags(query=query)
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
+
+    def organize_project(
+        self, project_id: uuid.UUID, command: ProjectOrganizationCommand
+    ) -> ProjectLibraryItemDto:
+        self._require_project(project_id)
+        try:
+            return self._require_project_library_repository().organize_project(project_id, command)
+        except StudioConflictError:
+            raise
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
+
+    def apply_project_library_action(
+        self, command: ProjectLibraryBatchActionCommand
+    ) -> ProjectLibraryBatchResultDto:
+        try:
+            return self._require_project_library_repository().apply_project_library_action(command)
+        except StudioConflictError:
+            raise
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
+
+    def _require_project_library_repository(self) -> ProjectLibraryRepository:
+        if self._project_library_repository is None:
+            raise RuntimeError("project library repository is not configured")
+        return self._project_library_repository
 
     def get_project(self, project_id: uuid.UUID) -> ProjectDto | None:
         return self._repository.get_project(project_id)
@@ -1399,9 +1469,7 @@ class StudioService:
         }
         latest_video_job = self._repository.latest_job(project_id, kind="generate_video")
         latest_director_job = self._repository.latest_job(project_id, kind="plan_shots")
-        latest_repair_job = self._repository.latest_job(
-            project_id, kind="regenerate_video_segment"
-        )
+        latest_repair_job = self._repository.latest_job(project_id, kind="regenerate_video_segment")
         return {
             "eventCursor": event_cursor,
             "project": project.model_dump(mode="json", by_alias=True),
@@ -1421,9 +1489,7 @@ class StudioService:
                 None,
             ),
             "selections": {
-                slot: asset.model_dump(
-                    mode="json", by_alias=True, exclude={"storage_key"}
-                )
+                slot: asset.model_dump(mode="json", by_alias=True, exclude={"storage_key"})
                 for slot, asset in selections.items()
             },
             "selectionHash": self.current_selection_hash(project_id),
@@ -2200,9 +2266,7 @@ class StudioService:
             projectId=project_id,
             jobs=usages,
             totals=totals,
-            calculatedCostMicros=sum(
-                item.calculated_cost_micros or 0 for item in usages
-            ),
+            calculatedCostMicros=sum(item.calculated_cost_micros or 0 for item in usages),
             unpricedJobCount=sum(item.billing_status == "unpriced" for item in usages),
         )
 
@@ -2348,11 +2412,7 @@ class StudioService:
             raise StudioConflictError(str(exc)) from exc
 
     def _with_pricing_snapshot(self, job: JobDto) -> JobDto:
-        if (
-            job.provider is not None
-            and job.model is not None
-            and job.pricing_snapshot is None
-        ):
+        if job.provider is not None and job.model is not None and job.pricing_snapshot is None:
             now = datetime.now(UTC)
             card = next(
                 (
@@ -2374,8 +2434,7 @@ class StudioService:
                             "sourceUrl": card.source_url,
                             "effectiveFrom": card.effective_from.isoformat(),
                             "rates": [
-                                rate.model_dump(mode="json", by_alias=True)
-                                for rate in card.rates
+                                rate.model_dump(mode="json", by_alias=True) for rate in card.rates
                             ],
                         },
                     }

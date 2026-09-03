@@ -6,6 +6,22 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from catflow.application.project_library import (
+    ProjectCollectionCreate,
+    ProjectCollectionDto,
+    ProjectCollectionPatch,
+    ProjectLibraryBatchActionCommand,
+    ProjectLibraryBatchResultDto,
+    ProjectLibraryItemDto,
+    ProjectLibraryPageDto,
+    ProjectLibraryQuery,
+    ProjectOrganizationCommand,
+    ProjectTagDto,
+    normalize_organization_name,
+    normalize_tags,
+    project_library_page,
+    suggested_theme_tags,
+)
 from catflow.application.service import (
     FIXED_CANON_ROLES,
     AssetDto,
@@ -105,6 +121,11 @@ class MemoryStudioRepository:
             )
         ]
         self._projects: dict[uuid.UUID, ProjectDto] = {}
+        self._project_collections: dict[uuid.UUID, ProjectCollectionDto] = {}
+        self._project_collection_ids: dict[uuid.UUID, uuid.UUID | None] = {}
+        self._project_tags: dict[uuid.UUID, tuple[ProjectTagDto, ...]] = {}
+        self._project_pinned_at: dict[uuid.UUID, datetime | None] = {}
+        self._project_archived_at: dict[uuid.UUID, datetime | None] = {}
         self._planner_sessions: dict[uuid.UUID, tuple[uuid.UUID, int]] = {}
         self._messages: dict[uuid.UUID, list[PlannerMessageDto]] = {}
         self._proposals: dict[uuid.UUID, LifeStoryProposalDto] = {}
@@ -120,9 +141,7 @@ class MemoryStudioRepository:
         self._validation_runs: dict[uuid.UUID, ValidationRunDto] = {}
         self._environment_presets: list[EnvironmentPresetDto] = []
 
-    def publish_rate_card(
-        self, command: RateCardRevisionCreateCommand
-    ) -> RateCardRevisionDto:
+    def publish_rate_card(self, command: RateCardRevisionCreateCommand) -> RateCardRevisionDto:
         existing = next(
             (
                 item
@@ -207,9 +226,7 @@ class MemoryStudioRepository:
         self._assets[asset.id] = asset
         return asset
 
-    def publish_canon_revision(
-        self, command: CanonRevisionCreateCommand
-    ) -> CanonProfileDto:
+    def publish_canon_revision(self, command: CanonRevisionCreateCommand) -> CanonProfileDto:
         fixed: dict[FixedCanonRole, AssetDto] = {}
         for role in FIXED_CANON_ROLES:
             asset = self._assets.get(command.fixed_assets[role])
@@ -268,9 +285,7 @@ class MemoryStudioRepository:
     def latest_validation_run(self) -> ValidationRunDto | None:
         return next(reversed(self._validation_runs.values()), None)
 
-    def set_validation_run_status(
-        self, run_id: uuid.UUID, status: str
-    ) -> ValidationRunDto:
+    def set_validation_run_status(self, run_id: uuid.UUID, status: str) -> ValidationRunDto:
         run = self._validation_runs.get(run_id)
         if run is None:
             raise StudioNotFoundError("validation run not found")
@@ -304,6 +319,10 @@ class MemoryStudioRepository:
             updatedAt=now,
         )
         self._projects[project.id] = project
+        self._project_collection_ids[project.id] = None
+        self._project_pinned_at[project.id] = None
+        self._project_archived_at[project.id] = None
+        self._project_tags[project.id] = suggested_theme_tags(draft.theme)
         session_id = uuid.uuid4()
         self._planner_sessions[project.id] = (session_id, 1)
         self._messages[session_id] = []
@@ -311,6 +330,317 @@ class MemoryStudioRepository:
 
     def list_projects(self) -> list[ProjectDto]:
         return sorted(self._projects.values(), key=lambda project: project.created_at, reverse=True)
+
+    def list_project_library(self, query: ProjectLibraryQuery) -> ProjectLibraryPageDto:
+        return project_library_page(
+            [self._project_library_item(project_id) for project_id in self._projects],
+            query,
+        )
+
+    def list_project_collections(
+        self, *, include_archived: bool = False
+    ) -> list[ProjectCollectionDto]:
+        return sorted(
+            [
+                item
+                for item in self._project_collections.values()
+                if include_archived or not item.archived
+            ],
+            key=lambda item: (item.sort_order, item.name.casefold()),
+        )
+
+    def create_project_collection(self, command: ProjectCollectionCreate) -> ProjectCollectionDto:
+        name, normalized = normalize_organization_name(command.name, maximum_length=40)
+        if any(
+            normalize_organization_name(item.name, maximum_length=40)[1] == normalized
+            and not item.archived
+            for item in self._project_collections.values()
+        ):
+            raise StudioConflictError("collection name already exists")
+        now = datetime.now(UTC)
+        collection = ProjectCollectionDto(
+            id=uuid.uuid4(),
+            name=name,
+            colorKey=command.color_key,
+            sortOrder=len(self._project_collections),
+            archived=False,
+            createdAt=now,
+            updatedAt=now,
+        )
+        self._project_collections[collection.id] = collection
+        return collection
+
+    def update_project_collection(
+        self, collection_id: uuid.UUID, command: ProjectCollectionPatch
+    ) -> ProjectCollectionDto:
+        current = self._project_collections.get(collection_id)
+        if current is None:
+            raise StudioNotFoundError("project collection not found")
+        name = current.name
+        if command.name is not None:
+            name, normalized = normalize_organization_name(command.name, maximum_length=40)
+            if any(
+                item.id != collection_id
+                and normalize_organization_name(item.name, maximum_length=40)[1] == normalized
+                and not item.archived
+                for item in self._project_collections.values()
+            ):
+                raise StudioConflictError("collection name already exists")
+        updated = current.model_copy(
+            update={
+                "name": name,
+                "color_key": command.color_key or current.color_key,
+                "sort_order": (
+                    command.sort_order if command.sort_order is not None else current.sort_order
+                ),
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._project_collections[collection_id] = updated
+        return updated
+
+    def set_project_collection_archived(
+        self, collection_id: uuid.UUID, *, archived: bool
+    ) -> ProjectCollectionDto:
+        current = self._project_collections.get(collection_id)
+        if current is None:
+            raise StudioNotFoundError("project collection not found")
+        if not archived:
+            normalized = normalize_organization_name(current.name, maximum_length=40)[1]
+            if any(
+                item.id != collection_id
+                and not item.archived
+                and normalize_organization_name(item.name, maximum_length=40)[1] == normalized
+                for item in self._project_collections.values()
+            ):
+                raise StudioConflictError("collection name already exists")
+        updated = current.model_copy(update={"archived": archived, "updated_at": datetime.now(UTC)})
+        self._project_collections[collection_id] = updated
+        if archived:
+            now = datetime.now(UTC)
+            for project_id, assigned_id in self._project_collection_ids.items():
+                if assigned_id == collection_id:
+                    self._project_collection_ids[project_id] = None
+                    self._projects[project_id] = self._projects[project_id].model_copy(
+                        update={"updated_at": now}
+                    )
+        return updated
+
+    def list_project_tags(self, *, query: str | None = None) -> list[dict[str, object]]:
+        counts: dict[str, tuple[str, int]] = {}
+        needle = (query or "").strip().casefold()
+        for tags in self._project_tags.values():
+            for tag in tags:
+                if needle and needle not in tag.normalized_name:
+                    continue
+                display, count = counts.get(tag.normalized_name, (tag.name, 0))
+                counts[tag.normalized_name] = (display, count + 1)
+        return [
+            {"name": name, "count": count}
+            for _, (name, count) in sorted(counts.items(), key=lambda item: (-item[1][1], item[0]))
+        ]
+
+    def organize_project(
+        self, project_id: uuid.UUID, command: ProjectOrganizationCommand
+    ) -> ProjectLibraryItemDto:
+        if project_id not in self._projects:
+            raise StudioNotFoundError("project not found")
+        if "collection_id" in command.model_fields_set:
+            self._require_active_collection(command.collection_id)
+        if command.archived:
+            self._require_projects_not_running((project_id,))
+        now = datetime.now(UTC)
+        if "collection_id" in command.model_fields_set:
+            self._project_collection_ids[project_id] = command.collection_id
+        if command.tags is not None:
+            self._project_tags[project_id] = normalize_tags(list(command.tags))
+        if command.pinned is not None:
+            self._project_pinned_at[project_id] = now if command.pinned else None
+        if command.archived is not None:
+            self._project_archived_at[project_id] = now if command.archived else None
+        self._projects[project_id] = self._projects[project_id].model_copy(
+            update={"updated_at": now}
+        )
+        return self._project_library_item(project_id)
+
+    def apply_project_library_action(
+        self, command: ProjectLibraryBatchActionCommand
+    ) -> ProjectLibraryBatchResultDto:
+        missing = [
+            project_id for project_id in command.project_ids if project_id not in self._projects
+        ]
+        if missing:
+            raise StudioNotFoundError("project not found")
+        if command.action == "move_collection":
+            self._require_active_collection(command.collection_id)
+        if command.action == "archive":
+            self._require_projects_not_running(command.project_ids)
+        normalized_tags = normalize_tags(list(command.tags)) if command.tags else ()
+        added_tags: dict[uuid.UUID, tuple[ProjectTagDto, ...]] = {}
+        if command.action == "add_tags":
+            for project_id in command.project_ids:
+                current = self._project_tags.get(project_id, ())
+                added_tags[project_id] = normalize_tags(
+                    [*(tag.name for tag in current), *(tag.name for tag in normalized_tags)]
+                )
+        now = datetime.now(UTC)
+        for project_id in command.project_ids:
+            if command.action == "move_collection":
+                self._project_collection_ids[project_id] = command.collection_id
+            elif command.action == "add_tags":
+                self._project_tags[project_id] = added_tags[project_id]
+            elif command.action == "remove_tags":
+                removed = {tag.normalized_name for tag in normalized_tags}
+                self._project_tags[project_id] = tuple(
+                    tag
+                    for tag in self._project_tags.get(project_id, ())
+                    if tag.normalized_name not in removed
+                )
+            elif command.action == "pin":
+                self._project_pinned_at[project_id] = now
+            elif command.action == "unpin":
+                self._project_pinned_at[project_id] = None
+            elif command.action == "archive":
+                self._project_archived_at[project_id] = now
+            elif command.action == "restore":
+                self._project_archived_at[project_id] = None
+            self._projects[project_id] = self._projects[project_id].model_copy(
+                update={"updated_at": now}
+            )
+        return ProjectLibraryBatchResultDto(updatedCount=len(command.project_ids))
+
+    def _require_active_collection(self, collection_id: uuid.UUID | None) -> None:
+        if collection_id is None:
+            return
+        collection = self._project_collections.get(collection_id)
+        if collection is None or collection.archived:
+            raise StudioNotFoundError("project collection not found")
+
+    def _require_projects_not_running(self, project_ids: tuple[uuid.UUID, ...]) -> None:
+        active_statuses = {
+            "queued",
+            "submitting",
+            "submitted",
+            "polling",
+            "storing",
+            "cancel_requested",
+        }
+        if any(
+            job.project_id in project_ids and job.status in active_statuses
+            for job in self._jobs.values()
+        ):
+            raise StudioConflictError("running projects cannot be archived")
+
+    def _project_library_item(self, project_id: uuid.UUID) -> ProjectLibraryItemDto:
+        project = self._projects[project_id]
+        stories = self._stories.get(project_id, [])
+        active_story = next((item for item in reversed(stories) if item.active), None)
+        plans = self._shot_plans.get(project_id, [])
+        active_plan = next((item for item in reversed(plans) if item.active), None)
+        selections = self.current_selections(project_id)
+        production_slots = {
+            "episode_child",
+            "episode_cat",
+            "pair_scale",
+            "environment",
+            "style_board",
+        }
+        current_selection_hash = _library_selection_hash(selections)
+        plan_outdated = active_plan is not None and (
+            active_story is None
+            or active_plan.source_story_version_id != active_story.id
+            or active_plan.source_selection_hash != current_selection_hash
+        )
+        if active_story is None:
+            stage = "story"
+        elif not production_slots <= selections.keys():
+            stage = "assets"
+        elif active_plan is None or plan_outdated:
+            stage = "storyboard"
+        elif "video" not in selections:
+            stage = "generation"
+        elif "final" not in selections:
+            stage = "editing"
+        else:
+            stage = "completed"
+
+        project_jobs = [job for job in self._jobs.values() if job.project_id == project_id]
+        latest_by_kind: dict[str, JobDto] = {}
+        for job in sorted(project_jobs, key=lambda item: item.updated_at):
+            latest_by_kind[job.kind] = job
+        active_statuses = {
+            "queued",
+            "submitting",
+            "submitted",
+            "polling",
+            "storing",
+            "cancel_requested",
+        }
+        reasons: list[str] = []
+        if any(job.status == "submission_unknown" for job in latest_by_kind.values()):
+            reasons.append("submission_unknown")
+        if any(job.status == "failed" for job in latest_by_kind.values()):
+            reasons.append("generation_failed")
+        if plan_outdated:
+            reasons.append("storyboard_outdated")
+        if any(
+            repair.project_id == project_id and repair.status == "candidate_ready"
+            for repair in self._video_repairs.values()
+        ):
+            reasons.append("edit_candidate_ready")
+        if "video" not in selections and any(
+            job.kind == "generate_video" and job.status == "succeeded" and job.result_asset_ids
+            for job in latest_by_kind.values()
+        ):
+            reasons.append("video_candidate_ready")
+        if reasons:
+            attention = "needs_attention"
+        elif any(job.status in active_statuses for job in latest_by_kind.values()):
+            attention = "running"
+        else:
+            attention = "normal"
+
+        activity_times = [project.updated_at, project.created_at]
+        activity_times.extend(item.created_at for item in stories)
+        activity_times.extend(item.created_at for item in plans)
+        activity_times.extend(item.created_at for item in self._selections.get(project_id, []))
+        activity_times.extend(item.updated_at for item in project_jobs)
+        activity_times.extend(item.created_at for item in self._edits.get(project_id, []))
+        collection_id = self._project_collection_ids.get(project_id)
+        collection = self._project_collections.get(collection_id) if collection_id else None
+        project_assets = [
+            asset for asset in self._assets.values() if asset.project_id == project_id
+        ]
+        preferred_cover_source = selections.get("final") or selections.get("video")
+        poster = next(
+            (
+                asset
+                for asset in reversed(project_assets)
+                if asset.role == "project_poster"
+                and preferred_cover_source is not None
+                and asset.metadata.get("sourceAssetId") == str(preferred_cover_source.id)
+            ),
+            None,
+        )
+        cover = poster or selections.get("environment")
+        return ProjectLibraryItemDto(
+            id=project.id,
+            title=project.title,
+            themeSummary=project.theme[:80],
+            targetDurationSeconds=project.target_duration_seconds,
+            aspectRatio=project.aspect_ratio,
+            coverAssetId=cover.id if cover is not None and cover.media_type == "image" else None,
+            collection=collection,
+            tags=self._project_tags.get(project_id, ()),
+            stage=stage,
+            attention=attention,
+            attentionReasons=tuple(reasons),
+            pinned=self._project_pinned_at.get(project_id) is not None,
+            archived=self._project_archived_at.get(project_id) is not None,
+            lastActivityAt=max(activity_times),
+            createdAt=project.created_at,
+            search_text=project.theme,
+        )
 
     def get_project(self, project_id: uuid.UUID) -> ProjectDto | None:
         return self._projects.get(project_id)
@@ -626,8 +956,7 @@ class MemoryStudioRepository:
         self._selections.setdefault(project_id, []).append(selection)
         if slot == "environment":
             self._environment_presets = [
-                preset.model_copy(update={"active": False})
-                for preset in self._environment_presets
+                preset.model_copy(update={"active": False}) for preset in self._environment_presets
             ]
             self._environment_presets.insert(
                 0,
@@ -687,12 +1016,8 @@ class MemoryStudioRepository:
                 None,
             )
             if duplicate is not None:
-                raise StudioConflictError(
-                    "validation run already has this project call"
-                )
-            self.reserve_validation_call(
-                job.validation_run_id, ValidationCallKind(job.kind)
-            )
+                raise StudioConflictError("validation run already has this project call")
+            self.reserve_validation_call(job.validation_run_id, ValidationCallKind(job.kind))
         self._jobs[job.id] = job
         self._jobs_by_idempotency[job.idempotency_key] = job.id
         self._record_event(job, "job.queued")
@@ -808,11 +1133,7 @@ class MemoryStudioRepository:
 
     def active_edit(self, project_id: uuid.UUID) -> EditVersionDto | None:
         return next(
-            (
-                edit
-                for edit in reversed(self._edits.get(project_id, []))
-                if edit.active
-            ),
+            (edit for edit in reversed(self._edits.get(project_id, [])) if edit.active),
             None,
         )
 
@@ -952,6 +1273,24 @@ class MemoryStudioRepository:
 
 def _selection_source_hash(project_id: uuid.UUID, slot: str, asset: AssetDto) -> str:
     document = {"projectId": str(project_id), "slot": slot, "sha256": asset.sha256}
+    return hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _library_selection_hash(selections: dict[str, AssetDto]) -> str:
+    production_slots = {
+        "episode_child",
+        "episode_cat",
+        "pair_scale",
+        "environment",
+        "style_board",
+    }
+    document = {
+        slot: {"assetId": str(asset.id), "sha256": asset.sha256}
+        for slot, asset in sorted(selections.items())
+        if slot in production_slots
+    }
     return hashlib.sha256(
         json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

@@ -6,15 +6,30 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
+from catflow.application.project_library import (
+    ProjectCollectionCreate,
+    ProjectCollectionDto,
+    ProjectCollectionPatch,
+    ProjectLibraryBatchActionCommand,
+    ProjectLibraryBatchResultDto,
+    ProjectLibraryItemDto,
+    ProjectLibraryPageDto,
+    ProjectLibraryQuery,
+    ProjectLibrarySort,
+    ProjectOrganizationCommand,
+    ProjectStage,
+    ProjectSystemView,
+)
 from catflow.application.service import (
     AssetDto,
     AssetGenerationCommand,
@@ -138,9 +153,7 @@ def create_app(
         return await call_next(request)
 
     @app.exception_handler(StudioInputChangedError)
-    async def handle_input_changed(
-        _request: Request, exc: StudioInputChangedError
-    ) -> JSONResponse:
+    async def handle_input_changed(_request: Request, exc: StudioInputChangedError) -> JSONResponse:
         return JSONResponse(
             status_code=409,
             content={
@@ -326,6 +339,101 @@ def create_app(
     def list_projects() -> list[ProjectDto]:
         return service.list_projects()
 
+    @app.get("/api/v1/project-library", response_model=ProjectLibraryPageDto)
+    def project_library(
+        q: str | None = Query(default=None, max_length=200),
+        system_view: ProjectSystemView = Query(default="all", alias="systemView"),
+        collection_id: uuid.UUID | None = Query(default=None, alias="collectionId"),
+        unassigned: bool = Query(default=False),
+        tags: list[str] | None = Query(default=None),
+        stage_filter: ProjectStage | None = Query(default=None, alias="stage"),
+        date_from: datetime | None = Query(default=None, alias="dateFrom"),
+        date_to: datetime | None = Query(default=None, alias="dateTo"),
+        sort_order: ProjectLibrarySort = Query(default="activity", alias="sort"),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=36, ge=12, le=60),
+    ) -> ProjectLibraryPageDto:
+        try:
+            query = ProjectLibraryQuery(
+                q=q,
+                systemView=system_view,
+                collectionId=collection_id,
+                unassigned=unassigned,
+                tags=tuple(tags or ()),
+                stage=stage_filter,
+                dateFrom=date_from,
+                dateTo=date_to,
+                sort=sort_order,
+                cursor=cursor,
+                limit=limit,
+            )
+            return service.project_library(query)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/v1/project-collections", response_model=list[ProjectCollectionDto])
+    def project_collections() -> list[ProjectCollectionDto]:
+        return service.list_project_collections()
+
+    @app.post(
+        "/api/v1/project-collections",
+        response_model=ProjectCollectionDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_project_collection(command: ProjectCollectionCreate) -> ProjectCollectionDto:
+        return service.create_project_collection(command)
+
+    @app.patch(
+        "/api/v1/project-collections/{collection_id}",
+        response_model=ProjectCollectionDto,
+    )
+    def update_project_collection(
+        collection_id: uuid.UUID, command: ProjectCollectionPatch
+    ) -> ProjectCollectionDto:
+        return service.update_project_collection(collection_id, command)
+
+    @app.post(
+        "/api/v1/project-collections/{collection_id}/archive",
+        response_model=ProjectCollectionDto,
+    )
+    def archive_project_collection(
+        collection_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+    ) -> ProjectCollectionDto:
+        return service.archive_project_collection(collection_id, archived=True)
+
+    @app.post(
+        "/api/v1/project-collections/{collection_id}/restore",
+        response_model=ProjectCollectionDto,
+    )
+    def restore_project_collection(
+        collection_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+    ) -> ProjectCollectionDto:
+        return service.archive_project_collection(collection_id, archived=False)
+
+    @app.get("/api/v1/project-tags")
+    def project_tags(
+        query: str | None = Query(default=None, max_length=24),
+    ) -> list[dict[str, object]]:
+        return service.list_project_tags(query=query)
+
+    @app.patch(
+        "/api/v1/projects/{project_id}/organization",
+        response_model=ProjectLibraryItemDto,
+    )
+    def organize_project(
+        project_id: uuid.UUID, command: ProjectOrganizationCommand
+    ) -> ProjectLibraryItemDto:
+        return service.organize_project(project_id, command)
+
+    @app.post(
+        "/api/v1/project-library/actions",
+        response_model=ProjectLibraryBatchResultDto,
+    )
+    def project_library_action(
+        command: ProjectLibraryBatchActionCommand,
+    ) -> ProjectLibraryBatchResultDto:
+        return service.apply_project_library_action(command)
+
     @app.post("/api/v1/projects", response_model=ProjectDto, status_code=status.HTTP_201_CREATED)
     def create_project(draft: ProjectCreate) -> ProjectDto:
         return service.create_project(draft)
@@ -399,9 +507,7 @@ def create_app(
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
     )
-    def generate_shot_plan(
-        project_id: uuid.UUID, command: ShotPlanGenerationCommand
-    ) -> JobDto:
+    def generate_shot_plan(project_id: uuid.UUID, command: ShotPlanGenerationCommand) -> JobDto:
         return service.create_shot_plan_generation_job(project_id, command)
 
     @app.post(

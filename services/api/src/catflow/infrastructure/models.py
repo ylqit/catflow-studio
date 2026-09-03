@@ -54,6 +54,33 @@ class CanonProfileRecord(Base):
     )
 
 
+class ProjectCollectionRecord(Base):
+    __tablename__ = "project_collections"
+    __table_args__ = (
+        Index(
+            "uq_project_collections_active_name",
+            "normalized_name",
+            unique=True,
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+        Index("ix_project_collections_sort", "sort_order", "name"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    color_key: Mapped[str] = mapped_column(String(16), nullable=False, default="clay")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ProjectRecord(Base):
     __tablename__ = "projects"
     __table_args__ = (
@@ -72,11 +99,39 @@ class ProjectRecord(Base):
         ForeignKey(f"{SCHEMA_NAME}.canon_profiles.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    collection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.project_collections.id", ondelete="SET NULL"),
+    )
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProjectTagRecord(Base):
+    __tablename__ = "project_tags"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "normalized_name", name="uq_project_tags_project_normalized"
+        ),
+        Index("ix_project_tags_normalized", "normalized_name"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    name: Mapped[str] = mapped_column(String(24), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(24), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

@@ -111,6 +111,82 @@ export interface ProjectDto extends ProjectCreate {
   updatedAt: string;
 }
 
+export type ProjectStage = "story" | "assets" | "storyboard" | "generation" | "editing" | "completed";
+export type ProjectAttention = "normal" | "running" | "needs_attention";
+export type ProjectSystemView = "all" | "recent" | "in_progress" | "needs_attention" | "completed" | "pinned" | "archived";
+export type ProjectLibrarySort = "activity" | "created" | "title" | "stage";
+export type ProjectLibraryGroupMode = "date" | "collection" | "none";
+export type ProjectLibraryLayout = "grid" | "list";
+
+export interface ProjectCollectionDto {
+  id: string;
+  name: string;
+  colorKey: "clay" | "sage" | "sky" | "lavender" | "sand" | "rose";
+  sortOrder: number;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectTagDto { name: string; normalizedName: string }
+
+export interface ProjectLibraryItemDto {
+  id: string;
+  title: string;
+  themeSummary: string;
+  targetDurationSeconds: number;
+  aspectRatio: "9:16";
+  coverAssetId?: string | null;
+  collection?: ProjectCollectionDto | null;
+  tags: ProjectTagDto[];
+  stage: ProjectStage;
+  attention: ProjectAttention;
+  attentionReasons: string[];
+  pinned: boolean;
+  archived: boolean;
+  lastActivityAt: string;
+  createdAt: string;
+}
+
+export interface ProjectLibraryFacetsDto {
+  systemViews: Record<ProjectSystemView, number>;
+  stages: Record<ProjectStage, number>;
+  collections: Array<{ id: string; name: string; count: number }>;
+  tags: Array<{ name: string; count: number }>;
+}
+
+export interface ProjectTagSuggestionDto {
+  name: string;
+  count: number;
+}
+
+export interface ProjectLibraryPageDto {
+  items: ProjectLibraryItemDto[];
+  nextCursor?: string | null;
+  total: number;
+  facets: ProjectLibraryFacetsDto;
+}
+
+export interface ProjectLibraryQuery {
+  q?: string;
+  systemView?: ProjectSystemView;
+  collectionId?: string;
+  unassigned?: boolean;
+  tags?: string[];
+  stage?: ProjectStage;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: ProjectLibrarySort;
+  cursor?: string;
+  limit?: number;
+}
+
+export type ProjectLibraryBatchAction =
+  | { action: "move_collection"; projectIds: string[]; collectionId: string | null }
+  | { action: "add_tags"; projectIds: string[]; tags: string[] }
+  | { action: "remove_tags"; projectIds: string[]; tags: string[] }
+  | { action: "pin" | "unpin" | "archive" | "restore"; projectIds: string[] };
+
 export type GenerationInputSnapshotDto = components["schemas"]["GenerationInputSnapshotDto"];
 
 export interface JobDto {

@@ -19,6 +19,8 @@ from catflow.infrastructure.models import (
     VideoRepairRecord,
 )
 
+from .project_posters import ProjectPosterGenerator
+
 
 class MediaJobExecutor:
     """Materialize fake video candidates and formal EDL exports as immutable MP4 assets."""
@@ -30,11 +32,17 @@ class MediaJobExecutor:
         *,
         ffmpeg_path: Path,
         ffprobe_path: Path,
+        poster_generator: ProjectPosterGenerator | None = None,
     ) -> None:
         self._sessions = sessions
         self._media_store = media_store
         self._ffmpeg_path = ffmpeg_path
         self._ffprobe_path = ffprobe_path
+        self._poster_generator = poster_generator or ProjectPosterGenerator(
+            sessions,
+            media_store,
+            ffmpeg_path=ffmpeg_path,
+        )
 
     def store_result(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:
@@ -58,6 +66,8 @@ class MediaJobExecutor:
                 else None
             )
             if existing is not None:
+                if existing.role in {"video", "final"}:
+                    self._poster_generator.ensure_for_asset(existing.id)
                 return
             kind = job.kind
         if kind == "diagnose_image":
@@ -74,6 +84,16 @@ class MediaJobExecutor:
             self._render_edit(job_id)
         else:
             raise ValueError(f"job kind does not produce media: {kind}")
+        if kind in {"generate_video", "render_export"}:
+            with self._sessions() as session:
+                primary = session.scalar(
+                    select(AssetRecord).where(
+                        AssetRecord.producing_job_id == job_id,
+                        AssetRecord.role == ("video" if kind == "generate_video" else "final"),
+                    )
+                )
+                if primary is not None:
+                    self._poster_generator.ensure_for_asset(primary.id)
 
     def _store_fake_diagnosis(self, job_id: uuid.UUID) -> None:
         with self._sessions.begin() as session:

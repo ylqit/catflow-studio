@@ -13,7 +13,13 @@ import type {
   PlannerSnapshotDto,
   ObjectPublisherRuntimeDto,
   ProjectCreate,
+  ProjectCollectionDto,
   ProjectDto,
+  ProjectLibraryBatchAction,
+  ProjectLibraryItemDto,
+  ProjectLibraryPageDto,
+  ProjectLibraryQuery,
+  ProjectTagSuggestionDto,
   ProjectUsageSummaryDto,
   RateCardRevisionDto,
   RuntimeBootstrapDto,
@@ -28,6 +34,7 @@ import type {
   ValidationRunPreviewDto,
   VideoRepairDto,
 } from "./types";
+import { buildLibraryQuery } from "../projectLibrary";
 
 export class ApiError extends Error {
   constructor(
@@ -98,6 +105,46 @@ export class CatFlowClient {
 
   projects(): Promise<ProjectDto[]> {
     return this.request("/api/v1/projects");
+  }
+
+  projectLibrary(query: ProjectLibraryQuery = {}): Promise<ProjectLibraryPageDto> {
+    const params = buildLibraryQuery(query);
+    return this.request(`/api/v1/project-library?${params.toString()}`);
+  }
+
+  projectCollections(): Promise<ProjectCollectionDto[]> {
+    return this.request("/api/v1/project-collections");
+  }
+
+  projectTags(query = ""): Promise<ProjectTagSuggestionDto[]> {
+    const params = new URLSearchParams();
+    if (query) params.set("query", query);
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return this.request(`/api/v1/project-tags${suffix}`);
+  }
+
+  createProjectCollection(command: { name: string; colorKey: ProjectCollectionDto["colorKey"] }): Promise<ProjectCollectionDto> {
+    return this.json("/api/v1/project-collections", "POST", command);
+  }
+
+  updateProjectCollection(collectionId: string, command: { name?: string; colorKey?: ProjectCollectionDto["colorKey"]; sortOrder?: number }): Promise<ProjectCollectionDto> {
+    return this.json(`/api/v1/project-collections/${collectionId}`, "PATCH", command);
+  }
+
+  archiveProjectCollection(collectionId: string): Promise<ProjectCollectionDto> {
+    return this.json(`/api/v1/project-collections/${collectionId}/archive`, "POST", {});
+  }
+
+  restoreProjectCollection(collectionId: string): Promise<ProjectCollectionDto> {
+    return this.json(`/api/v1/project-collections/${collectionId}/restore`, "POST", {});
+  }
+
+  organizeProject(projectId: string, command: { collectionId?: string | null; tags?: string[]; pinned?: boolean; archived?: boolean }): Promise<ProjectLibraryItemDto> {
+    return this.json(`/api/v1/projects/${projectId}/organization`, "PATCH", command);
+  }
+
+  projectLibraryAction(command: ProjectLibraryBatchAction): Promise<{ updatedCount: number }> {
+    return this.json("/api/v1/project-library/actions", "POST", command);
   }
 
   createProject(draft: ProjectCreate): Promise<ProjectDto> {

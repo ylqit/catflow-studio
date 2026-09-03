@@ -26,6 +26,7 @@ from .ark_job_gateway import ArkProviderJobGateway
 from .ark_results import ArkResultLandingService
 from .fake_provider import FakeProviderGateway
 from .media_jobs import MediaJobExecutor
+from .project_posters import ProjectPosterGenerator
 from .provider_media import ProviderMediaDownloader
 from .runner import DurableJobWorker
 from .runtime_support import AssetMediaResolver, JobResultDispatcher
@@ -53,11 +54,17 @@ def run_worker(
     sessions = create_session_factory(engine)
     service = StudioService(PostgresStudioRepository(sessions), provider_runtime=provider_runtime)
     media_store = LocalMediaStore(paths.media_root)
+    poster_generator = ProjectPosterGenerator(
+        sessions,
+        media_store,
+        ffmpeg_path=ffmpeg_path,
+    )
     local_results = MediaJobExecutor(
         sessions,
         media_store,
         ffmpeg_path=ffmpeg_path,
         ffprobe_path=ffprobe_path,
+        poster_generator=poster_generator,
     )
     if provider_runtime.provider == "ark":
         typed_gateway = ArkTypedGateway(ArkGatewaySettings.from_env())
@@ -68,8 +75,7 @@ def run_worker(
         )
         segment_publisher = (
             SegmentReferencePublisher(sessions, object_publisher_runtime.store)
-            if object_publisher_runtime.status.ready
-            and object_publisher_runtime.store is not None
+            if object_publisher_runtime.status.ready and object_publisher_runtime.store is not None
             else None
         )
         provider = ArkProviderJobGateway(
@@ -85,6 +91,7 @@ def run_worker(
             studio_service=service,
             downloader=ProviderMediaDownloader(),
             ffprobe_path=ffprobe_path,
+            poster_generator=poster_generator,
         )
     else:
         provider = FakeProviderGateway()
@@ -113,10 +120,7 @@ def run_worker(
     try:
         next_publication_cleanup = time.monotonic()
         while True:
-            if (
-                segment_publisher is not None
-                and time.monotonic() >= next_publication_cleanup
-            ):
+            if segment_publisher is not None and time.monotonic() >= next_publication_cleanup:
                 segment_publisher.delete_due()
                 next_publication_cleanup = time.monotonic() + 60
             handled = worker.run_once()
@@ -139,3 +143,25 @@ def _required_tool(name: str) -> Path:
     if not path.is_file():
         raise typer.BadParameter(f"{name} does not point to a file")
     return path
+
+
+@app.command("backfill-posters")
+def backfill_posters(
+    limit: int = typer.Option(200, min=1, max=10_000),
+) -> None:
+    """Create missing local project posters without changing source videos."""
+    project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
+    load_dotenv(project_root / ".env", override=False)
+    paths = RuntimePaths.from_env(project_root)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    generator = ProjectPosterGenerator(
+        sessions,
+        LocalMediaStore(paths.media_root),
+        ffmpeg_path=_required_tool("FFMPEG_PATH"),
+    )
+    try:
+        processed, failed = generator.backfill_missing(limit=limit)
+        typer.echo(json.dumps({"processed": processed, "failed": failed}))
+    finally:
+        engine.dispose()
