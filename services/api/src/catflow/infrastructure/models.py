@@ -135,6 +135,49 @@ class ProjectTagRecord(Base):
     )
 
 
+class StorySeriesRecord(Base):
+    __tablename__ = "story_series"
+    __table_args__ = (
+        CheckConstraint(
+            "narrative_mode IN ('continuous','lightly_serialized','anthology')",
+            name="ck_story_series_narrative_mode",
+        ),
+        CheckConstraint(
+            "planned_episode_count BETWEEN 2 AND 30", name="ck_story_series_episode_count"
+        ),
+        CheckConstraint(
+            "default_episode_duration_seconds BETWEEN 8 AND 15",
+            name="ck_story_series_duration",
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    premise: Mapped[str] = mapped_column(Text, nullable=False)
+    narrative_mode: Mapped[str] = mapped_column(String(24), nullable=False)
+    planned_episode_count: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    default_episode_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    world_setting: Mapped[str] = mapped_column(Text, nullable=False)
+    emotional_direction: Mapped[str] = mapped_column(Text, nullable=False)
+    ending_goal: Mapped[str | None] = mapped_column(Text)
+    recurring_elements_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    must_keep_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    must_avoid_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    additional_notes: Mapped[str | None] = mapped_column(Text)
+    canon_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.canon_profiles.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ValidationRunRecord(Base):
     __tablename__ = "validation_runs"
     __table_args__ = (
@@ -178,9 +221,15 @@ class JobRecord(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('plan_story','plan_shots','generate_image','diagnose_image',"
-            "'generate_video','diagnose_video','regenerate_video_segment','render_export')",
+            "kind IN ('plan_story','plan_shots','plan_series','plan_series_episode',"
+            "'analyze_story_source','generate_image','diagnose_image','generate_video',"
+            "'diagnose_video','regenerate_video_segment','render_export',"
+            "'extract_continuity_frames')",
             name="ck_jobs_kind",
+        ),
+        CheckConstraint(
+            "num_nonnulls(project_id, series_id, story_source_document_id) = 1",
+            name="ck_jobs_exactly_one_scope",
         ),
         CheckConstraint(
             "status IN ('queued','submitting','submitted','polling','storing','succeeded',"
@@ -204,10 +253,16 @@ class JobRecord(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id: Mapped[uuid.UUID] = mapped_column(
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="CASCADE"),
-        nullable=False,
+    )
+    series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="CASCADE")
+    )
+    story_source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_source_documents.id", ondelete="CASCADE"),
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
@@ -249,6 +304,116 @@ class JobRecord(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StorySourceDocumentRecord(Base):
+    __tablename__ = "story_source_documents"
+    __table_args__ = (
+        CheckConstraint("source_format IN ('paste','txt','md')", name="ck_story_source_format"),
+        CheckConstraint(
+            "status IN ('pending','analyzing','analyzed','confirmed','failed')",
+            name="ck_story_source_status",
+        ),
+        UniqueConstraint("content_hash", name="uq_story_source_content_hash"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_format: Mapped[str] = mapped_column(String(16), nullable=False)
+    file_name: Mapped[str | None] = mapped_column(String(260))
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    analysis_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StorySourceUnitRecord(Base):
+    __tablename__ = "story_source_units"
+    __table_args__ = (
+        UniqueConstraint("document_id", "ordinal", name="uq_story_source_unit_ordinal"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_source_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    theme: Mapped[str | None] = mapped_column(String(200))
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class StorySourceRelationSuggestionRecord(Base):
+    __tablename__ = "story_source_relation_suggestions"
+    __table_args__ = ({"schema": SCHEMA_NAME},)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_source_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    relation_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    suggested_series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="SET NULL")
+    )
+    unit_ids_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    narrative_mode: Mapped[str | None] = mapped_column(String(24))
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class StorySourceMaterializationRecord(Base):
+    __tablename__ = "story_source_materializations"
+    __table_args__ = (
+        UniqueConstraint("suggestion_id", name="uq_story_source_materialization_suggestion"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suggestion_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_source_relation_suggestions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    target_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(96), nullable=False, unique=True)
+    series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="RESTRICT")
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="RESTRICT")
+    )
+    target_series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="RESTRICT")
+    )
+    target_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="RESTRICT")
+    )
+    project_ids_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -540,10 +705,254 @@ class ShotPlanVersionRecord(Base):
     )
 
 
+class SeriesPlanVersionRecord(Base):
+    __tablename__ = "series_plan_versions"
+    __table_args__ = (
+        UniqueConstraint("series_id", "revision", name="uq_series_plan_revision"),
+        UniqueConstraint("producing_job_id", name="uq_series_plan_job"),
+        CheckConstraint(
+            "status IN ('candidate','accepted','rejected','superseded')",
+            name="ck_series_plan_status",
+        ),
+        CheckConstraint(
+            "disposition IN ('candidate_ready','needs_input','invalid')",
+            name="ck_series_plan_disposition",
+        ),
+        CheckConstraint("NOT active OR status = 'accepted'", name="ck_series_plan_active"),
+        Index(
+            "uq_series_plan_active",
+            "series_id",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
+        Index(
+            "uq_series_plan_candidate",
+            "series_id",
+            unique=True,
+            postgresql_where=text("status = 'candidate'"),
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    disposition: Mapped[str] = mapped_column(String(24), nullable=False)
+    plan_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    issues_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_revision: Mapped[str] = mapped_column(String(80), nullable=False)
+    producing_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="RESTRICT"), unique=True
+    )
+    base_plan_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.series_plan_versions.id", ondelete="RESTRICT"),
+    )
+    materialization_idempotency_key: Mapped[str | None] = mapped_column(
+        String(96), unique=True
+    )
+    activation_idempotency_key: Mapped[str | None] = mapped_column(String(96), unique=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SeriesEpisodeRecord(Base):
+    __tablename__ = "series_episodes"
+    __table_args__ = (
+        UniqueConstraint("series_id", "episode_order", name="uq_series_episode_order"),
+        UniqueConstraint("project_id", name="uq_series_episode_project"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    episode_order: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="RESTRICT"),
+        unique=True,
+    )
+    materialization_idempotency_key: Mapped[str | None] = mapped_column(String(96), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SeriesEpisodeOutlineVersionRecord(Base):
+    __tablename__ = "series_episode_outline_versions"
+    __table_args__ = (
+        UniqueConstraint("episode_id", "revision", name="uq_episode_outline_revision"),
+        Index(
+            "uq_episode_outline_active",
+            "episode_id",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.series_episodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_plan_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.series_plan_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    outline_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class EpisodeContinuitySnapshotRecord(Base):
+    __tablename__ = "episode_continuity_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "direction IN ('incoming','outgoing')", name="ck_episode_continuity_direction"
+        ),
+        CheckConstraint(
+            "source IN ('planned','confirmed','final_video')",
+            name="ck_episode_continuity_source",
+        ),
+        Index(
+            "uq_episode_continuity_active",
+            "episode_id",
+            "direction",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.series_episodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    direction: Mapped[str] = mapped_column(String(12), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    decisions_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(96), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SeriesAssetBindingRecord(Base):
+    __tablename__ = "series_asset_bindings"
+    __table_args__ = (
+        Index(
+            "uq_series_asset_binding_active",
+            "series_id",
+            "binding_key",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    binding_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    role: Mapped[str] = mapped_column(String(64), nullable=False)
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ProjectAssetBindingRecord(Base):
+    __tablename__ = "project_asset_bindings"
+    __table_args__ = ({"schema": SCHEMA_NAME},)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    series_asset_binding_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.series_asset_bindings.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    slot: Mapped[str] = mapped_column(String(64), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class EpisodeReferenceManifestRecord(Base):
+    __tablename__ = "episode_reference_manifests"
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_episode_reference_manifest_job"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.series_episodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    continuity_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.episode_continuity_snapshots.id", ondelete="RESTRICT"),
+    )
+    references_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class JobEventRecord(Base):
     __tablename__ = "job_events"
     __table_args__ = (
         Index("ix_job_events_project_id", "project_id", "id"),
+        CheckConstraint(
+            "num_nonnulls(project_id, series_id, story_source_document_id) = 1",
+            name="ck_job_events_exactly_one_scope",
+        ),
         {"schema": SCHEMA_NAME},
     )
 
@@ -551,8 +960,15 @@ class JobEventRecord(Base):
     job_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="CASCADE")
     )
-    project_id: Mapped[uuid.UUID] = mapped_column(
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="CASCADE")
+    )
+    series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="CASCADE")
+    )
+    story_source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.story_source_documents.id", ondelete="CASCADE"),
     )
     event_type: Mapped[str] = mapped_column(String(80), nullable=False)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -659,9 +1075,7 @@ class VideoRepairRecord(Base):
     candidate_core_start_frame: Mapped[int] = mapped_column(Integer, nullable=False)
     candidate_core_end_frame: Mapped[int] = mapped_column(Integer, nullable=False)
     provider_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    selection_policy_version: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, default=2
-    )
+    selection_policy_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
     edit_intent: Mapped[str | None] = mapped_column(String(24))
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)

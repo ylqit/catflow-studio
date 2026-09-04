@@ -39,6 +39,15 @@ from catflow.domain.video_repairs import (
     validate_issue_range,
 )
 
+from .continuity import (
+    EpisodeContinuityConfirmCommand,
+    EpisodeContinuityDto,
+    EpisodeContinuityKeyframesCommand,
+    EpisodeContinuityResetCommand,
+    EpisodeContinuitySnapshotDto,
+    SeriesAssetBindingDto,
+    SeriesAssetBindingsPatchCommand,
+)
 from .image_generation import compile_provider_image_prompt
 from .project_library import (
     ProjectCollectionCreate,
@@ -53,6 +62,45 @@ from .project_library import (
     ProjectOrganizationCommand,
 )
 from .provider_config import ProviderRuntime
+from .series import (
+    ProjectSeriesContextDto,
+    SeriesCreateCommand,
+    SeriesEpisodeDto,
+    SeriesEpisodeMaterializeCommand,
+    SeriesEpisodeStoryGenerationCommand,
+    SeriesEpisodeStoryPreviewDto,
+    SeriesPatchCommand,
+    SeriesPlanActivationCommand,
+    SeriesPlanDraft,
+    SeriesPlanGenerationCommand,
+    SeriesPlanMaterializeCommand,
+    SeriesPlanPreviewDto,
+    SeriesPlanVersionDto,
+    SeriesValidationIssueDto,
+    StorySeriesDto,
+    compile_series_episode_story_preview,
+    compile_series_plan_preview,
+)
+from .story_imports import (
+    StoryImportAnalysisDraft,
+    StoryImportAnalysisJobDto,
+    StoryImportConfirmCommand,
+    StoryImportCreateCommand,
+    StoryImportCreateResultDto,
+    StoryImportMaterializationDto,
+    StoryImportPreviewCommand,
+    StoryImportPreviewDto,
+    StoryImportReanalyzeCommand,
+    StorySourceDocumentDto,
+    compile_story_import_preview,
+)
+from .video_generation import (
+    VIDEO_PROMPT_COMPILER_REVISION,
+    GenerationPromptSectionDto,
+    compile_provider_video_prompt,
+    compile_video_generation_prompt,
+    synchronize_professional_shot_summaries,
+)
 
 
 class StudioConflictError(ValueError):
@@ -166,7 +214,13 @@ class PlannerMessageCommand(ContractModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
-class GenerationCommand(ContractModel):
+class GenerationPreviewCommand(ContractModel):
+    include_previous_episode_video: bool = Field(
+        alias="includePreviousEpisodeVideo", default=False
+    )
+
+
+class GenerationCommand(GenerationPreviewCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -315,6 +369,14 @@ class AssetDto(ContractModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+class EpisodeContinuityFramesDto(ContractModel):
+    episode_id: uuid.UUID = Field(alias="episodeId")
+    source_video_asset_id: uuid.UUID | None = Field(alias="sourceVideoAssetId", default=None)
+    last_frame: AssetDto | None = Field(alias="lastFrame", default=None)
+    candidates: list[AssetDto] = Field(default_factory=list)
+    selected_keyframes: list[AssetDto] = Field(alias="selectedKeyframes", default_factory=list)
+
+
 class StoredAssetDto(AssetDto):
     """Internal persistence projection; never use as an HTTP response model."""
 
@@ -380,9 +442,7 @@ class ShotPlanVersionDto(ContractModel):
         alias="reviewStatus", default="accepted"
     )
     producing_job_id: uuid.UUID | None = Field(alias="producingJobId", default=None)
-    base_shot_plan_version_id: uuid.UUID | None = Field(
-        alias="baseShotPlanVersionId", default=None
-    )
+    base_shot_plan_version_id: uuid.UUID | None = Field(alias="baseShotPlanVersionId", default=None)
     decided_at: datetime | None = Field(alias="decidedAt", default=None)
     active: bool
     outdated: bool = False
@@ -447,9 +507,7 @@ class ShotPlanGenerationAttemptDto(ContractModel):
     job_id: uuid.UUID = Field(alias="jobId")
     status: JobStatus
     story_version_id: uuid.UUID = Field(alias="storyVersionId")
-    base_shot_plan_version_id: uuid.UUID | None = Field(
-        alias="baseShotPlanVersionId", default=None
-    )
+    base_shot_plan_version_id: uuid.UUID | None = Field(alias="baseShotPlanVersionId", default=None)
     result_shot_plan_version_id: uuid.UUID | None = Field(
         alias="resultShotPlanVersionId", default=None
     )
@@ -482,6 +540,14 @@ class GenerationInputReferenceDto(ContractModel):
     derived: bool = False
 
 
+class GenerationInputVideoReferenceDto(ContractModel):
+    asset_id: uuid.UUID = Field(alias="assetId")
+    role: Literal["previous_episode_video"]
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    duration_seconds: float | None = Field(alias="durationSeconds", default=None, gt=0)
+    included: bool
+
+
 class GenerationVideoSpecDto(ContractModel):
     duration_seconds: int = Field(alias="durationSeconds", ge=4, le=15)
     resolution: Literal["480p"]
@@ -505,7 +571,7 @@ class SegmentEditInputDto(ContractModel):
 
 
 class GenerationInputSnapshotDto(ContractModel):
-    schema_version: Literal[1] = Field(alias="schemaVersion")
+    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
     kind: Literal["whole_video", "segment_edit"]
     state: Literal["preview", "submitted"]
     provider: str
@@ -514,7 +580,14 @@ class GenerationInputSnapshotDto(ContractModel):
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
     prompt: str
     negative_prompt: str = Field(alias="negativePrompt")
+    prompt_summary: str | None = Field(alias="promptSummary", default=None)
+    prompt_sections: list[GenerationPromptSectionDto] = Field(
+        alias="promptSections", default_factory=list
+    )
     references: list[GenerationInputReferenceDto]
+    video_references: list[GenerationInputVideoReferenceDto] = Field(
+        alias="videoReferences", default_factory=list
+    )
     video: GenerationVideoSpecDto
     source: GenerationInputSourceDto
     segment_edit: SegmentEditInputDto | None = Field(alias="segmentEdit", default=None)
@@ -542,10 +615,16 @@ class ImageGenerationInputSnapshotDto(ContractModel):
 
 class JobDto(ContractModel):
     id: uuid.UUID
-    project_id: uuid.UUID = Field(alias="projectId")
+    project_id: uuid.UUID | None = Field(alias="projectId", default=None)
+    series_id: uuid.UUID | None = Field(alias="seriesId", default=None)
+    story_source_document_id: uuid.UUID | None = Field(alias="storySourceDocumentId", default=None)
     kind: Literal[
         "plan_story",
         "plan_shots",
+        "plan_series",
+        "plan_series_episode",
+        "analyze_story_source",
+        "extract_continuity_frames",
         "generate_image",
         "diagnose_image",
         "generate_video",
@@ -638,7 +717,9 @@ class ProjectUsageSummaryDto(ContractModel):
 class JobEventDto(ContractModel):
     id: int
     job_id: uuid.UUID = Field(alias="jobId")
-    project_id: uuid.UUID = Field(alias="projectId")
+    project_id: uuid.UUID | None = Field(alias="projectId", default=None)
+    series_id: uuid.UUID | None = Field(alias="seriesId", default=None)
+    story_source_document_id: uuid.UUID | None = Field(alias="storySourceDocumentId", default=None)
     event_type: str = Field(alias="eventType")
     payload: dict[str, Any]
     created_at: datetime = Field(alias="createdAt")
@@ -652,7 +733,12 @@ class GenerationPreviewDto(ContractModel):
     capability_revision: str = Field(alias="capabilityRevision")
     prompt: str
     negative_prompt: str = Field(alias="negativePrompt")
+    prompt_summary: str = Field(alias="promptSummary")
+    prompt_sections: list[GenerationPromptSectionDto] = Field(alias="promptSections")
     references: list[CompiledReference]
+    video_references: list[GenerationInputVideoReferenceDto] = Field(
+        alias="videoReferences", default_factory=list
+    )
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
     cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
     story_version_id: uuid.UUID = Field(alias="storyVersionId")
@@ -660,6 +746,10 @@ class GenerationPreviewDto(ContractModel):
     selection_hash: str = Field(alias="selectionHash")
     duration_seconds: int = Field(alias="durationSeconds", ge=4, le=15)
     input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
+    series_episode_id: uuid.UUID | None = Field(alias="seriesEpisodeId", default=None)
+    continuity_snapshot_id: uuid.UUID | None = Field(
+        alias="continuitySnapshotId", default=None
+    )
     warnings: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -932,6 +1022,128 @@ class StudioRepository(Protocol):
 
     def get_project(self, project_id: uuid.UUID) -> ProjectDto | None: ...
 
+    def create_story_series(
+        self, command: SeriesCreateCommand, *, canon_profile_id: uuid.UUID
+    ) -> StorySeriesDto: ...
+
+    def list_story_series(self) -> list[StorySeriesDto]: ...
+
+    def get_story_series(self, series_id: uuid.UUID) -> StorySeriesDto | None: ...
+
+    def update_story_series(
+        self, series_id: uuid.UUID, command: SeriesPatchCommand
+    ) -> StorySeriesDto: ...
+
+    def create_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        plan: SeriesPlanDraft,
+        input_hash: str,
+        prompt_revision: str,
+        producing_job_id: uuid.UUID,
+        validation_issues: list[SeriesValidationIssueDto] | None = None,
+    ) -> SeriesPlanVersionDto: ...
+
+    def materialize_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        base_plan_version_id: uuid.UUID,
+        plan: SeriesPlanDraft,
+        idempotency_key: str,
+    ) -> SeriesPlanVersionDto: ...
+
+    def list_series_plan_versions(self, series_id: uuid.UUID) -> list[SeriesPlanVersionDto]: ...
+
+    def activate_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        *,
+        expected_active_plan_version_id: uuid.UUID | None,
+        idempotency_key: str,
+    ) -> SeriesPlanVersionDto: ...
+
+    def reject_series_plan_version(
+        self, series_id: uuid.UUID, plan_version_id: uuid.UUID
+    ) -> SeriesPlanVersionDto: ...
+
+    def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]: ...
+
+    def list_series_jobs(self, series_id: uuid.UUID) -> list[JobDto]: ...
+
+    def materialize_series_episode(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        *,
+        idempotency_key: str,
+    ) -> ProjectDto: ...
+
+    def list_episode_continuity(
+        self, episode_id: uuid.UUID
+    ) -> list[EpisodeContinuitySnapshotDto]: ...
+
+    def confirm_episode_continuity(
+        self, episode_id: uuid.UUID, command: EpisodeContinuityConfirmCommand
+    ) -> EpisodeContinuitySnapshotDto: ...
+
+    def reset_episode_continuity(
+        self, episode_id: uuid.UUID, command: EpisodeContinuityResetCommand
+    ) -> EpisodeContinuitySnapshotDto: ...
+
+    def series_episode_for_project(self, project_id: uuid.UUID) -> SeriesEpisodeDto | None: ...
+
+    def list_series_asset_bindings(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesAssetBindingDto]: ...
+
+    def replace_series_asset_bindings(
+        self, series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
+    ) -> list[SeriesAssetBindingDto]: ...
+
+    def replace_continuity_keyframes(
+        self, project_id: uuid.UUID, asset_ids: list[uuid.UUID]
+    ) -> list[AssetDto]: ...
+
+    def save_episode_reference_manifest(
+        self,
+        episode_id: uuid.UUID,
+        job_id: uuid.UUID,
+        continuity_snapshot_id: uuid.UUID | None,
+        references: list[dict[str, Any]],
+    ) -> None: ...
+
+    def find_story_source_document(self, *, content_hash: str) -> StorySourceDocumentDto | None: ...
+
+    def list_story_source_documents(self) -> list[StorySourceDocumentDto]: ...
+
+    def get_story_source_document(
+        self, document_id: uuid.UUID
+    ) -> StorySourceDocumentDto | None: ...
+
+    def create_story_source_document(
+        self,
+        command: StoryImportCreateCommand,
+        *,
+        document_id: uuid.UUID,
+        content_hash: str,
+        job: JobDto,
+    ) -> StorySourceDocumentDto: ...
+
+    def complete_story_source_analysis(
+        self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
+    ) -> StorySourceDocumentDto: ...
+
+    def restart_story_source_analysis(
+        self, document_id: uuid.UUID, job: JobDto
+    ) -> JobDto: ...
+
+    def confirm_story_source(
+        self, document_id: uuid.UUID, command: StoryImportConfirmCommand
+    ) -> StoryImportMaterializationDto: ...
+
     def update_project(self, project_id: uuid.UUID, patch: ProjectPatch) -> ProjectDto: ...
 
     def planner_snapshot(self, project_id: uuid.UUID) -> PlannerSnapshotDto: ...
@@ -1016,6 +1228,10 @@ class StudioRepository(Protocol):
     def get_job(self, job_id: uuid.UUID) -> JobDto | None: ...
 
     def record_director_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto: ...
+
+    def record_series_plan_validation(
         self, job_id: uuid.UUID, validation: dict[str, object]
     ) -> JobDto: ...
 
@@ -1146,6 +1362,570 @@ class StudioService:
 
     def list_projects(self) -> list[ProjectDto]:
         return self._repository.list_projects()
+
+    def create_story_series(self, command: SeriesCreateCommand) -> StorySeriesDto:
+        return self._repository.create_story_series(
+            command, canon_profile_id=self._repository.active_canon_profile_id()
+        )
+
+    def list_story_series(self) -> list[StorySeriesDto]:
+        return self._repository.list_story_series()
+
+    def get_story_series(self, series_id: uuid.UUID) -> StorySeriesDto:
+        series = self._repository.get_story_series(series_id)
+        if series is None:
+            raise StudioNotFoundError("story series not found")
+        return series
+
+    def update_story_series(
+        self, series_id: uuid.UUID, command: SeriesPatchCommand
+    ) -> StorySeriesDto:
+        self.get_story_series(series_id)
+        return self._repository.update_story_series(series_id, command)
+
+    def preview_series_plan(self, series_id: uuid.UUID) -> SeriesPlanPreviewDto:
+        series = self.get_story_series(series_id)
+        canon = self._repository.current_canon_profile()
+        if canon.id != series.canon_profile_id:
+            raise StudioConflictError("series Canon changed")
+        return compile_series_plan_preview(
+            series,
+            canon_profile_hash=canon.profile_hash,
+            provider=self._provider_runtime.provider,
+            model=self._provider_runtime.planning_model,
+            capability_revision=self._provider_runtime.capability_revision,
+        )
+
+    def create_series_plan_job(
+        self, series_id: uuid.UUID, command: SeriesPlanGenerationCommand
+    ) -> JobDto:
+        preview = self.preview_series_plan(series_id)
+        if preview.input_hash != command.expected_input_hash:
+            raise StudioConflictError("series planning input changed")
+        self._require_paid_calls_enabled()
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=None,
+                seriesId=series_id,
+                kind="plan_series",
+                status="queued",
+                inputHash=preview.input_hash,
+                idempotencyKey=command.idempotency_key,
+                provider=preview.provider,
+                model=preview.model,
+                frozenInput={
+                    "seriesId": str(series_id),
+                    "canonProfileId": str(self.get_story_series(series_id).canon_profile_id),
+                    "plannedEpisodeCount": preview.planned_episode_count,
+                    "defaultEpisodeDurationSeconds": preview.default_episode_duration_seconds,
+                    "prompt": preview.prompt,
+                    "outputSchema": preview.output_schema,
+                    "seriesPlannerPromptRevision": preview.prompt_revision,
+                    "capabilityRevision": preview.capability_revision,
+                },
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    def complete_series_plan_job(
+        self,
+        job_id: uuid.UUID,
+        plan: SeriesPlanDraft,
+        *,
+        validation_issues: list[SeriesValidationIssueDto] | None = None,
+    ) -> SeriesPlanVersionDto:
+        job = self.get_job(job_id)
+        if job.kind != "plan_series" or job.series_id is None:
+            raise StudioConflictError("job is not a series planning job")
+        existing = next(
+            (
+                version
+                for version in self._repository.list_series_plan_versions(job.series_id)
+                if version.producing_job_id == job_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        return self._repository.create_series_plan_version(
+            job.series_id,
+            plan=plan,
+            input_hash=job.input_hash,
+            prompt_revision=str(job.frozen_input.get("seriesPlannerPromptRevision", "")),
+            producing_job_id=job.id,
+            validation_issues=validation_issues,
+        )
+
+    def record_series_plan_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto:
+        job = self.get_job(job_id)
+        if job.kind != "plan_series":
+            raise StudioConflictError("job is not a series planning job")
+        return self._repository.record_series_plan_validation(job_id, validation)
+
+    def list_series_plan_versions(self, series_id: uuid.UUID) -> list[SeriesPlanVersionDto]:
+        self.get_story_series(series_id)
+        return self._repository.list_series_plan_versions(series_id)
+
+    def materialize_series_plan(
+        self,
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        command: SeriesPlanMaterializeCommand,
+    ) -> SeriesPlanVersionDto:
+        self.get_story_series(series_id)
+        if command.base_plan_version_id != plan_version_id:
+            raise StudioConflictError("base series plan version changed")
+        return self._repository.materialize_series_plan_version(
+            series_id,
+            base_plan_version_id=plan_version_id,
+            plan=command.plan,
+            idempotency_key=command.idempotency_key,
+        )
+
+    def activate_series_plan(
+        self,
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        command: SeriesPlanActivationCommand,
+    ) -> SeriesPlanVersionDto:
+        self.get_story_series(series_id)
+        return self._repository.activate_series_plan_version(
+            series_id,
+            plan_version_id,
+            expected_active_plan_version_id=command.expected_active_plan_version_id,
+            idempotency_key=command.idempotency_key,
+        )
+
+    def reject_series_plan(
+        self, series_id: uuid.UUID, plan_version_id: uuid.UUID
+    ) -> SeriesPlanVersionDto:
+        self.get_story_series(series_id)
+        return self._repository.reject_series_plan_version(series_id, plan_version_id)
+
+    def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]:
+        self.get_story_series(series_id)
+        return self._repository.list_series_episodes(series_id)
+
+    def project_series_context(self, project_id: uuid.UUID) -> ProjectSeriesContextDto | None:
+        self._require_project(project_id)
+        episode = self._repository.series_episode_for_project(project_id)
+        if episode is None:
+            return None
+        series = self.get_story_series(episode.series_id)
+        return ProjectSeriesContextDto(
+            series=series,
+            episode=episode,
+            episodes=self._repository.list_series_episodes(series.id),
+        )
+
+    def list_series_jobs(self, series_id: uuid.UUID) -> list[JobDto]:
+        self.get_story_series(series_id)
+        return self._repository.list_series_jobs(series_id)
+
+    def list_project_jobs(self, project_id: uuid.UUID) -> list[JobDto]:
+        self._require_project(project_id)
+        return self._repository.list_project_jobs(project_id)
+
+    def materialize_series_episode(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: SeriesEpisodeMaterializeCommand,
+    ) -> ProjectDto:
+        self.get_story_series(series_id)
+        return self._repository.materialize_series_episode(
+            series_id,
+            episode_id,
+            idempotency_key=command.idempotency_key,
+        )
+
+    def preview_series_episode_story(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        *,
+        additional_notes: str | None = None,
+    ) -> SeriesEpisodeStoryPreviewDto:
+        series = self.get_story_series(series_id)
+        if series.active_plan_version_id is None:
+            raise StudioConflictError("series plan must be adopted before episode planning")
+        active_plan = next(
+            (
+                item
+                for item in self._repository.list_series_plan_versions(series_id)
+                if item.id == series.active_plan_version_id and item.active
+            ),
+            None,
+        )
+        episode = next(
+            (
+                item
+                for item in self._repository.list_series_episodes(series_id)
+                if item.id == episode_id
+            ),
+            None,
+        )
+        if active_plan is None or episode is None:
+            raise StudioNotFoundError("series episode or active plan not found")
+        if episode.project_id is None:
+            raise StudioConflictError("start episode production before planning its story")
+        previous = next(
+            (
+                item
+                for item in self._repository.list_series_episodes(series_id)
+                if item.order == episode.order - 1
+            ),
+            None,
+        )
+        incoming = None
+        if previous is not None:
+            carryover = "；".join(previous.outline.continuity_carryover)
+            incoming = previous.outline.ending_state
+            if carryover:
+                incoming = f"{incoming}；需要承接：{carryover}"
+        canon = self._repository.current_canon_profile()
+        if canon.id != series.canon_profile_id:
+            raise StudioConflictError("series Canon changed")
+        return compile_series_episode_story_preview(
+            series=series,
+            active_plan=active_plan,
+            episode=episode,
+            incoming_continuity=incoming,
+            additional_notes=additional_notes,
+            canon_profile_hash=canon.profile_hash,
+            provider=self._provider_runtime.provider,
+            model=self._provider_runtime.planning_model,
+            capability_revision=self._provider_runtime.capability_revision,
+        )
+
+    def create_series_episode_story_job(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: SeriesEpisodeStoryGenerationCommand,
+    ) -> JobDto:
+        preview = self.preview_series_episode_story(
+            series_id,
+            episode_id,
+            additional_notes=command.additional_notes,
+        )
+        if preview.input_hash != command.expected_input_hash:
+            raise StudioConflictError("series episode story input changed")
+        self._require_paid_calls_enabled()
+        now = datetime.now(UTC)
+        return self._create_job(
+            self._with_pricing_snapshot(
+                JobDto(
+                    id=uuid.uuid4(),
+                    projectId=preview.project_id,
+                    kind="plan_series_episode",
+                    status="queued",
+                    inputHash=preview.input_hash,
+                    idempotencyKey=command.idempotency_key,
+                    provider=preview.provider,
+                    model=preview.model,
+                    frozenInput={
+                        "seriesId": str(preview.series_id),
+                        "seriesPlanVersionId": str(preview.series_plan_version_id),
+                        "seriesEpisodeId": str(preview.series_episode_id),
+                        "episodeOutlineVersionId": str(preview.episode_outline_version_id),
+                        "incomingContinuity": preview.incoming_continuity,
+                        "additionalNotes": command.additional_notes,
+                        "prompt": preview.prompt,
+                        "outputSchema": preview.output_schema,
+                        "seriesEpisodePlannerPromptRevision": preview.prompt_revision,
+                        "capabilityRevision": preview.capability_revision,
+                    },
+                    resultAssetIds=[],
+                    createdAt=now,
+                    updatedAt=now,
+                )
+            )
+        )
+
+    def complete_series_episode_story_job(
+        self, job_id: uuid.UUID, proposal: LifeStoryProposalDraft
+    ) -> LifeStoryProposalDto:
+        job = self.get_job(job_id)
+        if job.kind != "plan_series_episode":
+            raise StudioConflictError("job is not a series episode planning job")
+        return self._repository.complete_planner_job(job_id, proposal)
+
+    def get_series_episode_continuity(
+        self, series_id: uuid.UUID, episode_id: uuid.UUID
+    ) -> EpisodeContinuityDto:
+        episodes = self.list_series_episodes(series_id)
+        episode = next((item for item in episodes if item.id == episode_id), None)
+        if episode is None:
+            raise StudioNotFoundError("series episode not found")
+        previous = next(
+            (item for item in episodes if item.order == episode.order - 1), None
+        )
+        snapshots = self._repository.list_episode_continuity(episode_id)
+        return EpisodeContinuityDto(
+            episodeId=episode_id,
+            previousEpisodeId=previous.id if previous is not None else None,
+            incoming=next(
+                (
+                    item
+                    for item in snapshots
+                    if item.direction == "incoming" and item.active
+                ),
+                None,
+            ),
+            outgoing=next(
+                (
+                    item
+                    for item in snapshots
+                    if item.direction == "outgoing" and item.active
+                ),
+                None,
+            ),
+        )
+
+    def confirm_series_episode_continuity(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: EpisodeContinuityConfirmCommand,
+    ) -> EpisodeContinuitySnapshotDto:
+        self.get_series_episode_continuity(series_id, episode_id)
+        return self._repository.confirm_episode_continuity(episode_id, command)
+
+    def reset_series_episode_continuity(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: EpisodeContinuityResetCommand,
+    ) -> EpisodeContinuitySnapshotDto:
+        self.get_series_episode_continuity(series_id, episode_id)
+        return self._repository.reset_episode_continuity(episode_id, command)
+
+    def list_series_assets(self, series_id: uuid.UUID) -> list[SeriesAssetBindingDto]:
+        self.get_story_series(series_id)
+        return self._repository.list_series_asset_bindings(series_id)
+
+    def update_series_assets(
+        self, series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
+    ) -> list[SeriesAssetBindingDto]:
+        self.get_story_series(series_id)
+        for binding in command.bindings:
+            self.get_asset(binding.asset_id)
+        return self._repository.replace_series_asset_bindings(series_id, command)
+
+    def get_episode_continuity_frames(
+        self, series_id: uuid.UUID, episode_id: uuid.UUID
+    ) -> EpisodeContinuityFramesDto:
+        episode = next(
+            (item for item in self.list_series_episodes(series_id) if item.id == episode_id),
+            None,
+        )
+        if episode is None:
+            raise StudioNotFoundError("series episode not found")
+        if episode.project_id is None:
+            return EpisodeContinuityFramesDto(episodeId=episode.id)
+        selections = self._repository.current_selections(episode.project_id)
+        final = selections.get("final")
+        if final is None:
+            return EpisodeContinuityFramesDto(episodeId=episode.id)
+        matching = [
+            asset
+            for asset in self._repository.list_assets(episode.project_id)
+            if asset.media_type == "image"
+            and asset.metadata.get("seriesEpisodeId") == str(episode.id)
+            and asset.metadata.get("sourceVideoAssetId") == str(final.id)
+        ]
+        last_frame = next(
+            (asset for asset in matching if asset.role == "episode_last_frame"),
+            None,
+        )
+        candidates = [asset for asset in matching if asset.role == "episode_keyframe"]
+        selected_keyframes = [
+            selections[slot]
+            for slot in ("continuity_keyframe_1", "continuity_keyframe_2")
+            if slot in selections
+            and selections[slot].id in {asset.id for asset in candidates}
+        ]
+        return EpisodeContinuityFramesDto(
+            episodeId=episode.id,
+            sourceVideoAssetId=final.id,
+            lastFrame=last_frame,
+            candidates=candidates,
+            selectedKeyframes=selected_keyframes,
+        )
+
+    def select_episode_continuity_keyframes(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: EpisodeContinuityKeyframesCommand,
+    ) -> list[AssetDto]:
+        frames = self.get_episode_continuity_frames(series_id, episode_id)
+        episode = next(
+            item for item in self.list_series_episodes(series_id) if item.id == episode_id
+        )
+        if episode.project_id is None or frames.source_video_asset_id is None:
+            raise StudioConflictError("episode has no selected final video")
+        candidates = {asset.id: asset for asset in frames.candidates}
+        if any(asset_id not in candidates for asset_id in command.asset_ids):
+            raise StudioConflictError("continuity keyframe is not a candidate for this final video")
+        return self._repository.replace_continuity_keyframes(
+            episode.project_id, command.asset_ids
+        )
+
+    def preview_story_import(self, command: StoryImportPreviewCommand) -> StoryImportPreviewDto:
+        provisional = compile_story_import_preview(
+            command,
+            duplicate_document_id=None,
+            provider=self._provider_runtime.provider,
+            model=self._provider_runtime.planning_model,
+            capability_revision=self._provider_runtime.capability_revision,
+        )
+        duplicate = self._repository.find_story_source_document(
+            content_hash=provisional.content_hash
+        )
+        return provisional.model_copy(
+            update={"duplicate_document_id": duplicate.id if duplicate is not None else None}
+        )
+
+    def create_story_import(self, command: StoryImportCreateCommand) -> StoryImportCreateResultDto:
+        preview = self.preview_story_import(
+            StoryImportPreviewCommand(
+                rawText=command.raw_text,
+                sourceFormat=command.source_format,
+                fileName=command.file_name,
+            )
+        )
+        if preview.input_hash != command.expected_input_hash:
+            raise StudioConflictError("story import input changed")
+        if preview.duplicate_document_id is not None:
+            document = self.get_story_import(preview.duplicate_document_id)
+            job = (
+                self.get_job(document.analysis_job_id)
+                if document.analysis_job_id is not None
+                else None
+            )
+            return StoryImportCreateResultDto(
+                document=document,
+                analysisJob=_story_import_job(job) if job is not None else None,
+                reused=True,
+            )
+        self._require_paid_calls_enabled()
+        document_id = uuid.uuid4()
+        job = self._build_story_import_analysis_job(
+            document_id=document_id,
+            preview=preview,
+            source_format=command.source_format,
+            file_name=command.file_name,
+            idempotency_key=command.idempotency_key,
+        )
+        document = self._repository.create_story_source_document(
+            command,
+            document_id=document_id,
+            content_hash=preview.content_hash,
+            job=job,
+        )
+        persisted_job = (
+            self.get_job(document.analysis_job_id)
+            if document.analysis_job_id is not None
+            else None
+        )
+        return StoryImportCreateResultDto(
+            document=document,
+            analysisJob=(
+                _story_import_job(persisted_job) if persisted_job is not None else None
+            ),
+            reused=document.id != document_id,
+        )
+
+    def list_story_imports(self) -> list[StorySourceDocumentDto]:
+        return self._repository.list_story_source_documents()
+
+    def get_story_import(self, document_id: uuid.UUID) -> StorySourceDocumentDto:
+        document = self._repository.get_story_source_document(document_id)
+        if document is None:
+            raise StudioNotFoundError("story source document not found")
+        return document
+
+    def reanalyze_story_import(
+        self, document_id: uuid.UUID, command: StoryImportReanalyzeCommand
+    ) -> JobDto:
+        document = self.get_story_import(document_id)
+        preview = self.preview_story_import(
+            StoryImportPreviewCommand(
+                rawText=document.raw_text,
+                sourceFormat=document.source_format,
+                fileName=document.file_name,
+            )
+        )
+        if preview.input_hash != command.expected_input_hash:
+            raise StudioConflictError("story import input changed")
+        self._require_paid_calls_enabled()
+        job = self._build_story_import_analysis_job(
+            document_id=document.id,
+            preview=preview,
+            source_format=document.source_format,
+            file_name=document.file_name,
+            idempotency_key=command.idempotency_key,
+        )
+        return self._repository.restart_story_source_analysis(document.id, job)
+
+    def _build_story_import_analysis_job(
+        self,
+        *,
+        document_id: uuid.UUID,
+        preview: StoryImportPreviewDto,
+        source_format: str,
+        file_name: str | None,
+        idempotency_key: str,
+    ) -> JobDto:
+        now = datetime.now(UTC)
+        return self._with_pricing_snapshot(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=None,
+                storySourceDocumentId=document_id,
+                kind="analyze_story_source",
+                status="queued",
+                inputHash=preview.input_hash,
+                idempotencyKey=idempotency_key,
+                provider=self._provider_runtime.provider,
+                model=self._provider_runtime.planning_model,
+                frozenInput={
+                    "storySourceDocumentId": str(document_id),
+                    "contentHash": preview.content_hash,
+                    "sourceFormat": source_format,
+                    "fileName": file_name,
+                    "prompt": preview.prompt,
+                    "outputSchema": preview.output_schema,
+                    "storySourceAnalyzerPromptRevision": preview.prompt_revision,
+                    "capabilityRevision": self._provider_runtime.capability_revision,
+                },
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    def complete_story_import_analysis(
+        self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
+    ) -> StorySourceDocumentDto:
+        job = self.get_job(job_id)
+        if job.kind != "analyze_story_source" or job.story_source_document_id is None:
+            raise StudioConflictError("job is not a story source analysis job")
+        return self._repository.complete_story_source_analysis(job_id, analysis)
+
+    def confirm_story_import(
+        self, document_id: uuid.UUID, command: StoryImportConfirmCommand
+    ) -> StoryImportMaterializationDto:
+        self.get_story_import(document_id)
+        return self._repository.confirm_story_source(document_id, command)
 
     def project_library(self, query: ProjectLibraryQuery) -> ProjectLibraryPageDto:
         return self._require_project_library_repository().list_project_library(query)
@@ -1307,7 +2087,7 @@ class StudioService:
             sourceStoryVersionId=story_id,
             sourceSelectionHash=selection_hash,
             clip=clip,
-            shots=payload.shots,
+            shots=[synchronize_professional_shot_summaries(shot) for shot in payload.shots],
             directorTreatment=payload.director_treatment,
             directorPromptRevision=str(job.frozen_input.get("directorPromptRevision", "")),
             directorModel=job.model or "unknown",
@@ -1337,9 +2117,7 @@ class StudioService:
         job = self.get_job(job_id)
         if job.kind != "plan_shots":
             raise StudioConflictError("job is not a director planning job")
-        return self._repository.record_director_validation(
-            job_id, result.validation_document()
-        )
+        return self._repository.record_director_validation(job_id, result.validation_document())
 
     def adopt_proposal(self, project_id: uuid.UUID, proposal_id: uuid.UUID) -> StoryVersionDto:
         self._require_project(project_id)
@@ -1376,9 +2154,16 @@ class StudioService:
             for plan in self._repository.list_shot_plans(project_id)
         ):
             raise StudioNotFoundError("base shot plan version not found")
+        synchronized_draft = draft.model_copy(
+            update={
+                "shots": [
+                    synchronize_professional_shot_summaries(shot) for shot in draft.shots
+                ]
+            }
+        )
         return self._repository.create_shot_plan(
             project_id,
-            draft,
+            synchronized_draft,
             active=True,
             review_status="accepted",
             base_shot_plan_version_id=draft.base_shot_plan_version_id,
@@ -1528,9 +2313,7 @@ class StudioService:
         return self._repository.activate_shot_plan(
             project_id,
             shot_plan_id,
-            expected_active_shot_plan_version_id=(
-                command.expected_active_shot_plan_version_id
-            ),
+            expected_active_shot_plan_version_id=(command.expected_active_shot_plan_version_id),
         )
 
     def reject_shot_plan(
@@ -1581,15 +2364,11 @@ class StudioService:
                         DirectorPlanDraftDto(
                             targetDurationSeconds=(
                                 int(normalized_payload["targetDurationSeconds"])
-                                if isinstance(
-                                    normalized_payload.get("targetDurationSeconds"), int
-                                )
+                                if isinstance(normalized_payload.get("targetDurationSeconds"), int)
                                 else None
                             ),
                             directorTreatment=(
-                                treatment_value
-                                if isinstance(treatment_value, dict)
-                                else None
+                                treatment_value if isinstance(treatment_value, dict) else None
                             ),
                             shots=(
                                 [item for item in shots_value if isinstance(item, dict)]
@@ -1635,9 +2414,7 @@ class StudioService:
                                 if error.get("incompleteReason")
                                 else None
                             ),
-                            requestId=(
-                                str(error["requestId"]) if error.get("requestId") else None
-                            ),
+                            requestId=(str(error["requestId"]) if error.get("requestId") else None),
                             retryable=bool(error.get("retryable", False)),
                             submissionUnknown=bool(error.get("submissionUnknown", False)),
                         )
@@ -1662,9 +2439,7 @@ class StudioService:
         if job.project_id != project_id or job.kind != "plan_shots":
             raise StudioNotFoundError("shot plan generation result not found")
         provider_payload = (
-            job.provider_result.get("payload")
-            if isinstance(job.provider_result, dict)
-            else None
+            job.provider_result.get("payload") if isinstance(job.provider_result, dict) else None
         )
         normalized = normalize_director_result(provider_payload)
         self.record_shot_plan_generation_validation(job_id, normalized)
@@ -1794,6 +2569,15 @@ class StudioService:
         latest_video_job = self._repository.latest_job(project_id, kind="generate_video")
         latest_director_job = self._repository.latest_job(project_id, kind="plan_shots")
         latest_repair_job = self._repository.latest_job(project_id, kind="regenerate_video_segment")
+        latest_asset_job = max(
+            (
+                job
+                for job in self._repository.list_project_jobs(project_id)
+                if job.kind in {"generate_image", "diagnose_image"}
+            ),
+            key=lambda job: (job.created_at, job.id.hex),
+            default=None,
+        )
         return {
             "eventCursor": event_cursor,
             "project": project.model_dump(mode="json", by_alias=True),
@@ -1832,6 +2616,11 @@ class StudioService:
                 if latest_repair_job is not None
                 else None
             ),
+            "latestAssetJob": (
+                latest_asset_job.model_dump(mode="json", by_alias=True)
+                if latest_asset_job is not None
+                else None
+            ),
         }
 
     def current_selections(self, project_id: uuid.UUID) -> dict[str, AssetDto]:
@@ -1861,14 +2650,46 @@ class StudioService:
             {
                 slot: {"assetId": str(asset.id), "sha256": asset.sha256}
                 for slot, asset in sorted(selections.items())
-                if slot != "final"
+                if slot != "final" and not slot.startswith("continuity_keyframe_")
             }
         )
 
     def preview_video_generation(
-        self, project_id: uuid.UUID, *, maximum_references: int | None = None
+        self,
+        project_id: uuid.UUID,
+        *,
+        maximum_references: int | None = None,
+        include_previous_episode_video: bool = False,
     ) -> GenerationPreviewDto:
         project = self._require_project(project_id)
+        series_episode = self._repository.series_episode_for_project(project_id)
+        previous_episode: SeriesEpisodeDto | None = None
+        confirmed_continuity: EpisodeContinuitySnapshotDto | None = None
+        if series_episode is not None and series_episode.order > 1:
+            previous_episode = next(
+                (
+                    item
+                    for item in self._repository.list_series_episodes(series_episode.series_id)
+                    if item.order == series_episode.order - 1
+                ),
+                None,
+            )
+            confirmed_continuity = next(
+                (
+                    item
+                    for item in self._repository.list_episode_continuity(series_episode.id)
+                    if item.direction == "incoming" and item.active and item.confirmed
+                ),
+                None,
+            )
+            if confirmed_continuity is None:
+                raise StudioConflictError(
+                    "confirm the episode's incoming continuity before video generation"
+                )
+        elif include_previous_episode_video:
+            raise StudioConflictError(
+                "the first episode does not have a previous episode video to reference"
+            )
         story = self._repository.active_story(project_id)
         shot_plan = self._repository.active_shot_plan(project_id)
         if story is None:
@@ -1892,31 +2713,154 @@ class StudioService:
         if shot_plan.source_selection_hash != selection_hash:
             raise StudioConflictError("shot plan asset selection is outdated")
 
-        compiled = compile_references(
-            [
-                ProviderReference(
-                    assetId=selections[slot].id,
-                    role=slot,  # type: ignore[arg-type]
-                    sha256=selections[slot].sha256,
+        provider_references = [
+            ProviderReference(
+                assetId=selections[slot].id,
+                role=slot,  # type: ignore[arg-type]
+                sha256=selections[slot].sha256,
+            )
+            for slot in required_slots
+        ]
+        previous_video: AssetDto | None = None
+        if previous_episode is not None and previous_episode.project_id is not None:
+            previous_video = self._repository.current_selections(
+                previous_episode.project_id
+            ).get("final")
+            if previous_video is not None and previous_video.media_type != "video":
+                previous_video = None
+        if include_previous_episode_video:
+            if previous_video is None:
+                raise StudioConflictError(
+                    "the previous episode needs a selected final video before it can be referenced"
                 )
-                for slot in required_slots
-            ],
-            maximum_references=(
-                self._provider_runtime.maximum_video_references
-                if maximum_references is None
-                else maximum_references
-            ),
+            if self._provider_runtime.maximum_video_input_references < 1:
+                raise StudioValidationError(
+                    "the current video capability does not accept a reference video"
+                )
+            if not self._provider_runtime.segment_reference_publishing_ready:
+                raise StudioConflictError(
+                    "the managed HTTPS publisher is required for a previous episode video reference"
+                )
+        video_references = (
+            [
+                GenerationInputVideoReferenceDto(
+                    assetId=previous_video.id,
+                    role="previous_episode_video",
+                    sha256=previous_video.sha256,
+                    durationSeconds=(
+                        float(previous_video.metadata["durationMs"]) / 1_000
+                        if previous_video.metadata.get("durationMs") is not None
+                        else (
+                            float(previous_video.metadata["durationSeconds"])
+                            if previous_video.metadata.get("durationSeconds") is not None
+                            else None
+                        )
+                    ),
+                    included=include_previous_episode_video,
+                )
+            ]
+            if previous_video is not None
+            else []
         )
-        prompt = _video_prompt(project, story, shot_plan)
+        role_order: tuple[Any, ...] = required_slots
+        if previous_episode is not None:
+            frames = self.get_episode_continuity_frames(
+                previous_episode.series_id, previous_episode.id
+            )
+            if frames is not None:
+                continuity_assets: list[tuple[str, AssetDto]] = []
+                if frames.last_frame is not None:
+                    continuity_assets.append(
+                        ("previous_episode_last_frame", frames.last_frame)
+                    )
+                continuity_assets.extend(
+                    (f"previous_episode_keyframe_{index}", asset)
+                    for index, asset in enumerate(frames.selected_keyframes, start=1)
+                )
+                provider_references.extend(
+                    ProviderReference(assetId=asset.id, role=role, sha256=asset.sha256)  # type: ignore[arg-type]
+                    for role, asset in continuity_assets
+                )
+                role_order = (
+                    *required_slots,
+                    "previous_episode_last_frame",
+                    "previous_episode_keyframe_1",
+                    "previous_episode_keyframe_2",
+                )
+        reference_limit = (
+            self._provider_runtime.maximum_video_references
+            if maximum_references is None
+            else maximum_references
+        )
+        if len(provider_references) > reference_limit:
+            raise StudioValidationError(
+                f"current video capability accepts {reference_limit} image references, "
+                f"but this episode requires {len(provider_references)}"
+            )
+        compiled = compile_references(
+            provider_references,
+            maximum_references=reference_limit,
+            role_order=role_order,
+        )
+        continuity_constraints: list[str] = []
+        if confirmed_continuity is not None:
+            continuity_constraints.append(
+                "跨集连续性：必须承接已确认的上一集结束状态："
+                + json.dumps(
+                    confirmed_continuity.state.model_dump(mode="json", by_alias=True),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+            if any(
+                reference.role.startswith("previous_episode_") and reference.included
+                for reference in compiled.references
+            ):
+                continuity_constraints.append(
+                    "上一集尾帧与连续性关键帧只负责服装、道具位置、时间、光线和接镜状态；"
+                    "不得取代儿童、猫咪、人猫比例、当前环境或固定画风板。"
+                )
+        if include_previous_episode_video:
+            continuity_constraints.append(
+                "用户已明确启用上一集完整成片作为高级连续性参考。"
+                "该视频只负责服装、道具、位置、时间、光线与直接接镜；"
+                "不得复制上一集的镜头调度、动作节奏或构图，也不得取代固定五张图片参考。"
+            )
+        compiled_prompt = compile_video_generation_prompt(
+            project_title=project.title,
+            target_duration_seconds=project.target_duration_seconds,
+            shots=shot_plan.shots,
+            director_treatment=shot_plan.director_treatment,
+            continuity_constraints=tuple(continuity_constraints),
+        )
+        prompt = compiled_prompt.prompt
+        negative_prompt = compiled_prompt.negative_prompt
+        compiled_provider_prompt = compile_provider_video_prompt(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+        )
         document = {
             "projectId": str(project_id),
             "storyVersionId": str(story.id),
             "shotPlanVersionId": str(shot_plan.id),
             "selectionHash": selection_hash,
             "prompt": prompt,
+            "negativePrompt": negative_prompt,
+            "promptSummary": compiled_prompt.prompt_summary,
+            "promptSections": [
+                section.model_dump(mode="json", by_alias=True)
+                for section in compiled_prompt.prompt_sections
+            ],
+            "compiledProviderPrompt": compiled_provider_prompt,
+            "promptCompilerRevision": VIDEO_PROMPT_COMPILER_REVISION,
             "references": [
                 reference.model_dump(mode="json", by_alias=True)
                 for reference in compiled.references
+            ],
+            "videoReferences": [
+                reference.model_dump(mode="json", by_alias=True)
+                for reference in video_references
+                if reference.included
             ],
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.video_model,
@@ -1924,6 +2868,12 @@ class StudioService:
             "durationSeconds": project.target_duration_seconds,
             "resolution": "480p",
             "aspectRatio": "9:16",
+            "seriesEpisodeId": (
+                str(series_episode.id) if series_episode is not None else None
+            ),
+            "continuitySnapshotId": (
+                str(confirmed_continuity.id) if confirmed_continuity is not None else None
+            ),
         }
         input_hash = _hash_document(document)
         preview = GenerationPreviewDto(
@@ -1932,20 +2882,26 @@ class StudioService:
             model=self._provider_runtime.video_model,
             capabilityRevision=self._provider_runtime.capability_revision,
             prompt=prompt,
-            negativePrompt=(
-                "真实摄影，3D塑料质感，叶片微距摄影污染，儿童年龄、发型、脸型漂移，"
-                "猫咪毛色和虎斑分区漂移，额外肢体，融脸，断尾，错误四足，文字，Logo，"
-                "水印，背景严重跳变，原地互看，静止停帧，循环动作填充时长，"
-                "禁止8岁以上的修长儿童比例，禁止青少年或成人脸型，禁止过长四肢，"
-                "禁止身体比例超过约5头身，禁止儿童身高与猫咪比例失真"
-            ),
+            negativePrompt=negative_prompt,
+            promptSummary=compiled_prompt.prompt_summary,
+            promptSections=list(compiled_prompt.prompt_sections),
             references=compiled.references,
+            videoReferences=video_references,
             expectedCostMicros=None,
             costEstimateStatus="unmetered_paid",
             storyVersionId=story.id,
             shotPlanVersionId=shot_plan.id,
             selectionHash=selection_hash,
             durationSeconds=project.target_duration_seconds,
+            seriesEpisodeId=series_episode.id if series_episode is not None else None,
+            continuitySnapshotId=(
+                confirmed_continuity.id if confirmed_continuity is not None else None
+            ),
+            warnings=[
+                {"code": risk.code, "message": risk.message}
+                for shot in shot_plan.shots
+                for risk in shot.generation_risks
+            ],
         )
         return preview.model_copy(
             update={
@@ -2098,9 +3054,7 @@ class StudioService:
                     "referenceAssetIds": [
                         str(item.asset_id) for item in preview.references if item.included
                     ],
-                    "referenceRoles": [
-                        item.role for item in preview.references if item.included
-                    ],
+                    "referenceRoles": [item.role for item in preview.references if item.included],
                     "imageInputSnapshot": (
                         image_input_snapshot.model_dump(mode="json", by_alias=True)
                         if image_input_snapshot is not None
@@ -2213,7 +3167,10 @@ class StudioService:
         )
 
     def create_video_job(self, project_id: uuid.UUID, command: GenerationCommand) -> JobDto:
-        preview = self.preview_video_generation(project_id)
+        preview = self.preview_video_generation(
+            project_id,
+            include_previous_episode_video=command.include_previous_episode_video,
+        )
         if preview.input_hash != command.expected_input_hash:
             raise StudioConflictError("generation input hash changed")
         self._require_paid_calls_enabled()
@@ -2240,21 +3197,71 @@ class StudioService:
                 "selectionHash": preview.selection_hash,
                 "prompt": preview.prompt,
                 "negativePrompt": preview.negative_prompt,
+                "compiledProviderPrompt": compile_provider_video_prompt(
+                    prompt=preview.prompt,
+                    negative_prompt=preview.negative_prompt,
+                ),
                 "references": [
                     item.model_dump(mode="json", by_alias=True) for item in preview.references
                 ],
                 "referenceAssetIds": [str(item.asset_id) for item in included],
                 "referenceRoles": [item.role for item in included],
+                "videoReferences": [
+                    item.model_dump(mode="json", by_alias=True)
+                    for item in preview.video_references
+                    if item.included
+                ],
+                "previousEpisodeVideoAssetId": next(
+                    (
+                        str(item.asset_id)
+                        for item in preview.video_references
+                        if item.included
+                    ),
+                    None,
+                ),
+                "previousEpisodeVideoSha256": next(
+                    (item.sha256 for item in preview.video_references if item.included),
+                    None,
+                ),
                 "capabilityRevision": preview.capability_revision,
                 "durationSeconds": preview.duration_seconds,
                 "resolution": "480p",
                 "aspectRatio": "9:16",
+                "seriesEpisodeId": (
+                    str(preview.series_episode_id)
+                    if preview.series_episode_id is not None
+                    else None
+                ),
+                "continuitySnapshotId": (
+                    str(preview.continuity_snapshot_id)
+                    if preview.continuity_snapshot_id is not None
+                    else None
+                ),
             },
             resultAssetIds=[],
             createdAt=now,
             updatedAt=now,
         )
-        return self._create_job(job)
+        persisted = self._create_job(job)
+        episode_value = persisted.frozen_input.get("seriesEpisodeId")
+        if episode_value:
+            continuity_value = persisted.frozen_input.get("continuitySnapshotId")
+            self._repository.save_episode_reference_manifest(
+                uuid.UUID(str(episode_value)),
+                persisted.id,
+                uuid.UUID(str(continuity_value)) if continuity_value else None,
+                [
+                    item.model_dump(mode="json", by_alias=True)
+                    for item in preview.references
+                    if item.included
+                ]
+                + [
+                    item.model_dump(mode="json", by_alias=True)
+                    for item in preview.video_references
+                    if item.included
+                ],
+            )
+        return persisted
 
     def create_video_diagnosis_job(
         self, project_id: uuid.UUID, command: VideoDiagnosisCommand
@@ -2792,12 +3799,53 @@ class StudioService:
         asset = self.get_asset(command.asset_id)
         if asset.project_id != project_id or asset.role != "final" or asset.media_type != "video":
             raise StudioConflictError("only a project final video can be approved")
-        return self.select_asset(
+        selection = self.select_asset(
             project_id,
             slot="final",
             asset_id=command.asset_id,
             decision="approved",
         )
+        episode = self._repository.series_episode_for_project(project_id)
+        if episode is not None:
+            duration_frames = asset.metadata.get("durationFrames")
+            if not isinstance(duration_frames, int) or duration_frames <= 0:
+                duration_ms = asset.metadata.get("durationMs")
+                duration_frames = (
+                    round(float(duration_ms) * 24 / 1000)
+                    if isinstance(duration_ms, (int, float)) and duration_ms > 0
+                    else episode.target_duration_seconds * 24
+                )
+            duration_seconds = duration_frames / 24
+            now = datetime.now(UTC)
+            frozen_input = {
+                "seriesId": str(episode.series_id),
+                "seriesEpisodeId": str(episode.id),
+                "sourceVideoAssetId": str(asset.id),
+                "sourceVideoSha256": asset.sha256,
+                "keyframeSeconds": [
+                    round(duration_seconds * 0.25, 3),
+                    round(duration_seconds * 0.75, 3),
+                ],
+                "extractLastFrame": True,
+            }
+            self._create_job(
+                JobDto(
+                    id=uuid.uuid4(),
+                    projectId=project_id,
+                    kind="extract_continuity_frames",
+                    status="queued",
+                    inputHash=_hash_document(frozen_input),
+                    idempotencyKey=f"continuity-frames:{episode.id}:{asset.id}:{asset.sha256}",
+                    provider="local_ffmpeg",
+                    model="ffmpeg-continuity-frames-v1",
+                    expectedCostMicros=0,
+                    frozenInput=frozen_input,
+                    resultAssetIds=[],
+                    createdAt=now,
+                    updatedAt=now,
+                )
+            )
+        return selection
 
     def _require_project(self, project_id: uuid.UUID) -> ProjectDto:
         project = self._repository.get_project(project_id)
@@ -2873,6 +3921,21 @@ def _job_usage(job: JobDto) -> JobUsageDto:
         currency=job.currency,
         rateCardRevision=job.rate_card_revision,
         priceSource=price_source,
+    )
+
+
+def _story_import_job(job: JobDto) -> StoryImportAnalysisJobDto:
+    return StoryImportAnalysisJobDto(
+        id=job.id,
+        status=job.status,
+        provider=job.provider,
+        model=job.model,
+        actualUsage=job.actual_usage,
+        actualCostMicros=job.actual_cost_micros,
+        billingStatus=job.billing_status,
+        error=job.error,
+        createdAt=job.created_at,
+        updatedAt=job.updated_at,
     )
 
 
@@ -3016,9 +4079,7 @@ def _environment_diagnostic_output_schema() -> dict[str, Any]:
         "type": "object",
         "additionalProperties": False,
         "required": required,
-        "properties": {
-            name: verdict for name in required if name != "warnings"
-        }
+        "properties": {name: verdict for name in required if name != "warnings"}
         | {
             "warnings": {
                 "type": "array",
@@ -3103,7 +4164,7 @@ def _whole_generation_input_snapshot(
     state: Literal["preview", "submitted"],
 ) -> dict[str, Any]:
     snapshot = GenerationInputSnapshotDto(
-        schemaVersion=1,
+        schemaVersion=2,
         kind="whole_video",
         state=state,
         provider=preview.provider,
@@ -3112,6 +4173,8 @@ def _whole_generation_input_snapshot(
         inputHash=preview.input_hash,
         prompt=preview.prompt,
         negativePrompt=preview.negative_prompt,
+        promptSummary=preview.prompt_summary,
+        promptSections=preview.prompt_sections,
         references=[
             GenerationInputReferenceDto(
                 assetId=item.asset_id,
@@ -3122,6 +4185,9 @@ def _whole_generation_input_snapshot(
                 sha256=item.sha256,
             )
             for item in preview.references
+        ],
+        videoReferences=[
+            item for item in preview.video_references if item.included
         ],
         video={
             "durationSeconds": preview.duration_seconds,
@@ -3134,7 +4200,7 @@ def _whole_generation_input_snapshot(
             "shotPlanVersionId": preview.shot_plan_version_id,
             "selectionHash": preview.selection_hash,
         },
-        promptCompilerRevision="seedance-professional-v1",
+        promptCompilerRevision=VIDEO_PROMPT_COMPILER_REVISION,
         createdAt=created_at,
     )
     return snapshot.model_dump(mode="json", by_alias=True)
@@ -3187,137 +4253,6 @@ def _segment_generation_input_snapshot(
         createdAt=created_at,
     )
     return snapshot.model_dump(mode="json", by_alias=True)
-
-
-def _video_prompt(
-    project: ProjectDto, story: StoryVersionDto, shot_plan: ShotPlanVersionDto
-) -> str:
-    direction_parts: list[str] = []
-    for shot in shot_plan.shots:
-        child_action = (
-            shot.child_action
-            if shot.child_action.startswith("孩子")
-            else f"孩子{shot.child_action}"
-        )
-        cat_action = (
-            shot.cat_action if shot.cat_action.startswith("猫咪") else f"猫咪{shot.cat_action}"
-        )
-        shot_parts = [
-            f"镜头{shot.order}（{shot.duration_seconds}秒，{shot.framing}）："
-            f"运镜{shot.camera_movement}；{child_action}；{cat_action}；"
-            f"环境变化{shot.environment_change}；转场{shot.transition}"
-        ]
-        if shot.lens is not None:
-            shot_parts.append(
-                "镜头语言："
-                f"{shot.lens.focal_length_equivalent}，机位高度{shot.lens.camera_height}，"
-                f"角度{shot.lens.camera_angle}，透视意图{shot.lens.perspective_intent}"
-            )
-        if shot.composition is not None:
-            shot_parts.append(
-                "构图："
-                f"主体{shot.composition.subject_placement}，前景{shot.composition.foreground}，"
-                f"中景{shot.composition.middle_ground}，背景{shot.composition.background}，"
-                f"运动方向{shot.composition.screen_direction}，视线{shot.composition.eye_line}"
-            )
-        if shot.child_blocking is not None:
-            shot_parts.append(
-                "人物走位："
-                f"{shot.child_blocking.initial_state}—{shot.child_blocking.movement_path}—"
-                f"{shot.child_blocking.end_state}；微动作"
-                f"{_join_prompt_items(shot.child_blocking.micro_motions)}"
-            )
-        if shot.cat_blocking is not None:
-            shot_parts.append(
-                "猫咪走位："
-                f"{shot.cat_blocking.initial_state}—{shot.cat_blocking.movement_path}—"
-                f"{shot.cat_blocking.end_state}；微动作"
-                f"{_join_prompt_items(shot.cat_blocking.micro_motions)}"
-            )
-        if shot.physical_change is not None:
-            shot_parts.append(
-                f"物理变化：{shot.physical_change.subject}从"
-                f"{shot.physical_change.before}→{shot.physical_change.after}"
-            )
-        if shot.continuity is not None:
-            shot_parts.append(
-                "连续性："
-                f"承接{shot.continuity.incoming}，离开{shot.continuity.outgoing}，"
-                f"共享元素{shot.continuity.shared_visual_element}，"
-                f"最终帧{shot.continuity.final_frame}"
-            )
-        if shot.lighting is not None:
-            shot_parts.append(
-                "光线："
-                f"{shot.lighting.direction}，{shot.lighting.softness}，"
-                f"{shot.lighting.color_intent}"
-            )
-        if shot.sound is not None:
-            sound_parts = [
-                f"环境声{_join_prompt_items(shot.sound.ambience)}",
-                f"物件声{_join_prompt_items(shot.sound.object_effects)}",
-                f"动作声{_join_prompt_items(shot.sound.movement_effects)}",
-                f"音乐{shot.sound.music_intent}",
-            ]
-            if shot.sound.dialogue:
-                sound_parts.append(f"对白{shot.sound.dialogue}")
-            shot_parts.append(f"声音：{'，'.join(sound_parts)}")
-        if shot.director_intent:
-            shot_parts.append(f"导演意图：{shot.director_intent}")
-        if shot.generation_risks:
-            shot_parts.append(
-                "生成风险："
-                + "，".join(f"{risk.code}：{risk.message}" for risk in shot.generation_risks)
-            )
-        direction_parts.append("；".join(shot_parts))
-    directions = "；".join(direction_parts)
-    active_endings = {
-        "雨天擦爪": ("孩子拿起并折好毛巾，猫咪沿脚垫向室内走两步，尾巴自然摆动；禁止原地互看"),
-        "浇花": (
-            "孩子将水壶放回一侧并轻推托盘归位，猫咪绕花盆走一小步、尾巴轻摆；"
-            "植物必须是柔和数字插画，不能有真实叶片摄影质感"
-        ),
-        "寻找滚落线团": (
-            "孩子将线团放进篮子并提起篮子，猫咪跟着向前走两步；禁止用静止凝视补足时长"
-        ),
-    }
-    active_ending = active_endings.get(project.theme, story.micro_event.warm_ending)
-    structured_event = (
-        f"触发：{story.micro_event.trigger}；"
-        f"孩子动作：{story.micro_event.child_action}；"
-        f"猫咪回应：{story.micro_event.cat_response}；"
-        f"可见变化：{story.micro_event.visible_change}；"
-        f"温暖结尾：{story.micro_event.warm_ending}"
-    )
-    treatment = shot_plan.director_treatment
-    treatment_prompt = ""
-    if treatment is not None:
-        treatment_prompt = (
-            f"总体导演设计：一句话故事{treatment.logline}；主题{treatment.theme}；"
-            f"情绪气质{_join_prompt_items(treatment.emotional_tone)}；"
-            f"视觉母题{treatment.visual_motif}；空间{treatment.spatial_setting}；"
-            f"情绪弧线{treatment.emotional_arc.opening}→"
-            f"{treatment.emotional_arc.development}→{treatment.emotional_arc.resolution}；"
-            f"声音意图{treatment.sound_intent}；结尾画面{treatment.ending_image}。"
-        )
-    return (
-        f"原创一人一猫生活短片《{project.title}》，9:16，{project.target_duration_seconds}秒。"
-        "固定同一位6至7岁儿童，身高约1.2米，齐下颌短发，保持圆润儿童脸型和"
-        "约4.5至5头身的低龄儿童比例；不得生成8岁以上的修长四肢、青少年脸型、"
-        "成人化身体比例，不得改变脸型、发型、年龄感和身体结构；"
-        "固定同一只灰白虎斑猫，保持毛色分区、"
-        "眼睛、鼻口、环纹尾巴和正常四足结构。二维柔和数字插画，暖灰细轮廓线，"
-        "哑光材质，轻微纸感颗粒，柔和漫射暖光。"
-        f"结构化生活事件：{structured_event}。{treatment_prompt}逐镜执行：{directions}。"
-        f"主动结尾：{active_ending}。"
-        "结尾必须继续发生一个清晰、自然、可观察的小动作，不得让儿童和猫咪"
-        "原地互看，不得使用完全静止、重复呼吸、无意义慢镜头或停帧来填充剩余时长。"
-        "无文字、无Logo、无水印，不复制任何画风来源中的叶片、露珠或摄影构图。"
-    )
-
-
-def _join_prompt_items(items: list[str]) -> str:
-    return "、".join(items) if items else "无"
 
 
 def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind) -> str:

@@ -37,7 +37,9 @@ from .models import (
     ProjectRecord,
     ProjectSelectionRecord,
     ProjectTagRecord,
+    SeriesEpisodeRecord,
     ShotPlanVersionRecord,
+    StorySeriesRecord,
     StoryVersionRecord,
     VideoRepairRecord,
 )
@@ -246,6 +248,10 @@ project_facts AS (
         collection.archived_at AS collection_archived_at,
         collection.created_at AS collection_created_at,
         collection.updated_at AS collection_updated_at,
+        series.id AS series_id,
+        series.title AS series_title,
+        series_episode.id AS series_episode_id,
+        series_episode.episode_order AS series_episode_order,
         coalesce(tag_state.tags, '[]'::jsonb) AS tags,
         coalesce(current_asset_state.assets, '{}'::jsonb) AS current_assets,
         active_story.id AS active_story_id,
@@ -277,6 +283,8 @@ project_facts AS (
         ) AS last_activity_at
     FROM catflow.projects AS project
     LEFT JOIN catflow.project_collections AS collection ON collection.id = project.collection_id
+    LEFT JOIN catflow.series_episodes AS series_episode ON series_episode.project_id = project.id
+    LEFT JOIN catflow.story_series AS series ON series.id = series_episode.series_id
     LEFT JOIN selection_state ON selection_state.project_id = project.id
     LEFT JOIN selection_activity ON selection_activity.project_id = project.id
     LEFT JOIN story_activity ON story_activity.project_id = project.id
@@ -353,6 +361,7 @@ filtered AS (
             :q = ''
             OR projection.title ILIKE '%' || :q || '%'
             OR projection.theme ILIKE '%' || :q || '%'
+            OR coalesce(projection.series_title, '') ILIKE '%' || :q || '%'
             OR coalesce(projection.collection_name, '') ILIKE '%' || :q || '%'
             OR EXISTS (
                 SELECT 1
@@ -470,6 +479,15 @@ SELECT
                 'targetDurationSeconds', item.target_duration_seconds,
                 'aspectRatio', item.aspect_ratio,
                 'coverAssetId', coalesce(item.poster_asset_id, item.environment_asset_id),
+                'series', CASE
+                    WHEN item.series_id IS NULL THEN NULL
+                    ELSE jsonb_build_object(
+                        'seriesId', item.series_id,
+                        'seriesTitle', item.series_title,
+                        'episodeId', item.series_episode_id,
+                        'episodeOrder', item.series_episode_order
+                    )
+                END,
                 'collection', CASE
                     WHEN item.collection_id IS NULL THEN NULL
                     ELSE jsonb_build_object(
@@ -806,6 +824,24 @@ class PostgresProjectLibraryRepository:
             select(VideoRepairRecord).where(VideoRepairRecord.project_id.in_(project_ids))
         ).all():
             repairs[record.project_id].append(record)
+        series_episodes = {
+            record.project_id: record
+            for record in session.scalars(
+                select(SeriesEpisodeRecord).where(SeriesEpisodeRecord.project_id.in_(project_ids))
+            ).all()
+            if record.project_id is not None
+        }
+        series_ids = {record.series_id for record in series_episodes.values()}
+        series_records = (
+            {
+                record.id: record
+                for record in session.scalars(
+                    select(StorySeriesRecord).where(StorySeriesRecord.id.in_(series_ids))
+                ).all()
+            }
+            if series_ids
+            else {}
+        )
         profiles = {
             record.id: record
             for record in session.scalars(
@@ -929,6 +965,12 @@ class PostgresProjectLibraryRepository:
             cover_asset_id = (
                 poster.id if poster is not None else (environment[0] if environment else None)
             )
+            series_episode = series_episodes.get(project.id)
+            series_record = (
+                series_records.get(series_episode.series_id)
+                if series_episode is not None
+                else None
+            )
             result.append(
                 ProjectLibraryItemDto(
                     id=project.id,
@@ -937,6 +979,16 @@ class PostgresProjectLibraryRepository:
                     targetDurationSeconds=project.target_duration_seconds,
                     aspectRatio=project.aspect_ratio,
                     coverAssetId=cover_asset_id,
+                    series=(
+                        {
+                            "seriesId": series_record.id,
+                            "seriesTitle": series_record.title,
+                            "episodeId": series_episode.id,
+                            "episodeOrder": series_episode.episode_order,
+                        }
+                        if series_episode is not None and series_record is not None
+                        else None
+                    ),
                     collection=collections.get(project.collection_id),
                     tags=tuple(tags[project.id]),
                     stage=stage,

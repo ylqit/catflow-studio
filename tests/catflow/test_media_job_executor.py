@@ -154,3 +154,109 @@ def test_ffmpeg_export_validates_edl_source_and_records_rendered_asset(tmp_path:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
         engine.dispose()
+
+
+def test_continuity_frame_job_extracts_tail_and_two_local_candidates(tmp_path: Path) -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions))
+    project = service.create_project(
+        ProjectCreate(title="连续性抽帧测试", theme="森林返程", targetDurationSeconds=8)
+    )
+    media_store = LocalMediaStore(tmp_path / "media")
+    ffmpeg_path = Path(os.environ["FFMPEG_PATH"])
+    executor = LocalMediaJobExecutor(
+        sessions,
+        media_store,
+        ffmpeg_path=ffmpeg_path,
+        ffprobe_path=Path(os.environ["FFPROBE_PATH"]),
+    )
+    source_job_id = uuid.uuid4()
+    source_asset_id = uuid.uuid4()
+    continuity_job_id = uuid.uuid4()
+    episode_id = uuid.uuid4()
+    try:
+        storage_key = f"generated/{project.id}/final/{source_job_id}.mp4"
+        source_path = media_store.resolve(storage_key)
+        _create_test_video(source_path, ffmpeg_path=ffmpeg_path)
+        payload = source_path.read_bytes()
+        source_sha256 = hashlib.sha256(payload).hexdigest()
+        with sessions.begin() as session:
+            session.add_all(
+                [
+                    JobRecord(
+                        id=source_job_id,
+                        project_id=project.id,
+                        kind="render_export",
+                        status="succeeded",
+                        input_hash="d" * 64,
+                        idempotency_key=f"continuity-source-{source_job_id}",
+                        provider="local_ffmpeg",
+                        model="ffmpeg-test-fixture",
+                        expected_cost_micros=0,
+                        frozen_input_json={"fixture": True},
+                    ),
+                    JobRecord(
+                        id=continuity_job_id,
+                        project_id=project.id,
+                        kind="extract_continuity_frames",
+                        status="storing",
+                        input_hash="c" * 64,
+                        idempotency_key=f"continuity-extract-{continuity_job_id}",
+                        provider="local_ffmpeg",
+                        model="ffmpeg-continuity-frames-v1",
+                        expected_cost_micros=0,
+                        frozen_input_json={
+                            "seriesEpisodeId": str(episode_id),
+                            "sourceVideoAssetId": str(source_asset_id),
+                            "sourceVideoSha256": source_sha256,
+                            "keyframeSeconds": [2.0, 6.0],
+                            "extractLastFrame": True,
+                        },
+                    ),
+                ]
+            )
+            session.flush()
+            session.add(
+                AssetRecord(
+                    id=source_asset_id,
+                    project_id=project.id,
+                    producing_job_id=source_job_id,
+                    candidate_index=0,
+                    role="final",
+                    media_type="video",
+                    storage_key=storage_key,
+                    sha256=source_sha256,
+                    byte_size=len(payload),
+                    width=480,
+                    height=854,
+                    duration_ms=8000,
+                    metadata_json={"durationFrames": 192},
+                )
+            )
+
+        executor.store_result(continuity_job_id)
+
+        assets = [
+            asset
+            for asset in service.list_assets(project.id)
+            if asset.producing_job_id == continuity_job_id
+        ]
+        assert [asset.role for asset in assets] == [
+            "episode_keyframe",
+            "episode_keyframe",
+            "episode_last_frame",
+        ]
+        assert sorted(
+            asset.candidate_index
+            for asset in assets
+            if asset.role == "episode_keyframe"
+        ) == [0, 1]
+        assert all(asset.media_type == "image" for asset in assets)
+        assert all(asset.metadata["sourceVideoAssetId"] == str(source_asset_id) for asset in assets)
+        assert all(asset.metadata["seriesEpisodeId"] == str(episode_id) for asset in assets)
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()

@@ -2,12 +2,29 @@ import type { RouteRecordRaw } from "vue-router";
 import { createRouter, createWebHistory } from "vue-router";
 
 const ProjectListView = () => import("./views/ProjectListView.vue");
+const SeriesListView = () => import("./views/SeriesListView.vue");
+const SeriesCreateView = () => import("./views/SeriesCreateView.vue");
+const SeriesWorkspaceView = () => import("./views/SeriesWorkspaceView.vue");
+const StoryImportView = () => import("./views/StoryImportView.vue");
 const WorkspaceView = () => import("./views/WorkspaceView.vue");
 const RuntimeSettingsView = () => import("./views/RuntimeSettingsView.vue");
 
 export const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/projects" },
   { path: "/projects", name: "projects", component: ProjectListView },
+  { path: "/series", name: "series", component: SeriesListView },
+  { path: "/series/new", name: "series-create", component: SeriesCreateView },
+  {
+    path: "/series/:seriesId",
+    name: "series-workspace",
+    component: SeriesWorkspaceView,
+  },
+  { path: "/story-imports/new", name: "story-import", component: StoryImportView },
+  {
+    path: "/story-imports/:documentId",
+    name: "story-import-detail",
+    component: StoryImportView,
+  },
   {
     path: "/projects/:projectId/planner",
     name: "project-planner",

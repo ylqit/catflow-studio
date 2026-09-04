@@ -50,6 +50,7 @@ const workspace: WorkspaceDto = {
 describe("AssetsStep", () => {
   const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     client.assets.mockResolvedValue([]);
     client.runtime.mockResolvedValue({ provider: { name: "ark", imageModel: "seedream" } });
@@ -84,6 +85,7 @@ describe("AssetsStep", () => {
     expect(wrapper.text()).toContain("雨天玄关和吸水脚垫");
     expect(wrapper.text()).toContain("空场景，不含人物与猫咪");
     expect(wrapper.text()).toContain("画风板");
+    expect(wrapper.text()).toContain("本次会使用付费模型，完成后显示实际用量");
 
     await wrapper.findAll("button").find((item) => item.text().includes("生成环境候选"))!.trigger("click");
     await flushPromises();
@@ -94,12 +96,46 @@ describe("AssetsStep", () => {
       expectedInputHash: "b".repeat(64),
       idempotencyKey: expect.any(String),
     });
-    expect(wrapper.text()).toContain("本次会使用付费模型，完成后显示实际用量");
+    const generateButton = wrapper.findAll("button").find((item) => item.text().includes("环境候选"))!;
+    expect(generateButton.attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("环境生成任务正在处理");
     expect(wrapper.get(".asset-intro").text()).not.toContain("style_source");
     expect(wrapper.get(".asset-intro").text()).not.toContain("Provider");
     expect(wrapper.text()).not.toContain("图片付费确认");
     expect(wrapper.text()).not.toContain("额度");
     expect(wrapper.text()).not.toContain("确认并提交");
+    wrapper.unmount();
+  });
+
+  it("restores an unfinished environment job and blocks another paid generation", async () => {
+    const runningWorkspace: WorkspaceDto = {
+      ...workspace,
+      latestAssetJob: {
+        id: "job-restored",
+        projectId: "project-1",
+        seriesId: null,
+        kind: "generate_image",
+        status: "submitting",
+        inputHash: "b".repeat(64),
+        frozenInput: {},
+        resultAssetIds: [],
+        billingStatus: "pending",
+        createdAt: "2026-09-04T08:00:00Z",
+        updatedAt: "2026-09-04T08:00:01Z",
+      },
+    };
+    const wrapper = mount(AssetsStep, {
+      props: { projectId: "project-1", workspace: runningWorkspace, runtime },
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+
+    const generateButton = wrapper.findAll("button").find((item) => item.text().includes("环境候选"))!;
+    expect(generateButton.attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("环境生成：正在准备");
+    expect(wrapper.text()).toContain("环境生成任务正在处理");
+    await generateButton.trigger("click");
+    expect(client.createAssetGeneration).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

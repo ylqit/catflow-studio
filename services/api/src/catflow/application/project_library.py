@@ -101,6 +101,13 @@ class ProjectLibraryBatchResultDto(ContractModel):
     updated_count: int = Field(alias="updatedCount")
 
 
+class ProjectLibrarySeriesDto(ContractModel):
+    series_id: uuid.UUID = Field(alias="seriesId")
+    series_title: str = Field(alias="seriesTitle")
+    episode_id: uuid.UUID = Field(alias="episodeId")
+    episode_order: int = Field(alias="episodeOrder", ge=1)
+
+
 class ProjectLibraryItemDto(ContractModel):
     id: uuid.UUID
     title: str
@@ -108,6 +115,7 @@ class ProjectLibraryItemDto(ContractModel):
     target_duration_seconds: int = Field(alias="targetDurationSeconds")
     aspect_ratio: str = Field(alias="aspectRatio")
     cover_asset_id: uuid.UUID | None = Field(alias="coverAssetId", default=None)
+    series: ProjectLibrarySeriesDto | None = None
     collection: ProjectCollectionDto | None = None
     tags: tuple[ProjectTagDto, ...] = ()
     stage: ProjectStage
@@ -302,6 +310,7 @@ def _filter_library_items(
                 (
                     item.title,
                     item.search_text or item.theme_summary,
+                    item.series.series_title if item.series else "",
                     item.collection.name if item.collection else "",
                     *(tag.name for tag in item.tags),
                 )

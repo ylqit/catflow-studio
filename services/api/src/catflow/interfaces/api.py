@@ -16,6 +16,15 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
+from catflow.application.continuity import (
+    EpisodeContinuityConfirmCommand,
+    EpisodeContinuityDto,
+    EpisodeContinuityKeyframesCommand,
+    EpisodeContinuityResetCommand,
+    EpisodeContinuitySnapshotDto,
+    SeriesAssetBindingDto,
+    SeriesAssetBindingsPatchCommand,
+)
 from catflow.application.project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -30,6 +39,22 @@ from catflow.application.project_library import (
     ProjectStage,
     ProjectSystemView,
 )
+from catflow.application.series import (
+    ProjectSeriesContextDto,
+    SeriesCreateCommand,
+    SeriesEpisodeDto,
+    SeriesEpisodeMaterializeCommand,
+    SeriesEpisodeStoryGenerationCommand,
+    SeriesEpisodeStoryPreviewCommand,
+    SeriesEpisodeStoryPreviewDto,
+    SeriesPatchCommand,
+    SeriesPlanActivationCommand,
+    SeriesPlanGenerationCommand,
+    SeriesPlanMaterializeCommand,
+    SeriesPlanPreviewDto,
+    SeriesPlanVersionDto,
+    StorySeriesDto,
+)
 from catflow.application.service import (
     AssetDto,
     AssetGenerationCommand,
@@ -39,10 +64,12 @@ from catflow.application.service import (
     CanonRevisionCreateCommand,
     EditCreateCommand,
     EditVersionDto,
+    EpisodeContinuityFramesDto,
     ExportCommand,
     FinalSelectionCommand,
     FixedCanonRole,
     GenerationCommand,
+    GenerationPreviewCommand,
     GenerationPreviewDto,
     ImageDiagnosisCommand,
     JobDto,
@@ -77,6 +104,16 @@ from catflow.application.service import (
     ValidationRunDto,
     VideoDiagnosisCommand,
     VideoRepairDto,
+)
+from catflow.application.story_imports import (
+    StoryImportConfirmCommand,
+    StoryImportCreateCommand,
+    StoryImportCreateResultDto,
+    StoryImportMaterializationDto,
+    StoryImportPreviewCommand,
+    StoryImportPreviewDto,
+    StoryImportReanalyzeCommand,
+    StorySourceDocumentDto,
 )
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import ShotPlanDraft
@@ -244,6 +281,14 @@ def create_app(
                 "capabilityRevision": provider.capability_revision,
                 "paidCallsEnabled": provider.paid_calls_enabled,
                 "apiKeyConfigured": settings.ark_api_key_configured,
+                "videoGeneration": {
+                    "maximumImageReferences": provider.maximum_video_references,
+                    "maximumVideoReferences": provider.maximum_video_input_references,
+                    "previousEpisodeVideoSupported": (
+                        provider.maximum_video_input_references >= 1
+                        and publisher_status.ready
+                    ),
+                },
                 "segmentRepair": {
                     "supported": segment_repair_supported,
                     "blockedReason": segment_repair_blocked_reason,
@@ -261,8 +306,7 @@ def create_app(
             detail={
                 "code": "worker_unavailable",
                 "message": (
-                    "后台任务暂时不可用，本次操作没有创建任务。"
-                    "系统正在尝试恢复，请稍后再试。"
+                    "后台任务暂时不可用，本次操作没有创建任务。系统正在尝试恢复，请稍后再试。"
                 ),
                 "retryable": True,
             },
@@ -443,6 +487,263 @@ def create_app(
     @app.post("/api/v1/projects", response_model=ProjectDto, status_code=status.HTTP_201_CREATED)
     def create_project(draft: ProjectCreate) -> ProjectDto:
         return service.create_project(draft)
+
+    @app.get("/api/v1/story-series", response_model=list[StorySeriesDto])
+    def story_series() -> list[StorySeriesDto]:
+        return service.list_story_series()
+
+    @app.post(
+        "/api/v1/story-series",
+        response_model=StorySeriesDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_story_series(command: SeriesCreateCommand) -> StorySeriesDto:
+        return service.create_story_series(command)
+
+    @app.get("/api/v1/story-series/{series_id}", response_model=StorySeriesDto)
+    def get_story_series(series_id: uuid.UUID) -> StorySeriesDto:
+        return service.get_story_series(series_id)
+
+    @app.patch("/api/v1/story-series/{series_id}", response_model=StorySeriesDto)
+    def patch_story_series(series_id: uuid.UUID, command: SeriesPatchCommand) -> StorySeriesDto:
+        return service.update_story_series(series_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plans/preview",
+        response_model=SeriesPlanPreviewDto,
+    )
+    def preview_series_plan(
+        series_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+    ) -> SeriesPlanPreviewDto:
+        return service.preview_series_plan(series_id)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plans/generations",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def generate_series_plan(series_id: uuid.UUID, command: SeriesPlanGenerationCommand) -> JobDto:
+        return service.create_series_plan_job(series_id, command)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/plans",
+        response_model=list[SeriesPlanVersionDto],
+    )
+    def series_plans(series_id: uuid.UUID) -> list[SeriesPlanVersionDto]:
+        return service.list_series_plan_versions(series_id)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plans/{plan_version_id}/materialize",
+        response_model=SeriesPlanVersionDto,
+    )
+    def materialize_series_plan(
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        command: SeriesPlanMaterializeCommand,
+    ) -> SeriesPlanVersionDto:
+        return service.materialize_series_plan(series_id, plan_version_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plans/{plan_version_id}/activate",
+        response_model=SeriesPlanVersionDto,
+    )
+    def activate_series_plan(
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        command: SeriesPlanActivationCommand,
+    ) -> SeriesPlanVersionDto:
+        return service.activate_series_plan(series_id, plan_version_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plans/{plan_version_id}/reject",
+        response_model=SeriesPlanVersionDto,
+    )
+    def reject_series_plan(
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        _payload: dict[str, Any] = Body(default={}),
+    ) -> SeriesPlanVersionDto:
+        return service.reject_series_plan(series_id, plan_version_id)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/episodes",
+        response_model=list[SeriesEpisodeDto],
+    )
+    def series_episodes(series_id: uuid.UUID) -> list[SeriesEpisodeDto]:
+        return service.list_series_episodes(series_id)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/jobs",
+        response_model=list[JobDto],
+    )
+    def series_jobs(series_id: uuid.UUID) -> list[JobDto]:
+        return service.list_series_jobs(series_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/series-context",
+        response_model=ProjectSeriesContextDto | None,
+    )
+    def project_series_context(project_id: uuid.UUID) -> ProjectSeriesContextDto | None:
+        return service.project_series_context(project_id)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/materialize",
+        response_model=ProjectDto,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def materialize_series_episode(
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: SeriesEpisodeMaterializeCommand,
+    ) -> ProjectDto:
+        return service.materialize_series_episode(series_id, episode_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations/preview",
+        response_model=SeriesEpisodeStoryPreviewDto,
+    )
+    def preview_series_episode_story(
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: SeriesEpisodeStoryPreviewCommand,
+    ) -> SeriesEpisodeStoryPreviewDto:
+        return service.preview_series_episode_story(
+            series_id,
+            episode_id,
+            additional_notes=command.additional_notes,
+        )
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def generate_series_episode_story(
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: SeriesEpisodeStoryGenerationCommand,
+    ) -> JobDto:
+        return service.create_series_episode_story_job(series_id, episode_id, command)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity",
+        response_model=EpisodeContinuityDto,
+    )
+    def series_episode_continuity(
+        series_id: uuid.UUID, episode_id: uuid.UUID
+    ) -> EpisodeContinuityDto:
+        return service.get_series_episode_continuity(series_id, episode_id)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/confirm",
+        response_model=EpisodeContinuitySnapshotDto,
+    )
+    def confirm_series_episode_continuity(
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: EpisodeContinuityConfirmCommand,
+    ) -> EpisodeContinuitySnapshotDto:
+        return service.confirm_series_episode_continuity(series_id, episode_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/reset",
+        response_model=EpisodeContinuitySnapshotDto,
+    )
+    def reset_series_episode_continuity(
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: EpisodeContinuityResetCommand,
+    ) -> EpisodeContinuitySnapshotDto:
+        return service.reset_series_episode_continuity(series_id, episode_id, command)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/frames",
+        response_model=EpisodeContinuityFramesDto,
+    )
+    def series_episode_continuity_frames(
+        series_id: uuid.UUID, episode_id: uuid.UUID
+    ) -> EpisodeContinuityFramesDto:
+        return service.get_episode_continuity_frames(series_id, episode_id)
+
+    @app.put(
+        "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/keyframes",
+        response_model=list[AssetDto],
+    )
+    def select_series_episode_continuity_keyframes(
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        command: EpisodeContinuityKeyframesCommand,
+    ) -> list[AssetDto]:
+        return service.select_episode_continuity_keyframes(series_id, episode_id, command)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/assets",
+        response_model=list[SeriesAssetBindingDto],
+    )
+    def series_assets(series_id: uuid.UUID) -> list[SeriesAssetBindingDto]:
+        return service.list_series_assets(series_id)
+
+    @app.patch(
+        "/api/v1/story-series/{series_id}/assets",
+        response_model=list[SeriesAssetBindingDto],
+    )
+    def update_series_assets(
+        series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
+    ) -> list[SeriesAssetBindingDto]:
+        return service.update_series_assets(series_id, command)
+
+    @app.post("/api/v1/story-imports/preview", response_model=StoryImportPreviewDto)
+    def preview_story_import(command: StoryImportPreviewCommand) -> StoryImportPreviewDto:
+        return service.preview_story_import(command)
+
+    @app.post(
+        "/api/v1/story-imports",
+        response_model=StoryImportCreateResultDto,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def create_story_import(command: StoryImportCreateCommand) -> StoryImportCreateResultDto:
+        preview = service.preview_story_import(
+            StoryImportPreviewCommand(
+                rawText=command.raw_text,
+                sourceFormat=command.source_format,
+                fileName=command.file_name,
+            )
+        )
+        if preview.duplicate_document_id is None:
+            require_worker_available()
+        return service.create_story_import(command)
+
+    @app.get("/api/v1/story-imports", response_model=list[StorySourceDocumentDto])
+    def story_imports() -> list[StorySourceDocumentDto]:
+        return service.list_story_imports()
+
+    @app.get(
+        "/api/v1/story-imports/{document_id}", response_model=StorySourceDocumentDto
+    )
+    def get_story_import(document_id: uuid.UUID) -> StorySourceDocumentDto:
+        return service.get_story_import(document_id)
+
+    @app.post(
+        "/api/v1/story-imports/{document_id}/reanalyze",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def reanalyze_story_import(
+        document_id: uuid.UUID, command: StoryImportReanalyzeCommand
+    ) -> JobDto:
+        return service.reanalyze_story_import(document_id, command)
+
+    @app.post(
+        "/api/v1/story-imports/{document_id}/confirm",
+        response_model=StoryImportMaterializationDto,
+    )
+    def confirm_story_import(
+        document_id: uuid.UUID, command: StoryImportConfirmCommand
+    ) -> StoryImportMaterializationDto:
+        return service.confirm_story_import(document_id, command)
 
     @app.get("/api/v1/projects/{project_id}", response_model=ProjectDto)
     def get_project(project_id: uuid.UUID) -> ProjectDto:
@@ -664,9 +965,12 @@ def create_app(
         response_model=GenerationPreviewDto,
     )
     def preview_video(
-        project_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
+        project_id: uuid.UUID, command: GenerationPreviewCommand = Body(default={})
     ) -> GenerationPreviewDto:
-        return service.preview_video_generation(project_id)
+        return service.preview_video_generation(
+            project_id,
+            include_previous_episode_video=command.include_previous_episode_video,
+        )
 
     @app.post(
         "/api/v1/projects/{project_id}/video-generations",
@@ -899,8 +1203,10 @@ def _worker_runtime(settings: AppSettings) -> dict[str, object]:
     supervisor_state = None if supervisor is None else supervisor.get("state")
     if heartbeat_is_fresh:
         state = "ready"
-    elif heartbeat_at is not None and worker_process_id is not None and _process_exists(
-        worker_process_id
+    elif (
+        heartbeat_at is not None
+        and worker_process_id is not None
+        and _process_exists(worker_process_id)
     ):
         state = "stale"
     elif supervisor_is_live and supervisor_state in {"starting", "ready", "restarting"}:

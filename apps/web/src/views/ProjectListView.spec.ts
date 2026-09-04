@@ -28,6 +28,7 @@ const items = Array.from({ length: 36 }, (_, index) => ({
   targetDurationSeconds: 12,
   aspectRatio: "9:16",
   coverAssetId: index === 0 ? "cover-1" : null,
+  series: index === 0 ? { seriesId: "series-1", seriesTitle: "森林野餐", episodeId: "episode-1", episodeOrder: 2 } : null,
   collection: index < 3 ? { id: "home", name: "居家日常", colorKey: "sage", sortOrder: 0, archived: false, createdAt: now, updatedAt: now } : null,
   tags: [{ name: "室内", normalizedName: "室内" }],
   stage: index === 0 ? "editing" : "story",
@@ -67,8 +68,11 @@ describe("ProjectListView", () => {
     expect(wrapper.text()).toContain("最近更新");
     expect(wrapper.text()).toContain("居家日常");
     expect(wrapper.text()).toContain("视频待选择");
+    expect(wrapper.text()).toContain("森林野餐 · 第 2 集");
     expect(wrapper.find("[aria-label='搜索项目']").exists()).toBe(true);
     expect(wrapper.find("[aria-label='切换为列表']").exists()).toBe(true);
+    expect(wrapper.text()).toContain("新建系列");
+    expect(wrapper.text()).toContain("导入故事");
     expect(wrapper.text()).not.toContain("Provider task ID");
   });
 
@@ -126,7 +130,7 @@ describe("ProjectListView", () => {
 
     const menu = wrapper.get("summary[aria-label='生活短片 0的更多操作']");
     expect(menu.element.closest("a")).toBeNull();
-    expect(wrapper.get("a.list-project").attributes("data-to")).toBe(
+    expect(wrapper.get(".list-row:not(.list-head) a.list-project").attributes("data-to")).toBe(
       "/projects/project-0/delivery",
     );
     await menu.trigger("click");

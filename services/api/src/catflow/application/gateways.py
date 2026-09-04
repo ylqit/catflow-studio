@@ -76,12 +76,7 @@ class SegmentVideoGenerationRequest:
         ):
             raise ValueError("segment generation Canon roles are incomplete or out of order")
         parsed = urlsplit(self.context_video_url)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-        ):
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("segment generation context video must use an HTTPS URL")
 
 
@@ -91,6 +86,18 @@ class PlanningGateway(Protocol):
     ) -> StructuredProviderResult: ...
 
     def plan_shots(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult: ...
+
+    def plan_series(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult: ...
+
+    def plan_series_episode(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult: ...
+
+    def analyze_story_source(
         self, *, prompt: str, output_schema: dict[str, object]
     ) -> StructuredProviderResult: ...
 
@@ -123,6 +130,7 @@ class VideoGenerationGateway(Protocol):
         prompt: str,
         reference_paths: tuple[Path, ...],
         reference_roles: tuple[str, ...],
+        reference_video_url: str | None = None,
         duration_seconds: int,
         resolution: str,
     ) -> VideoSubmissionResult: ...

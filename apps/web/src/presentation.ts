@@ -8,7 +8,13 @@ export interface PaidModelRuntime {
   provider: {
     apiKeyConfigured: boolean;
     paidCallsEnabled: boolean;
+    videoGeneration?: {
+      maximumImageReferences: number;
+      maximumVideoReferences: number;
+      previousEpisodeVideoSupported: boolean;
+    };
   };
+  objectPublisher?: { ready: boolean };
 }
 
 export type PresentationTone = "neutral" | "active" | "good" | "warn" | "danger";

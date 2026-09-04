@@ -6,7 +6,9 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from catflow.application.series import normalize_series_plan_result
 from catflow.application.service import StudioService
+from catflow.application.story_imports import StoryImportAnalysisDraft
 from catflow.domain.director_results import normalize_director_result
 from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.media import LocalMediaStore
@@ -43,10 +45,14 @@ class ArkResultLandingService:
             if job is None:
                 raise ValueError("job not found")
             kind = job.kind
-        if kind == "plan_story":
+        if kind in {"plan_story", "plan_series_episode"}:
             self._store_planner(job_id)
         elif kind == "plan_shots":
             self._store_shot_plan(job_id)
+        elif kind == "plan_series":
+            self._store_series_plan(job_id)
+        elif kind == "analyze_story_source":
+            self._store_story_source_analysis(job_id)
         elif kind == "generate_image":
             self._store_image(job_id)
         elif kind == "diagnose_image":
@@ -65,10 +71,16 @@ class ArkResultLandingService:
         proposal = result.get("payload")
         if not isinstance(proposal, dict):
             raise ValueError("planner result payload is missing")
-        self._studio_service.complete_planner_job(
-            job_id,
-            LifeStoryProposalDraft.model_validate(proposal),
-        )
+        parsed = LifeStoryProposalDraft.model_validate(proposal)
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if job is None:
+                raise ValueError("job not found")
+            kind = job.kind
+        if kind == "plan_series_episode":
+            self._studio_service.complete_series_episode_story_job(job_id, parsed)
+        else:
+            self._studio_service.complete_planner_job(job_id, parsed)
 
     def _store_shot_plan(self, job_id: uuid.UUID) -> None:
         result = self._provider_result(job_id)
@@ -81,8 +93,7 @@ class ArkResultLandingService:
                 code="director_output_validation_failed",
                 message="模型没有返回可读取的分镜内容，本次没有创建新版。",
                 detail="; ".join(
-                    f"{issue.path or '<root>'}: {issue.message}"
-                    for issue in normalized.issues
+                    f"{issue.path or '<root>'}: {issue.message}" for issue in normalized.issues
                 ),
             )
         if normalized.disposition == "needs_input":
@@ -94,6 +105,45 @@ class ArkResultLandingService:
         self._studio_service.complete_shot_plan_job(
             job_id,
             normalized.plan,
+        )
+
+    def _store_series_plan(self, job_id: uuid.UUID) -> None:
+        result = self._provider_result(job_id)
+        payload = result.get("payload")
+        job = self._studio_service.get_job(job_id)
+        if job.series_id is None:
+            raise ValueError("series planning job has no series")
+        series = self._studio_service.get_story_series(job.series_id)
+        normalized = normalize_series_plan_result(
+            payload,
+            expected_episode_count=series.planned_episode_count,
+            narrative_mode=series.narrative_mode,
+        )
+        self._studio_service.record_series_plan_validation(
+            job_id, normalized.validation_document()
+        )
+        if normalized.disposition == "invalid" or normalized.plan is None:
+            raise JobResultError(
+                code="series_plan_output_invalid",
+                message="模型没有返回可读取的整季方案，本次没有创建新方案。",
+                detail="; ".join(
+                    f"{issue.path or '<root>'}: {issue.message}"
+                    for issue in normalized.issues
+                ),
+            )
+        self._studio_service.complete_series_plan_job(
+            job_id,
+            normalized.plan,
+            validation_issues=list(normalized.issues),
+        )
+
+    def _store_story_source_analysis(self, job_id: uuid.UUID) -> None:
+        result = self._provider_result(job_id)
+        payload = result.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("story source analysis payload is missing")
+        self._studio_service.complete_story_import_analysis(
+            job_id, StoryImportAnalysisDraft.model_validate(payload)
         )
 
     def _store_image(self, job_id: uuid.UUID) -> None:

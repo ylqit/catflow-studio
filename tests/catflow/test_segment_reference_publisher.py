@@ -169,6 +169,80 @@ def test_publication_is_durable_idempotent_and_never_persists_the_signed_url(tmp
         engine.dispose()
 
 
+def test_previous_episode_video_can_be_published_for_a_different_episode_project(
+    tmp_path: Path,
+) -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    repository = PostgresStudioRepository(sessions)
+    service = StudioService(repository)
+    previous_project = service.create_project(
+        ProjectCreate(title="上一集", theme="准备野餐", targetDurationSeconds=12)
+    )
+    current_project = service.create_project(
+        ProjectCreate(title="本集", theme="快乐野餐", targetDurationSeconds=12)
+    )
+    source_path = tmp_path / "previous-episode.mp4"
+    source_path.write_bytes(b"previous-episode-final-video")
+    digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    job_id = uuid.uuid4()
+    try:
+        with sessions.begin() as session:
+            source = AssetRecord(
+                project_id=previous_project.id,
+                role="final",
+                media_type="video",
+                storage_key=f"generated/{previous_project.id}/final.mp4",
+                sha256=digest,
+                byte_size=source_path.stat().st_size,
+                metadata_json={"durationFrames": 288},
+            )
+            session.add(source)
+            session.flush()
+            source_id = source.id
+            session.add(
+                JobRecord(
+                    id=job_id,
+                    project_id=current_project.id,
+                    kind="generate_video",
+                    status="submitting",
+                    input_hash="a" * 64,
+                    idempotency_key=f"previous-video-{job_id}",
+                    provider="ark",
+                    model="video-model",
+                    frozen_input_json={
+                        "previousEpisodeVideoAssetId": str(source_id),
+                        "previousEpisodeVideoSha256": digest,
+                    },
+                )
+            )
+
+        store = RecordingObjectStore()
+        published = SegmentReferencePublisher(sessions, store).publish_asset(
+            job_id, source_id, source_path
+        )
+
+        assert published.url.startswith("https://")
+        with sessions() as session:
+            record = session.get(MediaPublicationRecord, published.publication_id)
+            assert record is not None
+            assert record.job_id == job_id
+            assert record.source_asset_id == source_id
+            assert str(current_project.id) in record.object_key
+    finally:
+        with sessions.begin() as session:
+            session.execute(
+                delete(MediaPublicationRecord).where(MediaPublicationRecord.job_id == job_id)
+            )
+            session.execute(
+                delete(ProjectRecord).where(
+                    ProjectRecord.id.in_((previous_project.id, current_project.id))
+                )
+            )
+        engine.dispose()
+
+
 def test_cleanup_deletes_only_due_exact_object_keys_and_keeps_audit_rows(tmp_path) -> None:
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_database_engine(DatabaseSettings.from_env())

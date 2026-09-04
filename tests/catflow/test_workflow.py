@@ -353,8 +353,6 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert "孩子孩子" not in preview.prompt
     assert "猫咪猫咪" not in preview.prompt
     assert story.body not in preview.prompt
-    assert story.micro_event.trigger in preview.prompt
-    assert story.micro_event.visible_change in preview.prompt
     assert preview.input_snapshot is not None
     assert preview.input_snapshot.state == "preview"
     assert preview.input_snapshot.video.duration_seconds == 12
@@ -370,6 +368,13 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert first_video_job.input_snapshot is not None
     assert first_video_job.input_snapshot.state == "submitted"
     assert first_video_job.input_snapshot.prompt == preview.prompt
+    assert first_video_job.input_snapshot.schema_version == 2
+    assert first_video_job.input_snapshot.prompt_compiler_revision == "seedance-professional-v4"
+    assert first_video_job.input_snapshot.prompt_summary == preview.prompt_summary
+    assert first_video_job.input_snapshot.prompt_sections == preview.prompt_sections
+    assert first_video_job.frozen_input["compiledProviderPrompt"] == (
+        f"【生成目标】\n{preview.prompt}\n\n【必须避免】\n{preview.negative_prompt}"
+    )
     workspace = service.workspace(project.id)
     assert workspace["latestVideoJob"]["id"] == str(first_video_job.id)
     assert workspace["eventCursor"] >= 1
@@ -747,7 +752,14 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
             idempotencyKey="professional-prompt-story",
         ),
     )
-    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    proposal_draft = _proposal().model_copy(
+        update={
+            "trigger": "旧故事触发：逐一执行五个独立动作",
+            "child_action": "旧故事动作：继续伸手整理下一件物品",
+            "warm_ending": "旧故事结尾：继续伸手，不停留在完成状态",
+        }
+    )
+    proposal = service.complete_planner_job(planner_job.id, proposal_draft)
     service.adopt_proposal(project.id, proposal.id)
     environment = service.register_asset(project.id, role="environment", sha256="7" * 64)
     service.select_asset(project.id, slot="environment", asset_id=environment.id)
@@ -762,9 +774,9 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         durationFrames=288,
         framing="中景",
         cameraMovement="缓慢跟随",
-        childAction="孩子逐只擦干猫爪",
-        catAction="猫咪抬爪后走上脚垫",
-        environmentChange="湿爪印明显减少",
+        childAction="简写人物动作不应进入专业提示词。",
+        catAction="简写猫咪动作不应进入专业提示词。",
+        environmentChange="简写环境变化不应进入专业提示词。",
         transition="continuous",
         lens=LensDesign(
             focalLengthEquivalent="35mm",
@@ -773,35 +785,35 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
             perspectiveIntent="同时看清手、猫爪和水印",
         ),
         composition=CompositionDesign(
-            subjectPlacement="孩子左侧，猫咪右侧",
-            foreground="软毛巾",
-            middleGround="孩子双手与猫爪",
-            background="暖光玄关",
-            screenDirection="从门口向室内",
-            eyeLine="孩子看向猫爪",
+            subjectPlacement="孩子左侧，猫咪右侧。",
+            foreground="软毛巾；",
+            middleGround="孩子双手与猫爪，",
+            background="暖光玄关。",
+            screenDirection="从门口向室内；",
+            eyeLine="孩子看向猫爪。",
         ),
         childBlocking=BlockingDesign(
-            initialState="孩子站在脚垫旁",
-            movementPath="屈膝蹲下并逐只擦拭",
-            endState="孩子起身折好毛巾",
-            microMotions=["重新握紧毛巾"],
+            initialState="孩子站在脚垫旁。",
+            movementPath="屈膝蹲下并逐只擦拭；",
+            endState="孩子起身折好毛巾，",
+            microMotions=["重新握紧毛巾。"],
         ),
         catBlocking=BlockingDesign(
-            initialState="猫咪四足站在湿脚垫边缘",
-            movementPath="依次抬爪并转移重心",
-            endState="猫咪向室内迈出两步",
-            microMotions=["尾巴自然摆动"],
+            initialState="猫咪四足站在湿脚垫边缘。",
+            movementPath="依次抬爪并转移重心；",
+            endState="猫咪向室内迈出两步，",
+            microMotions=["尾巴自然摆动。"],
         ),
         physicalChange=PhysicalChangeDesign(
             subject="猫爪和地面水印",
-            before="潮湿并留下连续水印",
-            after="猫爪擦干且水印减少",
+            before="潮湿并留下连续水印。",
+            after="猫爪擦干且水印减少；",
         ),
         continuity=ContinuityDesign(
             incoming="承接猫咪进门动作",
             outgoing="猫咪继续走向室内",
             sharedVisualElement="同一块毛巾和脚垫",
-            finalFrame="孩子折好毛巾，猫咪仍在向前迈步",
+            finalFrame="孩子折好毛巾，猫咪仍在向前迈步。",
         ),
         lighting=LightingDesign(
             direction="右上方室内暖光",
@@ -815,7 +827,7 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
             musicIntent="极轻木琴点音",
         ),
         directorIntent="用动作和物理变化呈现照顾感",
-        generationRisks=[{"code": "paw_occlusion", "message": "避免手与猫爪融合"}],
+        generationRisks=[{"code": "paw_occlusion", "message": "避免手与猫爪融合。"}],
     )
     payload = DirectorPlanPayload(
         targetDurationSeconds=12,
@@ -848,6 +860,15 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         shots=[shot],
     )
     candidate = service.complete_shot_plan_job(job.id, payload)
+    assert candidate.shots[0].child_action == (
+        "孩子站在脚垫旁 → 屈膝蹲下并逐只擦拭 → 孩子起身折好毛巾"
+    )
+    assert candidate.shots[0].cat_action == (
+        "猫咪四足站在湿脚垫边缘 → 依次抬爪并转移重心 → 猫咪向室内迈出两步"
+    )
+    assert candidate.shots[0].environment_change == (
+        "猫爪和地面水印 · 潮湿并留下连续水印 → 猫爪擦干且水印减少"
+    )
     service.activate_shot_plan(
         project.id,
         candidate.id,
@@ -857,18 +878,49 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         ),
     )
 
-    prompt = service.preview_video_generation(project.id).prompt
+    preview = service.preview_video_generation(project.id)
+    prompt = preview.prompt
 
+    assert [section.key for section in preview.prompt_sections] == [
+        "identity_style",
+        "creative_treatment",
+        "shot_execution",
+        "ending_constraints",
+    ]
+    assert "主要动作" in preview.prompt_summary
+    assert "可见变化" in preview.prompt_summary
+    assert "最终画面" in preview.prompt_summary
+    assert prompt.startswith("【角色与画风】\n")
+    assert "\n\n【整体基调】\n" in prompt
+    assert "\n\n【逐镜执行】\n" in prompt
+    assert "\n\n【结尾与生成限制】\n" in prompt
     for expected in (
         "35mm",
-        "孩子站在脚垫旁—屈膝蹲下并逐只擦拭—孩子起身折好毛巾",
-        "猫咪四足站在湿脚垫边缘—依次抬爪并转移重心—猫咪向室内迈出两步",
-        "潮湿并留下连续水印→猫爪擦干且水印减少",
+        "孩子站在脚垫旁 → 屈膝蹲下并逐只擦拭 → 孩子起身折好毛巾",
+        "猫咪四足站在湿脚垫边缘 → 依次抬爪并转移重心 → 猫咪向室内迈出两步",
+        "潮湿并留下连续水印 → 猫爪擦干且水印减少",
         "孩子折好毛巾，猫咪仍在向前迈步",
         "轻雨声",
-        "paw_occlusion：避免手与猫爪融合",
+        "逐镜执行是动作、节拍和最终状态的唯一权威",
+        "主动结尾：孩子折好毛巾，猫咪仍在向前迈步",
     ):
         assert expected in prompt
+    for invalid_boundary in ("。；", "。，", "。。", "；。"):
+        assert invalid_boundary not in prompt
+    assert shot.child_action not in prompt
+    assert shot.cat_action not in prompt
+    assert shot.environment_change not in prompt
+    assert prompt.count("孩子折好毛巾，猫咪仍在向前迈步") == 1
+    assert "paw_occlusion" not in prompt
+    assert "镜头1：paw_occlusion：避免手与猫爪融合" in preview.negative_prompt
+    assert proposal_draft.child_action not in prompt
+    assert proposal_draft.trigger not in prompt
+    assert proposal_draft.warm_ending not in prompt
+    assert payload.director_treatment.logline not in prompt
+    assert payload.director_treatment.ending_image not in prompt
+    assert preview.warnings == [
+        {"code": "paw_occlusion", "message": "避免手与猫爪融合。"}
+    ]
 
 
 def test_selected_environment_is_scoped_to_its_project() -> None:
@@ -951,6 +1003,7 @@ def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> 
 
     assert preview.kind == "episode_cat"
     assert job.kind == "generate_image"
+    assert service.workspace(project.id)["latestAssetJob"]["id"] == str(job.id)
     assert job.frozen_input["role"] == "episode_cat"
     assert all(reference["role"] != "style_source" for reference in job.frozen_input["references"])
 

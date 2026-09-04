@@ -11,6 +11,10 @@ from PIL import Image
 from sqlalchemy import delete, select
 
 from catflow.application.provider_config import ProviderRuntime
+from catflow.application.series import (
+    SeriesCreateCommand,
+    SeriesPlanGenerationCommand,
+)
 from catflow.application.service import (
     PlannerMessageCommand,
     ProjectCreate,
@@ -28,6 +32,7 @@ from catflow.infrastructure.models import (
     AssetRecord,
     JobRecord,
     ProjectRecord,
+    StorySeriesRecord,
 )
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow_worker.ark_results import ArkResultLandingService
@@ -115,6 +120,102 @@ def test_ark_result_landing_creates_planner_proposal_from_persisted_result(
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_series_plan_landing_preserves_recoverable_provider_result(
+    tmp_path: Path,
+) -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
+    series = service.create_story_series(
+        SeriesCreateCommand(
+            title="森林野餐",
+            premise="孩子和猫咪从准备到返程",
+            narrativeMode="continuous",
+            plannedEpisodeCount=2,
+            defaultEpisodeDurationSeconds=12,
+            worldSetting="家与森林",
+            emotionalDirection="期待到满足",
+        )
+    )
+    preview = service.preview_series_plan(series.id)
+    job = service.create_series_plan_job(
+        series.id,
+        SeriesPlanGenerationCommand(
+            expectedInputHash=preview.input_hash,
+            idempotencyKey=f"series-landing-{series.id}",
+        ),
+    )
+    payload = {
+        "seriesBible": {
+            "logline": "一起完成野餐。",
+            "centralTheme": "陪伴",
+            "narrativeMode": "continuous",
+            "emotionalArc": {
+                "opening": "期待",
+                "development": "准备",
+                "climax": "野餐",
+            },
+            "plannerNote": "夕阳方向保持一致",
+        },
+        "episodes": [
+            {
+                "order": order,
+                "title": title,
+                "targetDurationSeconds": 12,
+                "premise": title,
+                "openingState": "承接上一状态",
+                "trigger": "孩子开始行动",
+                "childIntent": "完成本集事件",
+                "childAction": "开始、行动并停下",
+                "catResponse": "观察、回应并停下",
+                "visibleChange": "道具状态改变",
+                "endingState": "形成明确结尾",
+            }
+            for order, title in ((1, "准备野餐"), (2, "快乐返程"))
+        ],
+        "extraSummary": "模型附带的创作说明",
+    }
+    try:
+        with sessions.begin() as session:
+            record = session.get(JobRecord, job.id)
+            assert record is not None
+            record.status = "storing"
+            record.provider_result_json = {
+                "payload": payload,
+                "responseId": "series-response-1",
+                "model": "planning",
+            }
+        landing = ArkResultLandingService(
+            sessions,
+            LocalMediaStore(tmp_path),
+            studio_service=service,
+            downloader=ProviderMediaDownloader(
+                client=httpx.Client(transport=httpx.MockTransport(lambda _request: None)),
+                resolve_host=lambda _host: ("8.8.8.8",),
+            ),
+            ffprobe_path=Path("ffprobe"),
+        )
+
+        landing.store_result(job.id)
+
+        candidate = service.list_series_plan_versions(series.id)[0]
+        assert candidate.disposition == "needs_input"
+        assert candidate.plan.series_bible.emotional_arc.resolution == ""
+        assert {issue.code for issue in candidate.issues} == {
+            "provider_extra_field",
+            "required_content_missing",
+        }
+        stored_job = service.get_job(job.id)
+        assert stored_job.provider_result is not None
+        assert stored_job.provider_result["payload"] == payload
+        assert stored_job.provider_result["validation"]["recoverable"] is True
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(StorySeriesRecord).where(StorySeriesRecord.id == series.id))
         engine.dispose()
 
 

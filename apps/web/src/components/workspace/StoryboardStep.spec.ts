@@ -214,14 +214,133 @@ describe("StoryboardStep", () => {
 
     expect(wrapper.text()).toContain("景别");
     expect(wrapper.text()).toContain("人物动作");
+    expect(wrapper.get('[data-testid="shot-child-summary"]').text()).toContain(
+      "蹲在门边 → 手持毛巾逐只擦拭 → 起身折好毛巾",
+    );
+    expect(wrapper.get('[data-testid="shot-child-summary"]').find("input").exists()).toBe(false);
+    expect(wrapper.get('[data-testid="shot-cat-summary"]').text()).toContain(
+      "前爪潮湿 → 依次抬爪配合 → 走上干燥脚垫",
+    );
+    expect(wrapper.get('[data-testid="shot-change-summary"]').text()).toContain(
+      "猫爪与地面 · 潮湿且有水印 → 擦干且水印减少",
+    );
+    expect(wrapper.get('[data-testid="shot-ending-summary"]').text()).toContain(
+      "孩子折好毛巾，猫咪继续迈步",
+    );
     const details = wrapper.get('[data-testid="professional-shot-details"]');
     expect(details.get("summary").text()).toBe("查看镜头细节");
     expect(details.attributes("open")).toBeUndefined();
+    expect(details.text()).toContain("动作与状态");
+    expect(details.text()).toContain("镜头画面");
+    expect(details.text()).toContain("连续性与结尾");
+    expect(details.text()).toContain("光线与声音");
+    expect(details.text()).toContain("导演意图与风险");
     expect(details.findAll("input").some((input) => input.element.value === "35mm")).toBe(true);
     expect(details.findAll("textarea").some((input) => input.element.value === "蹲在门边")).toBe(true);
     expect(details.findAll("textarea").some((input) => input.element.value === "孩子折好毛巾，猫咪继续迈步")).toBe(true);
     expect(details.text()).toContain("轻雨声");
     expect(details.text()).toContain("避免手与猫爪融合");
+
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    await wrapper.get('[data-testid="shot-child-summary"] button').trigger("click");
+    await flushPromises();
+    expect((details.element as HTMLDetailsElement).open).toBe(true);
+    expect(focus).toHaveBeenCalled();
+    focus.mockRestore();
+  });
+
+  it("saves compatibility summaries derived from the professional shot details", async () => {
+    const plan = {
+      id: "plan-1", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {}, shots: [{
+        ...professionalShot,
+        childAction: "这份旧人物摘要不应成为保存权威",
+        catAction: "这份旧猫咪摘要不应成为保存权威",
+        environmentChange: "这份旧变化摘要不应成为保存权威",
+      }], totalDurationSeconds: 12,
+      directorTreatment: { logline: "雨天门边的一次温柔照顾", theme: "日常照顾" },
+      directorPromptRevision: "catflow-director-v1", directorModel: "planner", directorInputHash: "b".repeat(64),
+      reviewStatus: "accepted" as const, active: true, outdated: false, createdAt: "2026-09-01T00:00:00Z",
+    };
+    client.createShotPlan.mockResolvedValue({ ...plan, id: "plan-2", revision: 2 });
+    const wrapper = mountStoryboard(plan);
+    await flushPromises();
+
+    await wrapper.get('[data-testid="shot-1-child-movement"]').setValue("抱住猫咪并逐只擦拭");
+    expect(wrapper.get('[data-testid="shot-child-summary"]').text()).toContain(
+      "蹲在门边 → 抱住猫咪并逐只擦拭 → 起身折好毛巾",
+    );
+    await wrapper.get(".head-actions .primary").trigger("click");
+    await flushPromises();
+
+    const command = client.createShotPlan.mock.calls[0]?.[1];
+    expect(command.shots[0].childAction).toBe(
+      "蹲在门边 → 抱住猫咪并逐只擦拭 → 起身折好毛巾",
+    );
+    expect(command.shots[0].catAction).toBe(
+      "前爪潮湿 → 依次抬爪配合 → 走上干燥脚垫",
+    );
+    expect(command.shots[0].environmentChange).toBe(
+      "猫爪与地面 · 潮湿且有水印 → 擦干且水印减少",
+    );
+  });
+
+  it("lets the creator remove a stale micro motion before saving a new version", async () => {
+    const plan = {
+      id: "plan-1", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {},
+      shots: [{
+        ...professionalShot,
+        childBlocking: {
+          ...professionalShot.childBlocking!,
+          microMotions: ["重新握紧毛巾", "伸向下一样物品"],
+        },
+      }],
+      totalDurationSeconds: 12,
+      directorTreatment: { logline: "雨天门边的一次温柔照顾", theme: "日常照顾" },
+      directorPromptRevision: "catflow-director-v1", directorModel: "planner", directorInputHash: "b".repeat(64),
+      reviewStatus: "accepted" as const, active: true, outdated: false, createdAt: "2026-09-01T00:00:00Z",
+    };
+    client.createShotPlan.mockResolvedValue({ ...plan, id: "plan-2", revision: 2 });
+    const wrapper = mountStoryboard(plan);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="移除人物微动作 2"]').trigger("click");
+    await wrapper.get(".head-actions .primary").trigger("click");
+    await flushPromises();
+
+    const command = client.createShotPlan.mock.calls[0]?.[1];
+    expect(command.shots[0].childBlocking.microMotions).toEqual(["重新握紧毛巾"]);
+  });
+
+  it("lets the creator remove a stale generation risk before saving a new version", async () => {
+    const plan = {
+      id: "plan-1", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {},
+      shots: [{
+        ...professionalShot,
+        generationRisks: [
+          { code: "SINGLE_SHOT_TIMING", message: "原动作节拍过多" },
+          { code: "HAND_SCALE", message: "保持儿童手部比例" },
+        ],
+      }],
+      totalDurationSeconds: 12,
+      directorTreatment: { logline: "雨天门边的一次温柔照顾", theme: "日常照顾" },
+      directorPromptRevision: "catflow-director-v1", directorModel: "planner", directorInputHash: "b".repeat(64),
+      reviewStatus: "accepted" as const, active: true, outdated: false, createdAt: "2026-09-01T00:00:00Z",
+    };
+    client.createShotPlan.mockResolvedValue({ ...plan, id: "plan-2", revision: 2 });
+    const wrapper = mountStoryboard(plan);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="移除生成风险 SINGLE_SHOT_TIMING"]').trigger("click");
+    await wrapper.get(".head-actions .primary").trigger("click");
+    await flushPromises();
+
+    const command = client.createShotPlan.mock.calls[0]?.[1];
+    expect(command.shots[0].generationRisks).toEqual([
+      { code: "HAND_SCALE", message: "保持儿童手部比例" },
+    ]);
   });
 
   it("hydrates the formal plan when the SSE-backed workspace projection changes", async () => {
@@ -270,6 +389,7 @@ describe("StoryboardStep", () => {
     await wrapper.get('[data-testid="compare-shot-plan"]').trigger("click");
     expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).toContain("缓慢推近");
     expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).toContain("缓慢跟随");
+    expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').find("pre").exists()).toBe(false);
     client.activateShotPlan.mockResolvedValue({ ...candidate, reviewStatus: "accepted", active: true });
     await wrapper.get(".head-actions .primary").trigger("click");
     await flushPromises();

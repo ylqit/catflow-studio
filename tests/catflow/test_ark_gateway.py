@@ -217,6 +217,75 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
     assert all(item["role"] == "reference_image" for item in image_content)
 
 
+def test_ark_video_gateway_places_an_explicit_https_video_after_fixed_images(
+    tmp_path: Path,
+) -> None:
+    video_tasks = Recorder(SimpleNamespace(id="video-task-2"))
+    gateway = ArkTypedGateway(
+        _settings(),
+        client=SimpleNamespace(
+            content_generation=SimpleNamespace(tasks=video_tasks),
+        ),
+    )
+    references = tuple(
+        _image(tmp_path / f"reference-{index}.png", color)
+        for index, color in enumerate(("red", "green", "blue", "white", "gray"), 1)
+    )
+
+    gateway.submit_video(
+        prompt="承接上一集开场",
+        reference_paths=references,
+        reference_roles=(
+            "episode_child",
+            "episode_cat",
+            "pair_scale",
+            "environment",
+            "style_board",
+        ),
+        reference_video_url="https://media.example.test/episode-1.mp4?signature=safe",
+        duration_seconds=12,
+        resolution="480p",
+    )
+
+    content = video_tasks.calls[0]["content"]
+    assert [item["type"] for item in content] == [
+        "text",
+        "image_url",
+        "image_url",
+        "image_url",
+        "image_url",
+        "image_url",
+        "video_url",
+    ]
+    assert content[-1] == {
+        "type": "video_url",
+        "video_url": {
+            "url": "https://media.example.test/episode-1.mp4?signature=safe"
+        },
+        "role": "reference_video",
+    }
+    assert "不得取代前五张图片" in content[0]["text"]
+
+
+def test_ark_video_gateway_rejects_non_https_video_references(tmp_path: Path) -> None:
+    gateway = ArkTypedGateway(
+        _settings(),
+        client=SimpleNamespace(
+            content_generation=SimpleNamespace(tasks=Recorder(SimpleNamespace(id="unused"))),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        gateway.submit_video(
+            prompt="不应提交",
+            reference_paths=(),
+            reference_roles=(),
+            reference_video_url="file:///private/episode.mp4",
+            duration_seconds=12,
+            resolution="480p",
+        )
+
+
 def test_ark_video_poll_maps_succeeded_media_urls() -> None:
     task = SimpleNamespace(
         id="video-task-1",

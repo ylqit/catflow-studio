@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from PIL import Image
 
@@ -43,15 +44,9 @@ class ArkGatewaySettings:
         return cls(
             api_key=os.environ.get("ARK_API_KEY", ""),
             base_url=os.environ.get("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
-            planning_model=os.environ.get(
-                "ARK_PLANNING_MODEL", "doubao-seed-2-1-pro-260628"
-            ),
-            image_model=os.environ.get(
-                "ARK_IMAGE_MODEL", "doubao-seedream-5-0-260128"
-            ),
-            video_model=os.environ.get(
-                "ARK_VIDEO_MODEL", "doubao-seedance-2-0-260128"
-            ),
+            planning_model=os.environ.get("ARK_PLANNING_MODEL", "doubao-seed-2-1-pro-260628"),
+            image_model=os.environ.get("ARK_IMAGE_MODEL", "doubao-seedream-5-0-260128"),
+            video_model=os.environ.get("ARK_VIDEO_MODEL", "doubao-seedance-2-0-260128"),
             diagnostic_model=os.environ.get(
                 "ARK_DIAGNOSTIC_MODEL",
                 os.environ.get("ARK_PLANNING_MODEL", "doubao-seed-2-1-pro-260628"),
@@ -96,6 +91,39 @@ class ArkTypedGateway:
             image_paths=(),
             output_schema=output_schema,
             max_output_tokens=8000,
+        )
+
+    def plan_series(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return self._structured_response(
+            model=self._settings.planning_model,
+            prompt=prompt,
+            image_paths=(),
+            output_schema=output_schema,
+            max_output_tokens=16000,
+        )
+
+    def plan_series_episode(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return self._structured_response(
+            model=self._settings.planning_model,
+            prompt=prompt,
+            image_paths=(),
+            output_schema=output_schema,
+            max_output_tokens=4000,
+        )
+
+    def analyze_story_source(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return self._structured_response(
+            model=self._settings.planning_model,
+            prompt=prompt,
+            image_paths=(),
+            output_schema=output_schema,
+            max_output_tokens=12000,
         )
 
     def diagnose(
@@ -165,18 +193,37 @@ class ArkTypedGateway:
         prompt: str,
         reference_paths: tuple[Path, ...],
         reference_roles: tuple[str, ...],
+        reference_video_url: str | None = None,
         duration_seconds: int,
         resolution: str,
     ) -> VideoSubmissionResult:
         if len(reference_paths) != len(reference_roles):
             raise ValueError("video reference paths and roles must have the same length")
-        if len(reference_paths) > 5:
-            raise ValueError("CatFlow Seedance capability accepts at most five references")
+        if len(reference_paths) > 9:
+            raise ValueError("CatFlow Seedance capability accepts at most nine image references")
+        if reference_video_url is not None:
+            parsed = urlsplit(reference_video_url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError("video reference must use an HTTPS URL without credentials")
         role_sequence = " → ".join(reference_roles)
+        video_guidance = (
+            "\n上一集成片只负责服装、道具、空间位置、时间、光线与直接接镜状态；"
+            "不得取代前五张图片对儿童、猫咪、比例、当前环境和画风的约束。"
+            if reference_video_url is not None
+            else ""
+        )
         content: list[dict[str, object]] = [
             {
                 "type": "text",
-                "text": f"{prompt}\n参考图片按顺序承担以下职责：{role_sequence}。",
+                "text": (
+                    f"{prompt}\n参考图片按顺序承担以下职责：{role_sequence}。"
+                    f"{video_guidance}"
+                ),
             }
         ]
         for path in reference_paths:
@@ -185,6 +232,14 @@ class ArkTypedGateway:
                     "type": "image_url",
                     "image_url": {"url": _image_data_url(path)},
                     "role": "reference_image",
+                }
+            )
+        if reference_video_url is not None:
+            content.append(
+                {
+                    "type": "video_url",
+                    "video_url": {"url": reference_video_url},
+                    "role": "reference_video",
                 }
             )
         try:
@@ -212,8 +267,7 @@ class ArkTypedGateway:
         return VideoSubmissionResult(
             task_id=task_id,
             request_id=_optional_string(
-                getattr(response, "request_id", None)
-                or getattr(response, "_request_id", None)
+                getattr(response, "request_id", None) or getattr(response, "_request_id", None)
             ),
         )
 
@@ -264,9 +318,7 @@ class ArkTypedGateway:
             },
         )
 
-    def submit_segment_video(
-        self, request: SegmentVideoGenerationRequest
-    ) -> VideoSubmissionResult:
+    def submit_segment_video(self, request: SegmentVideoGenerationRequest) -> VideoSubmissionResult:
         image_paths = (
             request.anchor_in_path,
             request.anchor_out_path,
@@ -329,8 +381,7 @@ class ArkTypedGateway:
         return VideoSubmissionResult(
             task_id=task_id,
             request_id=_optional_string(
-                getattr(response, "request_id", None)
-                or getattr(response, "_request_id", None)
+                getattr(response, "request_id", None) or getattr(response, "_request_id", None)
             ),
         )
 
@@ -401,9 +452,7 @@ class ArkTypedGateway:
                 submission_unknown=False,
                 request_id=_optional_string(getattr(response, "id", None)),
                 provider_status=provider_status,
-                incomplete_reason=_optional_string(
-                    getattr(incomplete_details, "reason", None)
-                ),
+                incomplete_reason=_optional_string(getattr(incomplete_details, "reason", None)),
                 max_output_tokens=max_output_tokens,
                 usage=_usage_document(getattr(response, "usage", None)),
             )
@@ -497,9 +546,7 @@ def _image_data_url(path: Path) -> str:
     with Image.open(path) as image:
         image.verify()
         image_format = str(image.format or "").upper()
-    mime = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}.get(
-        image_format
-    )
+    mime = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}.get(image_format)
     if mime is None:
         raise ValueError(f"unsupported reference image format: {image_format}")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")

@@ -331,6 +331,435 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/story-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Story Series */
+        get: operations["story_series_api_v1_story_series_get"];
+        put?: never;
+        /** Create Story Series */
+        post: operations["create_story_series_api_v1_story_series_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Story Series */
+        get: operations["get_story_series_api_v1_story_series__series_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Story Series */
+        patch: operations["patch_story_series_api_v1_story_series__series_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Series Plan */
+        post: operations["preview_series_plan_api_v1_story_series__series_id__plans_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plans/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Series Plan */
+        post: operations["generate_series_plan_api_v1_story_series__series_id__plans_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Plans */
+        get: operations["series_plans_api_v1_story_series__series_id__plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plans/{plan_version_id}/materialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize Series Plan */
+        post: operations["materialize_series_plan_api_v1_story_series__series_id__plans__plan_version_id__materialize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plans/{plan_version_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Series Plan */
+        post: operations["activate_series_plan_api_v1_story_series__series_id__plans__plan_version_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plans/{plan_version_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Series Plan */
+        post: operations["reject_series_plan_api_v1_story_series__series_id__plans__plan_version_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Episodes */
+        get: operations["series_episodes_api_v1_story_series__series_id__episodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Jobs */
+        get: operations["series_jobs_api_v1_story_series__series_id__jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/series-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Series Context */
+        get: operations["project_series_context_api_v1_projects__project_id__series_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/materialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize Series Episode */
+        post: operations["materialize_series_episode_api_v1_story_series__series_id__episodes__episode_id__materialize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Series Episode Story */
+        post: operations["preview_series_episode_story_api_v1_story_series__series_id__episodes__episode_id__story_generations_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Series Episode Story */
+        post: operations["generate_series_episode_story_api_v1_story_series__series_id__episodes__episode_id__story_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Episode Continuity */
+        get: operations["series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Series Episode Continuity */
+        post: operations["confirm_series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Series Episode Continuity */
+        post: operations["reset_series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Episode Continuity Frames */
+        get: operations["series_episode_continuity_frames_api_v1_story_series__series_id__episodes__episode_id__continuity_frames_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/keyframes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Select Series Episode Continuity Keyframes */
+        put: operations["select_series_episode_continuity_keyframes_api_v1_story_series__series_id__episodes__episode_id__continuity_keyframes_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Assets */
+        get: operations["series_assets_api_v1_story_series__series_id__assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Series Assets */
+        patch: operations["update_series_assets_api_v1_story_series__series_id__assets_patch"];
+        trace?: never;
+    };
+    "/api/v1/story-imports/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Story Import */
+        post: operations["preview_story_import_api_v1_story_imports_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Story Imports */
+        get: operations["story_imports_api_v1_story_imports_get"];
+        put?: never;
+        /** Create Story Import */
+        post: operations["create_story_import_api_v1_story_imports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-imports/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Story Import */
+        get: operations["get_story_import_api_v1_story_imports__document_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-imports/{document_id}/reanalyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reanalyze Story Import */
+        post: operations["reanalyze_story_import_api_v1_story_imports__document_id__reanalyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-imports/{document_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Story Import */
+        post: operations["confirm_story_import_api_v1_story_imports__document_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}": {
         parameters: {
             query?: never;
@@ -1025,6 +1454,11 @@ export interface components {
         };
         /** AssetGenerationCommand */
         AssetGenerationCommand: {
+            /**
+             * Includepreviousepisodevideo
+             * @default false
+             */
+            includePreviousEpisodeVideo: boolean;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
@@ -1149,7 +1583,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board" | "style_source";
+            role: "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board" | "style_source" | "previous_episode_last_frame" | "previous_episode_keyframe_1" | "previous_episode_keyframe_2";
             /** Sha256 */
             sha256: string;
             /** Priority */
@@ -1184,6 +1618,19 @@ export interface components {
             sharedVisualElement: string;
             /** Finalframe */
             finalFrame: string;
+        };
+        /** ContinuityPropState */
+        ContinuityPropState: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** Location */
+            location?: string | null;
+            /** Owner */
+            owner?: ("child" | "cat" | "environment") | null;
         };
         /** DirectorMicroEvent */
         DirectorMicroEvent: {
@@ -1483,6 +1930,130 @@ export interface components {
             /** Resolution */
             resolution: string;
         };
+        /** EpisodeContinuityConfirmCommand */
+        EpisodeContinuityConfirmCommand: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "incoming" | "outgoing";
+            state: components["schemas"]["EpisodeContinuityState"];
+            /** Decisions */
+            decisions?: {
+                [key: string]: "inherit" | "adjust" | "reset";
+            };
+            /** Expectedsnapshotid */
+            expectedSnapshotId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** EpisodeContinuityDto */
+        EpisodeContinuityDto: {
+            /**
+             * Episodeid
+             * Format: uuid
+             */
+            episodeId: string;
+            /** Previousepisodeid */
+            previousEpisodeId?: string | null;
+            incoming?: components["schemas"]["EpisodeContinuitySnapshotDto"] | null;
+            outgoing?: components["schemas"]["EpisodeContinuitySnapshotDto"] | null;
+        };
+        /** EpisodeContinuityFramesDto */
+        EpisodeContinuityFramesDto: {
+            /**
+             * Episodeid
+             * Format: uuid
+             */
+            episodeId: string;
+            /** Sourcevideoassetid */
+            sourceVideoAssetId?: string | null;
+            lastFrame?: components["schemas"]["AssetDto"] | null;
+            /** Candidates */
+            candidates?: components["schemas"]["AssetDto"][];
+            /** Selectedkeyframes */
+            selectedKeyframes?: components["schemas"]["AssetDto"][];
+        };
+        /** EpisodeContinuityKeyframesCommand */
+        EpisodeContinuityKeyframesCommand: {
+            /** Assetids */
+            assetIds: string[];
+        };
+        /** EpisodeContinuityResetCommand */
+        EpisodeContinuityResetCommand: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "incoming" | "outgoing";
+            /**
+             * Expectedsnapshotid
+             * Format: uuid
+             */
+            expectedSnapshotId: string;
+        };
+        /** EpisodeContinuitySnapshotDto */
+        EpisodeContinuitySnapshotDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Episodeid
+             * Format: uuid
+             */
+            episodeId: string;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "incoming" | "outgoing";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "planned" | "confirmed" | "final_video";
+            state: components["schemas"]["EpisodeContinuityState"];
+            /** Decisions */
+            decisions?: {
+                [key: string]: "inherit" | "adjust" | "reset";
+            };
+            /** Confirmed */
+            confirmed: boolean;
+            /** Active */
+            active: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** EpisodeContinuityState */
+        EpisodeContinuityState: {
+            /** Wardrobe */
+            wardrobe: string;
+            /** Location */
+            location: string;
+            /** Weather */
+            weather: string;
+            /** Timeofday */
+            timeOfDay: string;
+            /** Lighting */
+            lighting: string;
+            /** Childstate */
+            childState: string;
+            /** Catstate */
+            catState: string;
+            /** Spatialpositions */
+            spatialPositions: string;
+            /** Props */
+            props?: components["schemas"]["ContinuityPropState"][];
+            /** Unfinishedactions */
+            unfinishedActions?: string[];
+            /** Endingimage */
+            endingImage: string;
+        };
         /** ExportCommand */
         ExportCommand: {
             /**
@@ -1510,6 +2081,11 @@ export interface components {
         };
         /** GenerationCommand */
         GenerationCommand: {
+            /**
+             * Includepreviousepisodevideo
+             * @default false
+             */
+            includePreviousEpisodeVideo: boolean;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
@@ -1542,9 +2118,9 @@ export interface components {
         GenerationInputSnapshotDto: {
             /**
              * Schemaversion
-             * @constant
+             * @enum {integer}
              */
-            schemaVersion: 1;
+            schemaVersion: 1 | 2;
             /**
              * Kind
              * @enum {string}
@@ -1567,8 +2143,14 @@ export interface components {
             prompt: string;
             /** Negativeprompt */
             negativePrompt: string;
+            /** Promptsummary */
+            promptSummary?: string | null;
+            /** Promptsections */
+            promptSections?: components["schemas"]["GenerationPromptSectionDto"][];
             /** References */
             references: components["schemas"]["GenerationInputReferenceDto"][];
+            /** Videoreferences */
+            videoReferences?: components["schemas"]["GenerationInputVideoReferenceDto"][];
             video: components["schemas"]["GenerationVideoSpecDto"];
             source: components["schemas"]["GenerationInputSourceDto"];
             segmentEdit?: components["schemas"]["SegmentEditInputDto"] | null;
@@ -1593,6 +2175,33 @@ export interface components {
             /** Basetimelinehash */
             baseTimelineHash?: string | null;
         };
+        /** GenerationInputVideoReferenceDto */
+        GenerationInputVideoReferenceDto: {
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /**
+             * Role
+             * @constant
+             */
+            role: "previous_episode_video";
+            /** Sha256 */
+            sha256: string;
+            /** Durationseconds */
+            durationSeconds?: number | null;
+            /** Included */
+            included: boolean;
+        };
+        /** GenerationPreviewCommand */
+        GenerationPreviewCommand: {
+            /**
+             * Includepreviousepisodevideo
+             * @default false
+             */
+            includePreviousEpisodeVideo: boolean;
+        };
         /** GenerationPreviewDto */
         GenerationPreviewDto: {
             /** Inputhash */
@@ -1613,8 +2222,14 @@ export interface components {
             prompt: string;
             /** Negativeprompt */
             negativePrompt: string;
+            /** Promptsummary */
+            promptSummary: string;
+            /** Promptsections */
+            promptSections: components["schemas"]["GenerationPromptSectionDto"][];
             /** References */
             references: components["schemas"]["CompiledReference"][];
+            /** Videoreferences */
+            videoReferences?: components["schemas"]["GenerationInputVideoReferenceDto"][];
             /** Expectedcostmicros */
             expectedCostMicros?: number | null;
             /**
@@ -1637,10 +2252,26 @@ export interface components {
             /** Durationseconds */
             durationSeconds: number;
             inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
+            /** Seriesepisodeid */
+            seriesEpisodeId?: string | null;
+            /** Continuitysnapshotid */
+            continuitySnapshotId?: string | null;
             /** Warnings */
             warnings?: {
                 [key: string]: string;
             }[];
+        };
+        /** GenerationPromptSectionDto */
+        GenerationPromptSectionDto: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "identity_style" | "creative_treatment" | "shot_execution" | "ending_constraints";
+            /** Title */
+            title: string;
+            /** Content */
+            content: string;
         };
         /** GenerationRisk */
         GenerationRisk: {
@@ -1742,16 +2373,17 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Projectid
-             * Format: uuid
-             */
-            projectId: string;
+            /** Projectid */
+            projectId?: string | null;
+            /** Seriesid */
+            seriesId?: string | null;
+            /** Storysourcedocumentid */
+            storySourceDocumentId?: string | null;
             /**
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
+            kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
             /**
              * Status
              * @enum {string}
@@ -2264,6 +2896,7 @@ export interface components {
             aspectRatio: string;
             /** Coverassetid */
             coverAssetId?: string | null;
+            series?: components["schemas"]["ProjectLibrarySeriesDto"] | null;
             collection?: components["schemas"]["ProjectCollectionDto"] | null;
             /**
              * Tags
@@ -2309,6 +2942,23 @@ export interface components {
             /** Total */
             total: number;
             facets: components["schemas"]["ProjectLibraryFacetsDto"];
+        };
+        /** ProjectLibrarySeriesDto */
+        ProjectLibrarySeriesDto: {
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Seriestitle */
+            seriesTitle: string;
+            /**
+             * Episodeid
+             * Format: uuid
+             */
+            episodeId: string;
+            /** Episodeorder */
+            episodeOrder: number;
         };
         /** ProjectOrganizationCommand */
         ProjectOrganizationCommand: {
@@ -2361,6 +3011,13 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** ProjectSeriesContextDto */
+        ProjectSeriesContextDto: {
+            series: components["schemas"]["StorySeriesDto"];
+            episode: components["schemas"]["SeriesEpisodeDto"];
+            /** Episodes */
+            episodes: components["schemas"]["SeriesEpisodeDto"][];
         };
         /** ProjectTagDto */
         ProjectTagDto: {
@@ -2467,6 +3124,42 @@ export interface components {
             numerator: number;
             /** Denominator */
             denominator: number;
+        };
+        /** RecurringLocationDraft */
+        RecurringLocationDraft: {
+            /**
+             * Key
+             * @default
+             */
+            key: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** RecurringPropDraft */
+        RecurringPropDraft: {
+            /**
+             * Key
+             * @default
+             */
+            key: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Continuityrule
+             * @default
+             */
+            continuityRule: string;
         };
         /** SegmentEditInputDto */
         SegmentEditInputDto: {
@@ -2633,6 +3326,447 @@ export interface components {
              * Format: uuid
              */
             assetId: string;
+        };
+        /** SeriesAssetBindingCommand */
+        SeriesAssetBindingCommand: {
+            /** Bindingkey */
+            bindingKey: string;
+            /** Role */
+            role: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+        };
+        /** SeriesAssetBindingDto */
+        SeriesAssetBindingDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Bindingkey */
+            bindingKey: string;
+            /** Role */
+            role: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Assetsha256 */
+            assetSha256: string;
+            /** Active */
+            active: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** SeriesAssetBindingsPatchCommand */
+        SeriesAssetBindingsPatchCommand: {
+            /** Bindings */
+            bindings: components["schemas"]["SeriesAssetBindingCommand"][];
+        };
+        /** SeriesBibleDraft */
+        SeriesBibleDraft: {
+            /**
+             * Logline
+             * @default
+             */
+            logline: string;
+            /**
+             * Centraltheme
+             * @default
+             */
+            centralTheme: string;
+            /** Narrativemode */
+            narrativeMode?: ("continuous" | "lightly_serialized" | "anthology") | null;
+            /** Worldrules */
+            worldRules?: string[];
+            emotionalArc?: components["schemas"]["SeriesEmotionalArcDraft"];
+            /** Recurringlocations */
+            recurringLocations?: components["schemas"]["RecurringLocationDraft"][];
+            /** Recurringprops */
+            recurringProps?: components["schemas"]["RecurringPropDraft"][];
+            /** Wardroberules */
+            wardrobeRules?: string[];
+            /** Continuityrules */
+            continuityRules?: string[];
+            /** Visualmotifs */
+            visualMotifs?: string[];
+            /** Soundmotifs */
+            soundMotifs?: string[];
+            /** Forbiddenchanges */
+            forbiddenChanges?: string[];
+        };
+        /** SeriesCreateCommand */
+        SeriesCreateCommand: {
+            /** Title */
+            title: string;
+            /** Premise */
+            premise: string;
+            /**
+             * Narrativemode
+             * @enum {string}
+             */
+            narrativeMode: "continuous" | "lightly_serialized" | "anthology";
+            /** Plannedepisodecount */
+            plannedEpisodeCount: number;
+            /** Defaultepisodedurationseconds */
+            defaultEpisodeDurationSeconds: number;
+            /** Worldsetting */
+            worldSetting: string;
+            /** Emotionaldirection */
+            emotionalDirection: string;
+            /** Endinggoal */
+            endingGoal?: string | null;
+            /** Recurringelements */
+            recurringElements?: string[];
+            /** Mustkeep */
+            mustKeep?: string[];
+            /** Mustavoid */
+            mustAvoid?: string[];
+            /** Additionalnotes */
+            additionalNotes?: string | null;
+        };
+        /** SeriesEmotionalArcDraft */
+        SeriesEmotionalArcDraft: {
+            /**
+             * Opening
+             * @default
+             */
+            opening: string;
+            /**
+             * Development
+             * @default
+             */
+            development: string;
+            /**
+             * Climax
+             * @default
+             */
+            climax: string;
+            /**
+             * Resolution
+             * @default
+             */
+            resolution: string;
+        };
+        /** SeriesEpisodeDto */
+        SeriesEpisodeDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Order */
+            order: number;
+            /** Title */
+            title: string;
+            /** Targetdurationseconds */
+            targetDurationSeconds: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "outline" | "story_review" | "assets" | "storyboard" | "generating" | "selecting" | "editing" | "completed" | "needs_attention";
+            /** Projectid */
+            projectId?: string | null;
+            /**
+             * Activeoutlineversionid
+             * Format: uuid
+             */
+            activeOutlineVersionId: string;
+            outline: components["schemas"]["SeriesEpisodeOutlineDraft"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** SeriesEpisodeMaterializeCommand */
+        SeriesEpisodeMaterializeCommand: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesEpisodeOutlineDraft */
+        SeriesEpisodeOutlineDraft: {
+            /**
+             * Order
+             * @default 0
+             */
+            order: number;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Targetdurationseconds
+             * @default 0
+             */
+            targetDurationSeconds: number;
+            /**
+             * Premise
+             * @default
+             */
+            premise: string;
+            /**
+             * Openingstate
+             * @default
+             */
+            openingState: string;
+            /**
+             * Trigger
+             * @default
+             */
+            trigger: string;
+            /**
+             * Childintent
+             * @default
+             */
+            childIntent: string;
+            /**
+             * Childaction
+             * @default
+             */
+            childAction: string;
+            /**
+             * Catresponse
+             * @default
+             */
+            catResponse: string;
+            /**
+             * Visiblechange
+             * @default
+             */
+            visibleChange: string;
+            /**
+             * Endingstate
+             * @default
+             */
+            endingState: string;
+            /** Continuitycarryover */
+            continuityCarryover?: string[];
+            /** Recurringlocationkeys */
+            recurringLocationKeys?: string[];
+            /** Recurringpropkeys */
+            recurringPropKeys?: string[];
+            /** Productionwarnings */
+            productionWarnings?: string[];
+        };
+        /** SeriesEpisodeStoryGenerationCommand */
+        SeriesEpisodeStoryGenerationCommand: {
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Additionalnotes */
+            additionalNotes?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesEpisodeStoryPreviewCommand */
+        SeriesEpisodeStoryPreviewCommand: {
+            /** Additionalnotes */
+            additionalNotes?: string | null;
+        };
+        /** SeriesEpisodeStoryPreviewDto */
+        SeriesEpisodeStoryPreviewDto: {
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /**
+             * Seriesplanversionid
+             * Format: uuid
+             */
+            seriesPlanVersionId: string;
+            /**
+             * Seriesepisodeid
+             * Format: uuid
+             */
+            seriesEpisodeId: string;
+            /**
+             * Episodeoutlineversionid
+             * Format: uuid
+             */
+            episodeOutlineVersionId: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /** Incomingcontinuity */
+            incomingContinuity?: string | null;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /** Inputhash */
+            inputHash: string;
+            /** Prompt */
+            prompt: string;
+            /** Outputschema */
+            outputSchema: {
+                [key: string]: unknown;
+            };
+            /** Promptrevision */
+            promptRevision: string;
+        };
+        /** SeriesPatchCommand */
+        SeriesPatchCommand: {
+            /** Title */
+            title?: string | null;
+            /** Premise */
+            premise?: string | null;
+            /** Worldsetting */
+            worldSetting?: string | null;
+            /** Emotionaldirection */
+            emotionalDirection?: string | null;
+            /** Endinggoal */
+            endingGoal?: string | null;
+            /** Additionalnotes */
+            additionalNotes?: string | null;
+        };
+        /** SeriesPlanActivationCommand */
+        SeriesPlanActivationCommand: {
+            /** Expectedactiveplanversionid */
+            expectedActivePlanVersionId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesPlanDraft */
+        SeriesPlanDraft: {
+            seriesBible: components["schemas"]["SeriesBibleDraft"];
+            /** Episodes */
+            episodes: components["schemas"]["SeriesEpisodeOutlineDraft"][];
+        };
+        /** SeriesPlanGenerationCommand */
+        SeriesPlanGenerationCommand: {
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesPlanMaterializeCommand */
+        SeriesPlanMaterializeCommand: {
+            /**
+             * Baseplanversionid
+             * Format: uuid
+             */
+            basePlanVersionId: string;
+            plan: components["schemas"]["SeriesPlanDraft"];
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesPlanPreviewDto */
+        SeriesPlanPreviewDto: {
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /** Inputhash */
+            inputHash: string;
+            /** Prompt */
+            prompt: string;
+            /** Outputschema */
+            outputSchema: {
+                [key: string]: unknown;
+            };
+            /** Plannedepisodecount */
+            plannedEpisodeCount: number;
+            /** Defaultepisodedurationseconds */
+            defaultEpisodeDurationSeconds: number;
+            /** Promptrevision */
+            promptRevision: string;
+        };
+        /** SeriesPlanVersionDto */
+        SeriesPlanVersionDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "accepted" | "rejected" | "superseded";
+            /** Active */
+            active: boolean;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "candidate_ready" | "needs_input" | "invalid";
+            plan: components["schemas"]["SeriesPlanDraft"];
+            /** Inputhash */
+            inputHash: string;
+            /** Promptrevision */
+            promptRevision: string;
+            /** Producingjobid */
+            producingJobId?: string | null;
+            /** Baseplanversionid */
+            basePlanVersionId?: string | null;
+            /** Issues */
+            issues?: components["schemas"]["SeriesValidationIssueDto"][];
+            /** Decidedat */
+            decidedAt?: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** SeriesValidationIssueDto */
+        SeriesValidationIssueDto: {
+            /** Code */
+            code: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "fatal" | "blocking" | "warning";
+            /** Path */
+            path: string;
+            /** Message */
+            message: string;
+            /** Suggestedaction */
+            suggestedAction?: string | null;
         };
         /** ShotPlanActivationCommand */
         ShotPlanActivationCommand: {
@@ -2894,6 +4028,349 @@ export interface components {
             dialoguePolicy: "none" | "minimal";
             /** Environmentintent */
             environmentIntent: string;
+        };
+        /** StoryImportAnalysisJobDto */
+        StoryImportAnalysisJobDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "submitting" | "submitted" | "polling" | "storing" | "succeeded" | "failed" | "cancel_requested" | "cancelled" | "submission_unknown";
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Actualusage */
+            actualUsage?: {
+                [key: string]: unknown;
+            } | null;
+            /** Actualcostmicros */
+            actualCostMicros?: number | null;
+            /**
+             * Billingstatus
+             * @default pending
+             */
+            billingStatus: string;
+            /** Error */
+            error?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** StoryImportConfirmCommand */
+        StoryImportConfirmCommand: {
+            /**
+             * Suggestionid
+             * Format: uuid
+             */
+            suggestionId: string;
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "independent" | "new_series" | "append_series" | "revision" | "reference";
+            /** Targetseriesid */
+            targetSeriesId?: string | null;
+            /** Targetprojectid */
+            targetProjectId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** StoryImportCreateCommand */
+        StoryImportCreateCommand: {
+            /** Rawtext */
+            rawText: string;
+            /**
+             * Sourceformat
+             * @enum {string}
+             */
+            sourceFormat: "paste" | "txt" | "md";
+            /** Filename */
+            fileName?: string | null;
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** StoryImportCreateResultDto */
+        StoryImportCreateResultDto: {
+            document: components["schemas"]["StorySourceDocumentDto"];
+            analysisJob?: components["schemas"]["StoryImportAnalysisJobDto"] | null;
+            /** Reused */
+            reused: boolean;
+        };
+        /** StoryImportMaterializationDto */
+        StoryImportMaterializationDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Suggestionid
+             * Format: uuid
+             */
+            suggestionId: string;
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "independent" | "new_series" | "append_series" | "revision" | "reference";
+            /** Targetseriesid */
+            targetSeriesId?: string | null;
+            /** Targetprojectid */
+            targetProjectId?: string | null;
+            series?: components["schemas"]["StorySeriesDto"] | null;
+            /** Projects */
+            projects?: components["schemas"]["StoryImportProjectDto"][];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** StoryImportPreviewCommand */
+        StoryImportPreviewCommand: {
+            /** Rawtext */
+            rawText: string;
+            /**
+             * Sourceformat
+             * @enum {string}
+             */
+            sourceFormat: "paste" | "txt" | "md";
+            /** Filename */
+            fileName?: string | null;
+        };
+        /** StoryImportPreviewDto */
+        StoryImportPreviewDto: {
+            /** Contenthash */
+            contentHash: string;
+            /** Inputhash */
+            inputHash: string;
+            /** Charactercount */
+            characterCount: number;
+            /** Duplicatedocumentid */
+            duplicateDocumentId?: string | null;
+            /** Prompt */
+            prompt: string;
+            /** Outputschema */
+            outputSchema: {
+                [key: string]: unknown;
+            };
+            /** Promptrevision */
+            promptRevision: string;
+        };
+        /** StoryImportProjectDto */
+        StoryImportProjectDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Theme */
+            theme: string;
+            /** Targetdurationseconds */
+            targetDurationSeconds: number;
+        };
+        /** StoryImportReanalyzeCommand */
+        StoryImportReanalyzeCommand: {
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** StorySeriesDto */
+        StorySeriesDto: {
+            /** Title */
+            title: string;
+            /** Premise */
+            premise: string;
+            /**
+             * Narrativemode
+             * @enum {string}
+             */
+            narrativeMode: "continuous" | "lightly_serialized" | "anthology";
+            /** Plannedepisodecount */
+            plannedEpisodeCount: number;
+            /** Defaultepisodedurationseconds */
+            defaultEpisodeDurationSeconds: number;
+            /** Worldsetting */
+            worldSetting: string;
+            /** Emotionaldirection */
+            emotionalDirection: string;
+            /** Endinggoal */
+            endingGoal?: string | null;
+            /** Recurringelements */
+            recurringElements?: string[];
+            /** Mustkeep */
+            mustKeep?: string[];
+            /** Mustavoid */
+            mustAvoid?: string[];
+            /** Additionalnotes */
+            additionalNotes?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /** Activeplanversionid */
+            activePlanVersionId?: string | null;
+            /**
+             * Plannedcount
+             * @default 0
+             */
+            plannedCount: number;
+            /**
+             * Materializedcount
+             * @default 0
+             */
+            materializedCount: number;
+            /**
+             * Completedcount
+             * @default 0
+             */
+            completedCount: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** StorySourceDocumentDto */
+        StorySourceDocumentDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Contenthash */
+            contentHash: string;
+            /**
+             * Sourceformat
+             * @enum {string}
+             */
+            sourceFormat: "paste" | "txt" | "md";
+            /** Filename */
+            fileName?: string | null;
+            /** Rawtext */
+            rawText: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "analyzing" | "analyzed" | "confirmed" | "failed";
+            /** Analysisjobid */
+            analysisJobId?: string | null;
+            /** Units */
+            units?: components["schemas"]["StorySourceUnitDto"][];
+            /** Relationsuggestions */
+            relationSuggestions?: components["schemas"]["StorySourceRelationSuggestionDto"][];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** StorySourceRelationSuggestionDto */
+        StorySourceRelationSuggestionDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Documentid
+             * Format: uuid
+             */
+            documentId: string;
+            /**
+             * Relationtype
+             * @enum {string}
+             */
+            relationType: "independent" | "new_series" | "append_series" | "revision" | "reference";
+            /** Unitids */
+            unitIds: string[];
+            /** Title */
+            title: string;
+            /** Narrativemode */
+            narrativeMode?: ("continuous" | "lightly_serialized" | "anthology") | null;
+            /** Suggestedseriesid */
+            suggestedSeriesId?: string | null;
+            /** Confidence */
+            confidence: number;
+            /** Rationale */
+            rationale: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "suggested" | "accepted" | "rejected";
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** StorySourceUnitDto */
+        StorySourceUnitDto: {
+            /** Ordinal */
+            ordinal: number;
+            /** Title */
+            title: string;
+            /** Theme */
+            theme?: string | null;
+            /** Rawtext */
+            rawText: string;
+            /** Analysis */
+            analysis?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Documentid
+             * Format: uuid
+             */
+            documentId: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
         };
         /** StoryVersionDto */
         StoryVersionDto: {
@@ -3822,6 +5299,964 @@ export interface operations {
             };
         };
     };
+    story_series_api_v1_story_series_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySeriesDto"][];
+                };
+            };
+        };
+    };
+    create_story_series_api_v1_story_series_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySeriesDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_story_series_api_v1_story_series__series_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySeriesDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_story_series_api_v1_story_series__series_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPatchCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySeriesDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_series_plan_api_v1_story_series__series_id__plans_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_series_plan_api_v1_story_series__series_id__plans_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPlanGenerationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_plans_api_v1_story_series__series_id__plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanVersionDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    materialize_series_plan_api_v1_story_series__series_id__plans__plan_version_id__materialize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                plan_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPlanMaterializeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_series_plan_api_v1_story_series__series_id__plans__plan_version_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                plan_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPlanActivationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_series_plan_api_v1_story_series__series_id__plans__plan_version_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                plan_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_episodes_api_v1_story_series__series_id__episodes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesEpisodeDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_jobs_api_v1_story_series__series_id__jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_series_context_api_v1_projects__project_id__series_context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSeriesContextDto"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    materialize_series_episode_api_v1_story_series__series_id__episodes__episode_id__materialize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesEpisodeMaterializeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_series_episode_story_api_v1_story_series__series_id__episodes__episode_id__story_generations_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesEpisodeStoryPreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesEpisodeStoryPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_series_episode_story_api_v1_story_series__series_id__episodes__episode_id__story_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesEpisodeStoryGenerationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpisodeContinuityDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EpisodeContinuityConfirmCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpisodeContinuitySnapshotDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EpisodeContinuityResetCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpisodeContinuitySnapshotDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_episode_continuity_frames_api_v1_story_series__series_id__episodes__episode_id__continuity_frames_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpisodeContinuityFramesDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    select_series_episode_continuity_keyframes_api_v1_story_series__series_id__episodes__episode_id__continuity_keyframes_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                episode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EpisodeContinuityKeyframesCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_assets_api_v1_story_series__series_id__assets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesAssetBindingDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_series_assets_api_v1_story_series__series_id__assets_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesAssetBindingsPatchCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesAssetBindingDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_story_import_api_v1_story_imports_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryImportPreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryImportPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    story_imports_api_v1_story_imports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySourceDocumentDto"][];
+                };
+            };
+        };
+    };
+    create_story_import_api_v1_story_imports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryImportCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryImportCreateResultDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_story_import_api_v1_story_imports__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySourceDocumentDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reanalyze_story_import_api_v1_story_imports__document_id__reanalyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryImportReanalyzeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_story_import_api_v1_story_imports__document_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryImportConfirmCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryImportMaterializationDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_project_api_v1_projects__project_id__get: {
         parameters: {
             query?: never;
@@ -4660,9 +7095,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["GenerationPreviewCommand"];
             };
         };
         responses: {

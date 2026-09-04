@@ -68,7 +68,7 @@ catflow_studio
 .\scripts\configure-existing-postgres.ps1
 ```
 
-脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；截至 `0018_remove_obsolete_job_kinds` 有 19 张业务表，`catflow.alembic_version` 是额外的迁移版本表。
+脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；当前迁移 head 为 `0020_shot_plan_review_workflow`。数据库表和接口的现状汇总见 [当前架构与开发交接](docs/CURRENT_ARCHITECTURE_AND_HANDOFF.md)。
 
 ## 本机启动
 

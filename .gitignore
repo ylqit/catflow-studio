@@ -20,6 +20,7 @@ docs/LibTV
 /.playwright-mcp
 /docs/*
 /docs.zip
+!/docs/CURRENT_ARCHITECTURE_AND_HANDOFF.md
 !/docs/checklists/
 /docs/checklists/*
 !/docs/checklists/shot-queue-production-core.md

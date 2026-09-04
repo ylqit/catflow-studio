@@ -6,10 +6,30 @@ import uuid
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from catflow.application.continuity import (
+    EpisodeContinuityConfirmCommand,
+    EpisodeContinuityResetCommand,
+    EpisodeContinuitySnapshotDto,
+    EpisodeContinuityState,
+    SeriesAssetBindingDto,
+    SeriesAssetBindingsPatchCommand,
+    planned_continuity_state,
+)
 from catflow.application.project_library import suggested_theme_tags
+from catflow.application.series import (
+    SeriesCreateCommand,
+    SeriesEpisodeDto,
+    SeriesEpisodeOutlineDraft,
+    SeriesPatchCommand,
+    SeriesPlanDraft,
+    SeriesPlanVersionDto,
+    SeriesValidationIssueDto,
+    StorySeriesDto,
+    validate_series_plan,
+)
 from catflow.application.service import (
     FIXED_CANON_ROLES,
     AssetDto,
@@ -46,6 +66,16 @@ from catflow.application.service import (
     VideoRepairDto,
     VideoRepairStatus,
 )
+from catflow.application.story_imports import (
+    StoryImportAnalysisDraft,
+    StoryImportConfirmCommand,
+    StoryImportCreateCommand,
+    StoryImportMaterializationDto,
+    StoryImportProjectDto,
+    StorySourceDocumentDto,
+    StorySourceRelationSuggestionDto,
+    StorySourceUnitDto,
+)
 from catflow.domain.billing import RateCardItem, rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
 from catflow.domain.video_repairs import FrameRange, RationalFrameRate
@@ -55,6 +85,8 @@ from .models import (
     AssetRecord,
     CanonProfileRecord,
     EditVersionRecord,
+    EpisodeContinuitySnapshotRecord,
+    EpisodeReferenceManifestRecord,
     JobEventRecord,
     JobRecord,
     LifePlannerMessageRecord,
@@ -65,7 +97,16 @@ from .models import (
     ProjectSelectionRecord,
     ProjectTagRecord,
     ProviderRateCardRecord,
+    SeriesAssetBindingRecord,
+    SeriesEpisodeOutlineVersionRecord,
+    SeriesEpisodeRecord,
+    SeriesPlanVersionRecord,
     ShotPlanVersionRecord,
+    StorySeriesRecord,
+    StorySourceDocumentRecord,
+    StorySourceMaterializationRecord,
+    StorySourceRelationSuggestionRecord,
+    StorySourceUnitRecord,
     StoryVersionRecord,
     ValidationRunRecord,
     VideoRepairRecord,
@@ -297,6 +338,1044 @@ class PostgresStudioRepository:
             record = session.get(ProjectRecord, project_id)
             return _project_dto(record) if record is not None else None
 
+    def create_story_series(
+        self, command: SeriesCreateCommand, *, canon_profile_id: uuid.UUID
+    ) -> StorySeriesDto:
+        with self._sessions.begin() as session:
+            record = StorySeriesRecord(
+                title=command.title,
+                premise=command.premise,
+                narrative_mode=command.narrative_mode,
+                planned_episode_count=command.planned_episode_count,
+                default_episode_duration_seconds=command.default_episode_duration_seconds,
+                world_setting=command.world_setting,
+                emotional_direction=command.emotional_direction,
+                ending_goal=command.ending_goal,
+                recurring_elements_json=command.recurring_elements,
+                must_keep_json=command.must_keep,
+                must_avoid_json=command.must_avoid,
+                additional_notes=command.additional_notes,
+                canon_profile_id=canon_profile_id,
+            )
+            session.add(record)
+            session.flush()
+            return _story_series_dto(session, record)
+
+    def list_story_series(self) -> list[StorySeriesDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(StorySeriesRecord).order_by(
+                    StorySeriesRecord.updated_at.desc(), StorySeriesRecord.id.desc()
+                )
+            ).all()
+            return [_story_series_dto(session, record) for record in records]
+
+    def get_story_series(self, series_id: uuid.UUID) -> StorySeriesDto | None:
+        with self._sessions() as session:
+            record = session.get(StorySeriesRecord, series_id)
+            return _story_series_dto(session, record) if record is not None else None
+
+    def update_story_series(
+        self, series_id: uuid.UUID, command: SeriesPatchCommand
+    ) -> StorySeriesDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("story series not found")
+            for field_name in command.model_fields_set:
+                setattr(record, field_name, getattr(command, field_name))
+            record.updated_at = datetime.now(UTC)
+            session.flush()
+            return _story_series_dto(session, record)
+
+    def create_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        plan: SeriesPlanDraft,
+        input_hash: str,
+        prompt_revision: str,
+        producing_job_id: uuid.UUID,
+        validation_issues: list[SeriesValidationIssueDto] | None = None,
+    ) -> SeriesPlanVersionDto:
+        with self._sessions.begin() as session:
+            series = session.scalar(
+                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
+            )
+            if series is None:
+                raise StudioNotFoundError("story series not found")
+            existing = session.scalar(
+                select(SeriesPlanVersionRecord).where(
+                    SeriesPlanVersionRecord.producing_job_id == producing_job_id
+                )
+            )
+            if existing is not None:
+                return _series_plan_dto(existing)
+            revision = (
+                int(
+                    session.scalar(
+                        select(func.coalesce(func.max(SeriesPlanVersionRecord.revision), 0)).where(
+                            SeriesPlanVersionRecord.series_id == series_id
+                        )
+                    )
+                    or 0
+                )
+                + 1
+            )
+            now = datetime.now(UTC)
+            session.execute(
+                update(SeriesPlanVersionRecord)
+                .where(
+                    SeriesPlanVersionRecord.series_id == series_id,
+                    SeriesPlanVersionRecord.status == "candidate",
+                )
+                .values(status="superseded", decided_at=now)
+            )
+            if validation_issues is None:
+                disposition, issues = validate_series_plan(
+                    plan,
+                    expected_episode_count=series.planned_episode_count,
+                    narrative_mode=series.narrative_mode,
+                )
+            else:
+                issues = validation_issues
+                disposition = (
+                    "needs_input"
+                    if any(issue.severity == "blocking" for issue in issues)
+                    else "candidate_ready"
+                )
+            record = SeriesPlanVersionRecord(
+                series_id=series_id,
+                revision=revision,
+                status="candidate",
+                active=False,
+                disposition=disposition,
+                plan_json=plan.model_dump(mode="json", by_alias=True),
+                issues_json=[issue.model_dump(mode="json", by_alias=True) for issue in issues],
+                input_hash=input_hash,
+                prompt_revision=prompt_revision,
+                producing_job_id=producing_job_id,
+            )
+            session.add(record)
+            session.flush()
+            return _series_plan_dto(record)
+
+    def list_series_plan_versions(self, series_id: uuid.UUID) -> list[SeriesPlanVersionDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(SeriesPlanVersionRecord)
+                .where(SeriesPlanVersionRecord.series_id == series_id)
+                .order_by(SeriesPlanVersionRecord.revision.desc())
+            ).all()
+            return [_series_plan_dto(record) for record in records]
+
+    def materialize_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        base_plan_version_id: uuid.UUID,
+        plan: SeriesPlanDraft,
+        idempotency_key: str,
+    ) -> SeriesPlanVersionDto:
+        with self._sessions.begin() as session:
+            prior = session.scalar(
+                select(SeriesPlanVersionRecord).where(
+                    SeriesPlanVersionRecord.materialization_idempotency_key
+                    == idempotency_key
+                )
+            )
+            if prior is not None:
+                if (
+                    prior.series_id != series_id
+                    or prior.base_plan_version_id != base_plan_version_id
+                ):
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return _series_plan_dto(prior)
+            series = session.scalar(
+                select(StorySeriesRecord)
+                .where(StorySeriesRecord.id == series_id)
+                .with_for_update()
+            )
+            base = session.scalar(
+                select(SeriesPlanVersionRecord)
+                .where(
+                    SeriesPlanVersionRecord.id == base_plan_version_id,
+                    SeriesPlanVersionRecord.series_id == series_id,
+                )
+                .with_for_update()
+            )
+            if series is None or base is None:
+                raise StudioNotFoundError("series plan version not found")
+            if base.active or base.status != "candidate":
+                raise StudioConflictError("only a pending series plan can be completed")
+            now = datetime.now(UTC)
+            session.execute(
+                update(SeriesPlanVersionRecord)
+                .where(
+                    SeriesPlanVersionRecord.series_id == series_id,
+                    SeriesPlanVersionRecord.status == "candidate",
+                )
+                .values(status="superseded", decided_at=now)
+            )
+            revision = (
+                int(
+                    session.scalar(
+                        select(func.coalesce(func.max(SeriesPlanVersionRecord.revision), 0))
+                        .where(SeriesPlanVersionRecord.series_id == series_id)
+                    )
+                    or 0
+                )
+                + 1
+            )
+            disposition, issues = validate_series_plan(
+                plan,
+                expected_episode_count=series.planned_episode_count,
+                narrative_mode=series.narrative_mode,
+            )
+            input_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "basePlanVersionId": str(base_plan_version_id),
+                        "plan": plan.model_dump(mode="json", by_alias=True),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            created = SeriesPlanVersionRecord(
+                series_id=series_id,
+                revision=revision,
+                status="candidate",
+                active=False,
+                disposition=disposition,
+                plan_json=plan.model_dump(mode="json", by_alias=True),
+                issues_json=[
+                    issue.model_dump(mode="json", by_alias=True) for issue in issues
+                ],
+                input_hash=input_hash,
+                prompt_revision="manual-series-plan-v1",
+                producing_job_id=None,
+                base_plan_version_id=base_plan_version_id,
+                materialization_idempotency_key=idempotency_key,
+            )
+            session.add(created)
+            session.flush()
+            return _series_plan_dto(created)
+
+    def activate_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        *,
+        expected_active_plan_version_id: uuid.UUID | None,
+        idempotency_key: str,
+    ) -> SeriesPlanVersionDto:
+        with self._sessions.begin() as session:
+            prior = session.scalar(
+                select(SeriesPlanVersionRecord).where(
+                    SeriesPlanVersionRecord.activation_idempotency_key == idempotency_key
+                )
+            )
+            if prior is not None:
+                if prior.series_id != series_id or prior.id != plan_version_id:
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return _series_plan_dto(prior)
+            series = session.scalar(
+                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
+            )
+            selected = session.scalar(
+                select(SeriesPlanVersionRecord)
+                .where(
+                    SeriesPlanVersionRecord.id == plan_version_id,
+                    SeriesPlanVersionRecord.series_id == series_id,
+                )
+                .with_for_update()
+            )
+            if series is None or selected is None:
+                raise StudioNotFoundError("series plan version not found")
+            active_id = session.scalar(
+                select(SeriesPlanVersionRecord.id).where(
+                    SeriesPlanVersionRecord.series_id == series_id,
+                    SeriesPlanVersionRecord.active.is_(True),
+                )
+            )
+            if active_id != expected_active_plan_version_id:
+                raise StudioConflictError("active series plan changed")
+            if selected.status != "candidate" or selected.disposition != "candidate_ready":
+                raise StudioConflictError("series plan requires completion before adoption")
+            now = datetime.now(UTC)
+            session.execute(
+                update(SeriesPlanVersionRecord)
+                .where(SeriesPlanVersionRecord.series_id == series_id)
+                .values(active=False)
+            )
+            selected.active = True
+            selected.status = "accepted"
+            selected.decided_at = now
+            selected.activation_idempotency_key = idempotency_key
+            existing_episodes = {
+                item.episode_order: item
+                for item in session.scalars(
+                    select(SeriesEpisodeRecord)
+                    .where(SeriesEpisodeRecord.series_id == series_id)
+                    .with_for_update()
+                ).all()
+            }
+            parsed_plan = SeriesPlanDraft.model_validate(selected.plan_json)
+            for index, outline in enumerate(parsed_plan.episodes):
+                episode = existing_episodes.get(outline.order)
+                if episode is None:
+                    episode = SeriesEpisodeRecord(
+                        series_id=series_id,
+                        episode_order=outline.order,
+                        status="outline",
+                    )
+                    session.add(episode)
+                    session.flush()
+                    revision = 1
+                else:
+                    session.execute(
+                        update(SeriesEpisodeOutlineVersionRecord)
+                        .where(
+                            SeriesEpisodeOutlineVersionRecord.episode_id == episode.id,
+                            SeriesEpisodeOutlineVersionRecord.active.is_(True),
+                        )
+                        .values(active=False)
+                    )
+                    revision = (
+                        int(
+                            session.scalar(
+                                select(
+                                    func.coalesce(
+                                        func.max(SeriesEpisodeOutlineVersionRecord.revision), 0
+                                    )
+                                ).where(
+                                    SeriesEpisodeOutlineVersionRecord.episode_id == episode.id
+                                )
+                            )
+                            or 0
+                        )
+                        + 1
+                    )
+                session.add(
+                    SeriesEpisodeOutlineVersionRecord(
+                        episode_id=episode.id,
+                        revision=revision,
+                        source_plan_version_id=selected.id,
+                        outline_json=outline.model_dump(mode="json", by_alias=True),
+                        active=True,
+                    )
+                )
+                session.execute(
+                    update(EpisodeContinuitySnapshotRecord)
+                    .where(
+                        EpisodeContinuitySnapshotRecord.episode_id == episode.id,
+                        EpisodeContinuitySnapshotRecord.active.is_(True),
+                    )
+                    .values(active=False)
+                )
+                previous_outline = (
+                    parsed_plan.episodes[index - 1] if index > 0 else None
+                )
+                for direction in ("incoming", "outgoing"):
+                    state = planned_continuity_state(
+                        bible=parsed_plan.series_bible,
+                        episode=outline,
+                        direction=direction,
+                        previous_episode=previous_outline,
+                    )
+                    session.add(
+                        EpisodeContinuitySnapshotRecord(
+                            episode_id=episode.id,
+                            direction=direction,
+                            source="planned",
+                            snapshot_json=state.model_dump(mode="json", by_alias=True),
+                            decisions_json={},
+                            confirmed=False,
+                            active=True,
+                        )
+                    )
+            series.updated_at = now
+            session.flush()
+            return _series_plan_dto(selected)
+
+    def reject_series_plan_version(
+        self, series_id: uuid.UUID, plan_version_id: uuid.UUID
+    ) -> SeriesPlanVersionDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(SeriesPlanVersionRecord)
+                .where(
+                    SeriesPlanVersionRecord.id == plan_version_id,
+                    SeriesPlanVersionRecord.series_id == series_id,
+                )
+                .with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("series plan version not found")
+            if record.active or record.status != "candidate":
+                raise StudioConflictError("only a pending series plan can be rejected")
+            record.status = "rejected"
+            record.decided_at = datetime.now(UTC)
+            session.flush()
+            return _series_plan_dto(record)
+
+    def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]:
+        with self._sessions() as session:
+            episodes = session.scalars(
+                select(SeriesEpisodeRecord)
+                .where(SeriesEpisodeRecord.series_id == series_id)
+                .order_by(SeriesEpisodeRecord.episode_order)
+            ).all()
+            return [_series_episode_dto(session, episode) for episode in episodes]
+
+    def list_series_jobs(self, series_id: uuid.UUID) -> list[JobDto]:
+        with self._sessions() as session:
+            episode_project_ids = select(SeriesEpisodeRecord.project_id).where(
+                SeriesEpisodeRecord.series_id == series_id,
+                SeriesEpisodeRecord.project_id.is_not(None),
+            )
+            records = session.scalars(
+                select(JobRecord)
+                .where(
+                    or_(
+                        JobRecord.series_id == series_id,
+                        JobRecord.project_id.in_(episode_project_ids),
+                    )
+                )
+                .order_by(JobRecord.created_at.desc(), JobRecord.id.desc())
+            ).all()
+            return [_job_dto(session, item) for item in records]
+
+    def materialize_series_episode(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        *,
+        idempotency_key: str,
+    ) -> ProjectDto:
+        with self._sessions.begin() as session:
+            prior = session.scalar(
+                select(SeriesEpisodeRecord).where(
+                    SeriesEpisodeRecord.materialization_idempotency_key == idempotency_key
+                )
+            )
+            if prior is not None:
+                if (
+                    prior.series_id != series_id
+                    or prior.id != episode_id
+                    or prior.project_id is None
+                ):
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                project = session.get(ProjectRecord, prior.project_id)
+                if project is None:
+                    raise StudioConflictError("materialized project is missing")
+                return _project_dto(project)
+            series = session.get(StorySeriesRecord, series_id)
+            episode = session.scalar(
+                select(SeriesEpisodeRecord)
+                .where(
+                    SeriesEpisodeRecord.id == episode_id,
+                    SeriesEpisodeRecord.series_id == series_id,
+                )
+                .with_for_update()
+            )
+            if series is None or episode is None:
+                raise StudioNotFoundError("series episode not found")
+            if episode.project_id is not None:
+                project = session.get(ProjectRecord, episode.project_id)
+                if project is None:
+                    raise StudioConflictError("materialized project is missing")
+                episode.materialization_idempotency_key = idempotency_key
+                return _project_dto(project)
+            outline_record = session.scalar(
+                select(SeriesEpisodeOutlineVersionRecord).where(
+                    SeriesEpisodeOutlineVersionRecord.episode_id == episode_id,
+                    SeriesEpisodeOutlineVersionRecord.active.is_(True),
+                )
+            )
+            if outline_record is None:
+                raise StudioConflictError("series episode has no active outline")
+            outline = SeriesEpisodeOutlineDraft.model_validate(outline_record.outline_json)
+            project = ProjectRecord(
+                title=f"第{episode.episode_order}集 · {outline.title}",
+                theme=outline.premise,
+                target_duration_seconds=outline.target_duration_seconds,
+                aspect_ratio="9:16",
+                canon_profile_id=series.canon_profile_id,
+            )
+            session.add(project)
+            session.flush()
+            tags = suggested_theme_tags(outline.premise)
+            session.add_all(
+                ProjectTagRecord(
+                    project_id=project.id,
+                    name=tag.name,
+                    normalized_name=tag.normalized_name,
+                )
+                for tag in tags
+            )
+            session.add(LifePlannerSessionRecord(project_id=project.id, context_revision=1))
+            episode.project_id = project.id
+            episode.materialization_idempotency_key = idempotency_key
+            episode.status = "story_review"
+            episode.updated_at = datetime.now(UTC)
+            series.updated_at = episode.updated_at
+            session.flush()
+            return _project_dto(project)
+
+    def list_episode_continuity(
+        self, episode_id: uuid.UUID
+    ) -> list[EpisodeContinuitySnapshotDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(EpisodeContinuitySnapshotRecord)
+                .where(EpisodeContinuitySnapshotRecord.episode_id == episode_id)
+                .order_by(
+                    EpisodeContinuitySnapshotRecord.created_at.desc(),
+                    EpisodeContinuitySnapshotRecord.id.desc(),
+                )
+            ).all()
+            return [_episode_continuity_dto(item) for item in records]
+
+    def confirm_episode_continuity(
+        self, episode_id: uuid.UUID, command: EpisodeContinuityConfirmCommand
+    ) -> EpisodeContinuitySnapshotDto:
+        with self._sessions.begin() as session:
+            prior = session.scalar(
+                select(EpisodeContinuitySnapshotRecord).where(
+                    EpisodeContinuitySnapshotRecord.idempotency_key
+                    == command.idempotency_key
+                )
+            )
+            if prior is not None:
+                if prior.episode_id != episode_id or prior.direction != command.direction:
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return _episode_continuity_dto(prior)
+            current = session.scalar(
+                select(EpisodeContinuitySnapshotRecord)
+                .where(
+                    EpisodeContinuitySnapshotRecord.episode_id == episode_id,
+                    EpisodeContinuitySnapshotRecord.direction == command.direction,
+                    EpisodeContinuitySnapshotRecord.active.is_(True),
+                )
+                .with_for_update()
+            )
+            if current is None:
+                raise StudioNotFoundError("episode continuity snapshot not found")
+            if (
+                command.expected_snapshot_id is not None
+                and command.expected_snapshot_id != current.id
+            ):
+                raise StudioConflictError("episode continuity changed")
+            current.active = False
+            created = EpisodeContinuitySnapshotRecord(
+                episode_id=episode_id,
+                direction=command.direction,
+                source="confirmed",
+                snapshot_json=command.state.model_dump(mode="json", by_alias=True),
+                decisions_json=command.decisions,
+                confirmed=True,
+                active=True,
+                idempotency_key=command.idempotency_key,
+            )
+            session.add(created)
+            session.flush()
+            return _episode_continuity_dto(created)
+
+    def reset_episode_continuity(
+        self, episode_id: uuid.UUID, command: EpisodeContinuityResetCommand
+    ) -> EpisodeContinuitySnapshotDto:
+        with self._sessions.begin() as session:
+            current = session.scalar(
+                select(EpisodeContinuitySnapshotRecord)
+                .where(
+                    EpisodeContinuitySnapshotRecord.episode_id == episode_id,
+                    EpisodeContinuitySnapshotRecord.direction == command.direction,
+                    EpisodeContinuitySnapshotRecord.active.is_(True),
+                )
+                .with_for_update()
+            )
+            if current is None or current.id != command.expected_snapshot_id:
+                raise StudioConflictError("episode continuity changed")
+            planned = session.scalar(
+                select(EpisodeContinuitySnapshotRecord)
+                .where(
+                    EpisodeContinuitySnapshotRecord.episode_id == episode_id,
+                    EpisodeContinuitySnapshotRecord.direction == command.direction,
+                    EpisodeContinuitySnapshotRecord.source == "planned",
+                )
+                .order_by(EpisodeContinuitySnapshotRecord.created_at.desc())
+            )
+            if planned is None:
+                raise StudioNotFoundError("planned episode continuity not found")
+            current.active = False
+            restored = EpisodeContinuitySnapshotRecord(
+                episode_id=episode_id,
+                direction=command.direction,
+                source="planned",
+                snapshot_json=planned.snapshot_json,
+                decisions_json={},
+                confirmed=False,
+                active=True,
+            )
+            session.add(restored)
+            session.flush()
+            return _episode_continuity_dto(restored)
+
+    def series_episode_for_project(self, project_id: uuid.UUID) -> SeriesEpisodeDto | None:
+        with self._sessions() as session:
+            episode = session.scalar(
+                select(SeriesEpisodeRecord).where(
+                    SeriesEpisodeRecord.project_id == project_id
+                )
+            )
+            return _series_episode_dto(session, episode) if episode is not None else None
+
+    def list_series_asset_bindings(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesAssetBindingDto]:
+        with self._sessions() as session:
+            rows = session.execute(
+                select(SeriesAssetBindingRecord, AssetRecord)
+                .join(AssetRecord, AssetRecord.id == SeriesAssetBindingRecord.asset_id)
+                .where(
+                    SeriesAssetBindingRecord.series_id == series_id,
+                    SeriesAssetBindingRecord.active.is_(True),
+                )
+                .order_by(SeriesAssetBindingRecord.binding_key)
+            ).all()
+            return [_series_asset_binding_dto(binding, asset) for binding, asset in rows]
+
+    def replace_series_asset_bindings(
+        self, series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
+    ) -> list[SeriesAssetBindingDto]:
+        with self._sessions.begin() as session:
+            series = session.scalar(
+                select(StorySeriesRecord)
+                .where(StorySeriesRecord.id == series_id)
+                .with_for_update()
+            )
+            if series is None:
+                raise StudioNotFoundError("story series not found")
+            current = session.scalars(
+                select(SeriesAssetBindingRecord)
+                .where(
+                    SeriesAssetBindingRecord.series_id == series_id,
+                    SeriesAssetBindingRecord.active.is_(True),
+                )
+                .with_for_update()
+            ).all()
+            desired = {
+                item.binding_key: (item.role, item.asset_id) for item in command.bindings
+            }
+            existing = {
+                item.binding_key: (item.role, item.asset_id) for item in current
+            }
+            if desired == existing:
+                assets = {
+                    item.id: item
+                    for item in session.scalars(
+                        select(AssetRecord).where(
+                            AssetRecord.id.in_([record.asset_id for record in current])
+                        )
+                    ).all()
+                }
+                return [
+                    _series_asset_binding_dto(record, assets[record.asset_id])
+                    for record in sorted(current, key=lambda item: item.binding_key)
+                ]
+            asset_ids = [item.asset_id for item in command.bindings]
+            assets = {
+                item.id: item
+                for item in session.scalars(
+                    select(AssetRecord).where(AssetRecord.id.in_(asset_ids))
+                ).all()
+            }
+            if len(assets) != len(set(asset_ids)):
+                raise StudioNotFoundError("series asset not found")
+            for record in current:
+                record.active = False
+            created: list[SeriesAssetBindingRecord] = []
+            for item in command.bindings:
+                record = SeriesAssetBindingRecord(
+                    series_id=series_id,
+                    binding_key=item.binding_key,
+                    role=item.role,
+                    asset_id=item.asset_id,
+                    active=True,
+                )
+                session.add(record)
+                created.append(record)
+            series.updated_at = datetime.now(UTC)
+            session.flush()
+            return [
+                _series_asset_binding_dto(record, assets[record.asset_id])
+                for record in sorted(created, key=lambda item: item.binding_key)
+            ]
+
+    def find_story_source_document(
+        self, *, content_hash: str
+    ) -> StorySourceDocumentDto | None:
+        with self._sessions() as session:
+            record = session.scalar(
+                select(StorySourceDocumentRecord).where(
+                    StorySourceDocumentRecord.content_hash == content_hash
+                )
+            )
+            return _story_source_document_dto(session, record) if record is not None else None
+
+    def list_story_source_documents(self) -> list[StorySourceDocumentDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(StorySourceDocumentRecord).order_by(
+                    StorySourceDocumentRecord.created_at.desc(),
+                    StorySourceDocumentRecord.id.desc(),
+                )
+            ).all()
+            return [_story_source_document_dto(session, record) for record in records]
+
+    def get_story_source_document(
+        self, document_id: uuid.UUID
+    ) -> StorySourceDocumentDto | None:
+        with self._sessions() as session:
+            record = session.get(StorySourceDocumentRecord, document_id)
+            return _story_source_document_dto(session, record) if record is not None else None
+
+    def create_story_source_document(
+        self,
+        command: StoryImportCreateCommand,
+        *,
+        document_id: uuid.UUID,
+        content_hash: str,
+        job: JobDto,
+    ) -> StorySourceDocumentDto:
+        with self._sessions.begin() as session:
+            existing = session.scalar(
+                select(StorySourceDocumentRecord).where(
+                    StorySourceDocumentRecord.content_hash == content_hash
+                )
+            )
+            if existing is not None:
+                return _story_source_document_dto(session, existing)
+            document = StorySourceDocumentRecord(
+                id=document_id,
+                content_hash=content_hash,
+                source_format=command.source_format,
+                file_name=command.file_name,
+                raw_text=command.raw_text.replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .strip(),
+                status="analyzing",
+            )
+            session.add(document)
+            session.flush()
+            job_record = _new_job_record(job)
+            session.add(job_record)
+            session.flush()
+            document.analysis_job_id = job.id
+            _add_job_event(session, job_record, "job.queued")
+            session.flush()
+            return _story_source_document_dto(session, document)
+
+    def restart_story_source_analysis(
+        self, document_id: uuid.UUID, job: JobDto
+    ) -> JobDto:
+        with self._sessions.begin() as session:
+            existing = _job_by_idempotency(session, job.idempotency_key)
+            if existing is not None:
+                _require_same_input(existing, job.input_hash)
+                if existing.story_source_document_id != document_id:
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return _job_dto(session, existing)
+            document = session.scalar(
+                select(StorySourceDocumentRecord)
+                .where(StorySourceDocumentRecord.id == document_id)
+                .with_for_update()
+            )
+            if document is None:
+                raise StudioNotFoundError("story source document not found")
+            materialization_count = session.scalar(
+                select(func.count())
+                .select_from(StorySourceMaterializationRecord)
+                .join(
+                    StorySourceRelationSuggestionRecord,
+                    StorySourceRelationSuggestionRecord.id
+                    == StorySourceMaterializationRecord.suggestion_id,
+                )
+                .where(StorySourceRelationSuggestionRecord.document_id == document_id)
+            )
+            if document.status == "confirmed" or materialization_count:
+                raise StudioConflictError("confirmed story relationships cannot be reanalyzed")
+            previous = (
+                session.get(JobRecord, document.analysis_job_id)
+                if document.analysis_job_id is not None
+                else None
+            )
+            if previous is not None and previous.status == "submission_unknown":
+                raise StudioConflictError("story source analysis submission is unresolved")
+            if previous is not None and previous.status not in {
+                "failed",
+                "cancelled",
+                "succeeded",
+            }:
+                raise StudioConflictError("story source analysis is still running")
+            record = _new_job_record(job)
+            session.add(record)
+            session.flush()
+            document.analysis_job_id = record.id
+            document.status = "analyzing"
+            document.updated_at = datetime.now(UTC)
+            _add_job_event(session, record, "job.queued")
+            session.flush()
+            return _job_dto(session, record)
+
+    def complete_story_source_analysis(
+        self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
+    ) -> StorySourceDocumentDto:
+        with self._sessions.begin() as session:
+            job = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if (
+                job is None
+                or job.kind != "analyze_story_source"
+                or job.story_source_document_id is None
+            ):
+                raise StudioNotFoundError("story source analysis job not found")
+            document = session.scalar(
+                select(StorySourceDocumentRecord)
+                .where(StorySourceDocumentRecord.id == job.story_source_document_id)
+                .with_for_update()
+            )
+            if document is None:
+                raise StudioNotFoundError("story source document not found")
+            if document.analysis_job_id != job_id:
+                raise StudioConflictError("story source analysis is no longer current")
+            existing_unit_count = session.scalar(
+                select(func.count()).select_from(StorySourceUnitRecord).where(
+                    StorySourceUnitRecord.document_id == document.id
+                )
+            )
+            if document.status == "analyzed" and existing_unit_count:
+                return _story_source_document_dto(session, document)
+            materialization_count = session.scalar(
+                select(func.count())
+                .select_from(StorySourceMaterializationRecord)
+                .join(
+                    StorySourceRelationSuggestionRecord,
+                    StorySourceRelationSuggestionRecord.id
+                    == StorySourceMaterializationRecord.suggestion_id,
+                )
+                .where(StorySourceRelationSuggestionRecord.document_id == document.id)
+            )
+            if materialization_count:
+                raise StudioConflictError("confirmed story relationships cannot be replaced")
+            if existing_unit_count:
+                session.execute(
+                    delete(StorySourceRelationSuggestionRecord).where(
+                        StorySourceRelationSuggestionRecord.document_id == document.id
+                    )
+                )
+                session.execute(
+                    delete(StorySourceUnitRecord).where(
+                        StorySourceUnitRecord.document_id == document.id
+                    )
+                )
+                session.flush()
+            units_by_ordinal: dict[int, StorySourceUnitRecord] = {}
+            for item in analysis.units:
+                record = StorySourceUnitRecord(
+                    document_id=document.id,
+                    ordinal=item.ordinal,
+                    title=item.title,
+                    theme=item.theme,
+                    raw_text=item.raw_text,
+                    analysis_json=item.analysis,
+                )
+                session.add(record)
+                units_by_ordinal[item.ordinal] = record
+            session.flush()
+            for item in analysis.relation_suggestions:
+                session.add(
+                    StorySourceRelationSuggestionRecord(
+                        document_id=document.id,
+                        relation_type=item.relation_type,
+                        suggested_series_id=item.suggested_series_id,
+                        unit_ids_json=[
+                            str(units_by_ordinal[ordinal].id)
+                            for ordinal in item.unit_ordinals
+                        ],
+                        title=item.title,
+                        narrative_mode=item.narrative_mode,
+                        confidence=item.confidence,
+                        rationale=item.rationale,
+                        status="suggested",
+                    )
+                )
+            document.status = "analyzed"
+            document.updated_at = datetime.now(UTC)
+            session.flush()
+            return _story_source_document_dto(session, document)
+
+    def confirm_story_source(
+        self, document_id: uuid.UUID, command: StoryImportConfirmCommand
+    ) -> StoryImportMaterializationDto:
+        with self._sessions.begin() as session:
+            prior = session.scalar(
+                select(StorySourceMaterializationRecord).where(
+                    StorySourceMaterializationRecord.idempotency_key
+                    == command.idempotency_key
+                )
+            )
+            if prior is not None:
+                if (
+                    prior.suggestion_id != command.suggestion_id
+                    or prior.target_type != command.target
+                    or prior.target_series_id != command.target_series_id
+                    or prior.target_project_id != command.target_project_id
+                ):
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return _story_source_materialization_dto(session, prior)
+            document = session.scalar(
+                select(StorySourceDocumentRecord)
+                .where(StorySourceDocumentRecord.id == document_id)
+                .with_for_update()
+            )
+            suggestion = session.scalar(
+                select(StorySourceRelationSuggestionRecord)
+                .where(
+                    StorySourceRelationSuggestionRecord.id == command.suggestion_id,
+                    StorySourceRelationSuggestionRecord.document_id == document_id,
+                )
+                .with_for_update()
+            )
+            if document is None or suggestion is None:
+                raise StudioNotFoundError("story source relation suggestion not found")
+            unit_ids = [uuid.UUID(str(value)) for value in suggestion.unit_ids_json]
+            units = session.scalars(
+                select(StorySourceUnitRecord)
+                .where(StorySourceUnitRecord.id.in_(unit_ids))
+                .order_by(StorySourceUnitRecord.ordinal)
+            ).all()
+            series_record: StorySeriesRecord | None = None
+            projects: list[ProjectRecord] = []
+            if command.target == "new_series":
+                if len(units) < 2:
+                    raise StudioConflictError("a series requires at least two source units")
+                series_record = StorySeriesRecord(
+                    title=suggestion.title,
+                    premise="\n".join(item.raw_text for item in units),
+                    narrative_mode=suggestion.narrative_mode or "continuous",
+                    planned_episode_count=len(units),
+                    default_episode_duration_seconds=12,
+                    world_setting="由已导入原文中的地点、时间和环境归纳",
+                    emotional_direction="保持原文的情绪变化",
+                    recurring_elements_json=[],
+                    must_keep_json=["保留来源文本中的核心事件"],
+                    must_avoid_json=["不得无依据改写来源事实"],
+                    additional_notes=f"来源文档 {document.id}",
+                    canon_profile_id=ensure_canon_v4(session).id,
+                )
+                session.add(series_record)
+                session.flush()
+            elif command.target == "append_series":
+                if command.target_series_id is None:
+                    raise StudioConflictError("append_series requires a target series")
+                series_record = session.get(StorySeriesRecord, command.target_series_id)
+                if series_record is None:
+                    raise StudioNotFoundError("target story series not found")
+            elif command.target == "independent":
+                canon_profile_id = ensure_canon_v4(session).id
+                for unit in units:
+                    project = ProjectRecord(
+                        title=unit.title,
+                        theme=unit.raw_text,
+                        target_duration_seconds=12,
+                        aspect_ratio="9:16",
+                        canon_profile_id=canon_profile_id,
+                    )
+                    session.add(project)
+                    session.flush()
+                    session.add(
+                        LifePlannerSessionRecord(project_id=project.id, context_revision=1)
+                    )
+                    projects.append(project)
+            elif command.target_series_id is not None:
+                series_record = session.get(StorySeriesRecord, command.target_series_id)
+                if series_record is None:
+                    raise StudioNotFoundError("target story series not found")
+            elif command.target_project_id is not None:
+                if session.get(ProjectRecord, command.target_project_id) is None:
+                    raise StudioNotFoundError("target project not found")
+            else:
+                raise StudioConflictError("story relationship target is missing")
+            suggestion.status = "accepted"
+            record = StorySourceMaterializationRecord(
+                suggestion_id=suggestion.id,
+                target_type=command.target,
+                idempotency_key=command.idempotency_key,
+                series_id=series_record.id if series_record is not None else None,
+                project_id=projects[0].id if len(projects) == 1 else None,
+                target_series_id=command.target_series_id,
+                target_project_id=command.target_project_id,
+                project_ids_json=[str(item.id) for item in projects],
+            )
+            session.add(record)
+            remaining = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(StorySourceRelationSuggestionRecord)
+                    .where(
+                        StorySourceRelationSuggestionRecord.document_id == document_id,
+                        StorySourceRelationSuggestionRecord.status == "suggested",
+                        StorySourceRelationSuggestionRecord.id != suggestion.id,
+                    )
+                )
+                or 0
+            )
+            if remaining == 0:
+                document.status = "confirmed"
+            document.updated_at = datetime.now(UTC)
+            session.flush()
+            return StoryImportMaterializationDto(
+                id=record.id,
+                suggestionId=suggestion.id,
+                target=command.target,
+                targetSeriesId=command.target_series_id,
+                targetProjectId=command.target_project_id,
+                series=(
+                    _story_series_dto(session, series_record)
+                    if series_record is not None
+                    else None
+                ),
+                projects=[
+                    StoryImportProjectDto(
+                        id=item.id,
+                        title=item.title,
+                        theme=item.theme,
+                        targetDurationSeconds=item.target_duration_seconds,
+                    )
+                    for item in projects
+                ],
+                createdAt=record.created_at,
+            )
+
     def update_project(self, project_id: uuid.UUID, patch: ProjectPatch) -> ProjectDto:
         with self._sessions.begin() as session:
             project = session.scalar(
@@ -350,7 +1429,10 @@ class PostgresStudioRepository:
             ).all()
             latest_job = session.scalar(
                 select(JobRecord)
-                .where(JobRecord.project_id == project_id, JobRecord.kind == "plan_story")
+                .where(
+                    JobRecord.project_id == project_id,
+                    JobRecord.kind.in_(("plan_story", "plan_series_episode")),
+                )
                 .order_by(JobRecord.created_at.desc(), JobRecord.id.desc())
                 .limit(1)
             )
@@ -439,8 +1521,10 @@ class PostgresStudioRepository:
             job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if job is None:
                 raise StudioNotFoundError("job not found")
-            if job.kind != "plan_story":
+            if job.kind not in {"plan_story", "plan_series_episode"}:
                 raise StudioConflictError("job is not a planner job")
+            if job.project_id is None:
+                raise StudioConflictError("planner job has no project")
             existing = session.scalar(
                 select(LifePlannerProposalRecord).where(
                     LifePlannerProposalRecord.project_id == job.project_id,
@@ -870,7 +1954,6 @@ class PostgresStudioRepository:
                 .join(AssetRecord, AssetRecord.id == ProjectSelectionRecord.asset_id)
                 .where(
                     ProjectSelectionRecord.project_id == project_id,
-                    ProjectSelectionRecord.decision.in_(("selected", "approved")),
                 )
                 .order_by(
                     ProjectSelectionRecord.created_at.desc(),
@@ -882,9 +1965,104 @@ class PostgresStudioRepository:
                 for role, item in fixed_document.items()
                 if uuid.UUID(str(item["assetId"])) in fixed_records
             }
+            seen_slots: set[str] = set()
             for selection, asset in records:
-                current.setdefault(selection.slot, _asset_dto(asset))
+                if selection.slot in seen_slots:
+                    continue
+                seen_slots.add(selection.slot)
+                if selection.decision in {"selected", "approved"}:
+                    current[selection.slot] = _asset_dto(asset)
             return current
+
+    def replace_continuity_keyframes(
+        self, project_id: uuid.UUID, asset_ids: list[uuid.UUID]
+    ) -> list[AssetDto]:
+        with self._sessions.begin() as session:
+            project = session.get(ProjectRecord, project_id)
+            if project is None:
+                raise StudioNotFoundError("project not found")
+            assets = {
+                asset.id: asset
+                for asset in session.scalars(
+                    select(AssetRecord).where(AssetRecord.id.in_(asset_ids))
+                ).all()
+            }
+            if len(assets) != len(asset_ids) or any(
+                asset.project_id != project_id or asset.media_type != "image"
+                for asset in assets.values()
+            ):
+                raise StudioNotFoundError("continuity keyframe not found")
+            latest_rows = session.execute(
+                select(ProjectSelectionRecord, AssetRecord)
+                .join(AssetRecord, AssetRecord.id == ProjectSelectionRecord.asset_id)
+                .where(
+                    ProjectSelectionRecord.project_id == project_id,
+                    ProjectSelectionRecord.slot.in_(
+                        ("continuity_keyframe_1", "continuity_keyframe_2")
+                    ),
+                )
+                .order_by(
+                    ProjectSelectionRecord.created_at.desc(),
+                    ProjectSelectionRecord.id.desc(),
+                )
+            ).all()
+            current_by_slot: dict[str, AssetRecord] = {}
+            for selection, asset in latest_rows:
+                current_by_slot.setdefault(selection.slot, asset)
+            result: list[AssetDto] = []
+            for index, slot in enumerate(
+                ("continuity_keyframe_1", "continuity_keyframe_2")
+            ):
+                if index < len(asset_ids):
+                    asset = assets[asset_ids[index]]
+                    decision = "selected"
+                    result.append(_asset_dto(asset))
+                elif slot in current_by_slot:
+                    asset = current_by_slot[slot]
+                    decision = "rejected"
+                else:
+                    continue
+                session.add(
+                    ProjectSelectionRecord(
+                        project_id=project_id,
+                        asset_id=asset.id,
+                        slot=slot,
+                        decision=decision,
+                        source_hash=_selection_source_hash(project_id, slot, asset.sha256),
+                    )
+                )
+            session.flush()
+            return result
+
+    def save_episode_reference_manifest(
+        self,
+        episode_id: uuid.UUID,
+        job_id: uuid.UUID,
+        continuity_snapshot_id: uuid.UUID | None,
+        references: list[dict[str, object]],
+    ) -> None:
+        with self._sessions.begin() as session:
+            existing = session.scalar(
+                select(EpisodeReferenceManifestRecord).where(
+                    EpisodeReferenceManifestRecord.job_id == job_id
+                )
+            )
+            if existing is not None:
+                if (
+                    existing.episode_id != episode_id
+                    or existing.continuity_snapshot_id != continuity_snapshot_id
+                    or existing.references_json != references
+                ):
+                    raise StudioConflictError("episode reference manifest changed")
+                return
+            session.add(
+                EpisodeReferenceManifestRecord(
+                    episode_id=episode_id,
+                    job_id=job_id,
+                    continuity_snapshot_id=continuity_snapshot_id,
+                    references_json=references,
+                )
+            )
 
     def list_assets(self, project_id: uuid.UUID) -> list[AssetDto]:
         with self._sessions() as session:
@@ -931,9 +2109,7 @@ class PostgresStudioRepository:
                     )
                 )
                 if running is not None:
-                    raise StudioConflictError(
-                        "a shot plan generation job is already running"
-                    )
+                    raise StudioConflictError("a shot plan generation job is already running")
             record = _new_job_record(job)
             session.add(record)
             session.flush()
@@ -946,6 +2122,21 @@ class PostgresStudioRepository:
             return _job_dto(session, record) if record is not None else None
 
     def record_director_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("job not found")
+            provider_result = dict(record.provider_result_json or {})
+            provider_result["validation"] = validation
+            record.provider_result_json = provider_result
+            session.flush()
+            return _job_dto(session, record)
+
+    def record_series_plan_validation(
         self, job_id: uuid.UUID, validation: dict[str, object]
     ) -> JobDto:
         with self._sessions.begin() as session:
@@ -1033,6 +2224,8 @@ class PostgresStudioRepository:
                     id=record.id,
                     jobId=record.job_id,
                     projectId=record.project_id,
+                    seriesId=record.series_id,
+                    storySourceDocumentId=record.story_source_document_id,
                     eventType=record.event_type,
                     payload=record.payload_json,
                     createdAt=record.created_at,
@@ -1288,6 +2481,248 @@ def _project_dto(record: ProjectRecord) -> ProjectDto:
     )
 
 
+def _story_series_dto(session: Session, record: StorySeriesRecord) -> StorySeriesDto:
+    active_plan_id = session.scalar(
+        select(SeriesPlanVersionRecord.id).where(
+            SeriesPlanVersionRecord.series_id == record.id,
+            SeriesPlanVersionRecord.active.is_(True),
+        )
+    )
+    planned_count = int(
+        session.scalar(
+            select(func.count())
+            .select_from(SeriesEpisodeRecord)
+            .where(SeriesEpisodeRecord.series_id == record.id)
+        )
+        or 0
+    )
+    materialized_count = int(
+        session.scalar(
+            select(func.count())
+            .select_from(SeriesEpisodeRecord)
+            .where(
+                SeriesEpisodeRecord.series_id == record.id,
+                SeriesEpisodeRecord.project_id.is_not(None),
+            )
+        )
+        or 0
+    )
+    completed_count = int(
+        session.scalar(
+            select(func.count())
+            .select_from(SeriesEpisodeRecord)
+            .where(
+                SeriesEpisodeRecord.series_id == record.id,
+                SeriesEpisodeRecord.status == "completed",
+            )
+        )
+        or 0
+    )
+    return StorySeriesDto(
+        id=record.id,
+        title=record.title,
+        premise=record.premise,
+        narrativeMode=record.narrative_mode,
+        plannedEpisodeCount=record.planned_episode_count,
+        defaultEpisodeDurationSeconds=record.default_episode_duration_seconds,
+        worldSetting=record.world_setting,
+        emotionalDirection=record.emotional_direction,
+        endingGoal=record.ending_goal,
+        recurringElements=record.recurring_elements_json,
+        mustKeep=record.must_keep_json,
+        mustAvoid=record.must_avoid_json,
+        additionalNotes=record.additional_notes,
+        canonProfileId=record.canon_profile_id,
+        activePlanVersionId=active_plan_id,
+        plannedCount=planned_count,
+        materializedCount=materialized_count,
+        completedCount=completed_count,
+        createdAt=record.created_at,
+        updatedAt=record.updated_at,
+    )
+
+
+def _series_plan_dto(record: SeriesPlanVersionRecord) -> SeriesPlanVersionDto:
+    return SeriesPlanVersionDto(
+        id=record.id,
+        seriesId=record.series_id,
+        revision=record.revision,
+        status=record.status,
+        active=record.active,
+        disposition=record.disposition,
+        plan=SeriesPlanDraft.model_validate(record.plan_json),
+        inputHash=record.input_hash,
+        promptRevision=record.prompt_revision,
+        producingJobId=record.producing_job_id,
+        basePlanVersionId=record.base_plan_version_id,
+        issues=[SeriesValidationIssueDto.model_validate(item) for item in record.issues_json],
+        decidedAt=record.decided_at,
+        createdAt=record.created_at,
+    )
+
+
+def _series_episode_dto(session: Session, record: SeriesEpisodeRecord) -> SeriesEpisodeDto:
+    outline = session.scalar(
+        select(SeriesEpisodeOutlineVersionRecord).where(
+            SeriesEpisodeOutlineVersionRecord.episode_id == record.id,
+            SeriesEpisodeOutlineVersionRecord.active.is_(True),
+        )
+    )
+    if outline is None:
+        raise StudioConflictError("series episode has no active outline")
+    payload = SeriesEpisodeOutlineDraft.model_validate(outline.outline_json)
+    return SeriesEpisodeDto(
+        id=record.id,
+        seriesId=record.series_id,
+        order=record.episode_order,
+        title=payload.title,
+        targetDurationSeconds=payload.target_duration_seconds,
+        status=record.status,
+        projectId=record.project_id,
+        activeOutlineVersionId=outline.id,
+        outline=payload,
+        createdAt=record.created_at,
+        updatedAt=record.updated_at,
+    )
+
+
+def _episode_continuity_dto(
+    record: EpisodeContinuitySnapshotRecord,
+) -> EpisodeContinuitySnapshotDto:
+    return EpisodeContinuitySnapshotDto(
+        id=record.id,
+        episodeId=record.episode_id,
+        direction=record.direction,
+        source=record.source,
+        state=EpisodeContinuityState.model_validate(record.snapshot_json),
+        decisions=record.decisions_json,
+        confirmed=record.confirmed,
+        active=record.active,
+        createdAt=record.created_at,
+    )
+
+
+def _series_asset_binding_dto(
+    record: SeriesAssetBindingRecord, asset: AssetRecord
+) -> SeriesAssetBindingDto:
+    return SeriesAssetBindingDto(
+        id=record.id,
+        seriesId=record.series_id,
+        bindingKey=record.binding_key,
+        role=record.role,
+        assetId=record.asset_id,
+        assetSha256=asset.sha256,
+        active=record.active,
+        createdAt=record.created_at,
+    )
+
+
+def _story_source_document_dto(
+    session: Session, record: StorySourceDocumentRecord
+) -> StorySourceDocumentDto:
+    projected_status = record.status
+    if record.status == "analyzing" and record.analysis_job_id is not None:
+        analysis_status = session.scalar(
+            select(JobRecord.status).where(JobRecord.id == record.analysis_job_id)
+        )
+        if analysis_status in {"failed", "cancelled"}:
+            projected_status = "failed"
+    unit_records = session.scalars(
+        select(StorySourceUnitRecord)
+        .where(StorySourceUnitRecord.document_id == record.id)
+        .order_by(StorySourceUnitRecord.ordinal)
+    ).all()
+    suggestion_records = session.scalars(
+        select(StorySourceRelationSuggestionRecord)
+        .where(StorySourceRelationSuggestionRecord.document_id == record.id)
+        .order_by(
+            StorySourceRelationSuggestionRecord.created_at,
+            StorySourceRelationSuggestionRecord.id,
+        )
+    ).all()
+    return StorySourceDocumentDto(
+        id=record.id,
+        contentHash=record.content_hash,
+        sourceFormat=record.source_format,
+        fileName=record.file_name,
+        rawText=record.raw_text,
+        status=projected_status,
+        analysisJobId=record.analysis_job_id,
+        units=[
+            StorySourceUnitDto(
+                id=item.id,
+                documentId=item.document_id,
+                ordinal=item.ordinal,
+                title=item.title,
+                theme=item.theme,
+                rawText=item.raw_text,
+                analysis=item.analysis_json,
+                createdAt=item.created_at,
+            )
+            for item in unit_records
+        ],
+        relationSuggestions=[
+            StorySourceRelationSuggestionDto(
+                id=item.id,
+                documentId=item.document_id,
+                relationType=item.relation_type,
+                unitIds=[uuid.UUID(str(value)) for value in item.unit_ids_json],
+                title=item.title,
+                narrativeMode=item.narrative_mode,
+                suggestedSeriesId=item.suggested_series_id,
+                confidence=item.confidence,
+                rationale=item.rationale,
+                status=item.status,
+                createdAt=item.created_at,
+            )
+            for item in suggestion_records
+        ],
+        createdAt=record.created_at,
+        updatedAt=record.updated_at,
+    )
+
+
+def _story_source_materialization_dto(
+    session: Session, record: StorySourceMaterializationRecord
+) -> StoryImportMaterializationDto:
+    suggestion = session.get(StorySourceRelationSuggestionRecord, record.suggestion_id)
+    if suggestion is None:
+        raise StudioConflictError("story source materialization suggestion is missing")
+    series = (
+        session.get(StorySeriesRecord, record.series_id)
+        if record.series_id is not None
+        else None
+    )
+    project_ids = [uuid.UUID(str(value)) for value in record.project_ids_json]
+    projects = (
+        session.scalars(
+            select(ProjectRecord)
+            .where(ProjectRecord.id.in_(project_ids))
+            .order_by(ProjectRecord.created_at, ProjectRecord.id)
+        ).all()
+        if project_ids
+        else []
+    )
+    return StoryImportMaterializationDto(
+        id=record.id,
+        suggestionId=record.suggestion_id,
+        target=record.target_type,
+        targetSeriesId=record.target_series_id,
+        targetProjectId=record.target_project_id,
+        series=_story_series_dto(session, series) if series is not None else None,
+        projects=[
+            StoryImportProjectDto(
+                id=item.id,
+                title=item.title,
+                theme=item.theme,
+                targetDurationSeconds=item.target_duration_seconds,
+            )
+            for item in projects
+        ],
+        createdAt=record.created_at,
+    )
+
+
 def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
     call_limits = dict(record.call_limits_json)
     return ValidationRunDto(
@@ -1302,8 +2737,7 @@ def _validation_run_dto(record: ValidationRunRecord) -> ValidationRunDto:
         callLimits=call_limits,
         totalCallLimit=sum(call_limits.values()),
         maximumVideoCalls=(
-            call_limits.get("generate_video", 0)
-            + call_limits.get("regenerate_video_segment", 0)
+            call_limits.get("generate_video", 0) + call_limits.get("regenerate_video_segment", 0)
         ),
         provider=record.provider,
         models=record.models_json,
@@ -1460,6 +2894,8 @@ def _new_job_record(job: JobDto) -> JobRecord:
     return JobRecord(
         id=job.id,
         project_id=job.project_id,
+        series_id=job.series_id,
+        story_source_document_id=job.story_source_document_id,
         kind=job.kind,
         status=job.status,
         input_hash=job.input_hash,
@@ -1659,6 +3095,8 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
     return JobDto(
         id=record.id,
         projectId=record.project_id,
+        seriesId=record.series_id,
+        storySourceDocumentId=record.story_source_document_id,
         kind=record.kind,
         status=record.status,
         inputHash=record.input_hash,
@@ -1805,6 +3243,8 @@ def _add_job_event(
         JobEventRecord(
             job_id=job.id,
             project_id=job.project_id,
+            series_id=job.series_id,
+            story_source_document_id=job.story_source_document_id,
             event_type=event_type,
             payload_json=payload or {"jobId": str(job.id), "status": job.status},
         )

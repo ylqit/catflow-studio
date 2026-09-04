@@ -431,7 +431,11 @@ onBeforeUnmount(() => {
   <main class="page library-page">
     <section class="library-heading">
       <div><h1>项目库</h1><p>整理、查找并继续你的一人一猫生活短片。</p></div>
-      <button class="primary new-project" @click="showCreate = true">＋ 新建短片</button>
+      <div class="library-create-actions">
+        <button class="primary new-project" @click="showCreate = true">＋ 新建短片</button>
+        <RouterLink class="secondary create-link" to="/series/new">新建系列</RouterLink>
+        <RouterLink class="ghost create-link" to="/story-imports/new">导入故事</RouterLink>
+      </div>
     </section>
 
     <p v-if="error" class="notice error library-error">
@@ -441,6 +445,7 @@ onBeforeUnmount(() => {
 
     <div class="library-shell">
       <aside class="library-sidebar card" aria-label="项目分类">
+        <RouterLink class="series-library-link" to="/series">系列</RouterLink>
         <nav class="sidebar-section" aria-label="项目视图">
           <button
             v-for="view in systemViews"
@@ -519,6 +524,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="project-body">
                     <div class="project-title-line"><h3>{{ project.title }}</h3><span v-if="project.pinned" aria-label="已固定">★</span></div>
+                    <span v-if="project.series" class="series-chip">{{ project.series.seriesTitle }} · 第 {{ project.series.episodeOrder }} 集</span>
                     <p>{{ project.themeSummary }}</p>
                     <div class="project-context">
                       <span v-if="project.collection" class="collection-chip"><i class="collection-dot" :class="project.collection.colorKey" />{{ project.collection.name }}</span>
@@ -539,7 +545,7 @@ onBeforeUnmount(() => {
                   <img v-if="project.coverAssetId" :src="`/api/v1/assets/${project.coverAssetId}/content`" alt="" loading="lazy" /><span v-else class="list-cover">🐾</span>
                   <span><b>{{ project.title }}</b><small>{{ project.themeSummary }}</small></span>
                 </RouterLink>
-                <span class="list-tags"><b>{{ project.collection?.name ?? "未分组" }}</b><small>{{ project.tags.map((tag) => `#${tag.name}`).join(" ") || "暂无标签" }}</small></span>
+                <span class="list-tags"><b>{{ project.series ? `${project.series.seriesTitle} · 第 ${project.series.episodeOrder} 集` : project.collection?.name ?? "未分组" }}</b><small>{{ project.tags.map((tag) => `#${tag.name}`).join(" ") || "暂无标签" }}</small></span>
                 <span>{{ stageLabels[project.stage] }}</span><span :class="`attention-${project.attention}`">{{ attentionLabel(project) }}</span>
                 <time :datetime="project.lastActivityAt">{{ formatActivity(project.lastActivityAt) }}</time><time :datetime="project.createdAt">{{ new Date(project.createdAt).toLocaleDateString("zh-CN") }}</time>
                 <details class="row-actions">
@@ -590,9 +596,11 @@ onBeforeUnmount(() => {
 .library-page { width: min(1880px, calc(100% - 44px)); }
 .library-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 22px; }
 .library-heading h1 { margin-bottom: 5px; }.library-heading p { margin: 0; color: var(--muted); }.new-project { min-width: 132px; }
+.library-create-actions { display: flex; gap: 8px; align-items: center; }.create-link { min-height: 40px; display: inline-flex; align-items: center; }
 .library-error { display: flex; justify-content: space-between; align-items: center; }.retry-link { border: 0; color: inherit; background: transparent; font-weight: 700; cursor: pointer; text-decoration: underline; }
 .library-shell { display: grid; grid-template-columns: 218px minmax(0, 1fr); gap: 18px; align-items: start; }
 .library-sidebar { position: sticky; top: 90px; padding: 14px 10px; max-height: calc(100vh - 112px); overflow: auto; border-radius: 16px; }
+.series-library-link { margin: 2px 0 8px; padding: 10px; display: block; border-radius: 10px; color: #5b6f5e; background: var(--sage-soft); font-weight: 700; }
 .sidebar-section { display: grid; gap: 2px; padding: 7px 0 12px; border-bottom: 1px solid var(--line); }.sidebar-section:last-child { border-bottom: 0; }
 .sidebar-section header { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; color: #8a8179; font-size: 11px; font-weight: 700; }.sidebar-section header button { border: 0; background: transparent; color: var(--accent-dark); font-size: 18px; cursor: pointer; }
 .sidebar-section > button, .collection-row > button:first-child { min-width: 0; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: transparent; color: #5f5852; cursor: pointer; text-align: left; }
@@ -605,7 +613,7 @@ onBeforeUnmount(() => {
 .project-groups { display: grid; gap: 25px; }.group-heading { margin: 2px 2px 10px; display: flex; align-items: baseline; gap: 9px; }.group-heading h2 { margin: 0; font: 600 16px Inter, sans-serif; }.group-heading span { color: var(--muted); font-size: 11px; }.compact-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .project-card { min-width: 0; position: relative; overflow: hidden; border-radius: 15px; transition: transform .16s, box-shadow .16s; }.project-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }.project-link { min-height: 152px; display: grid; grid-template-columns: 82px minmax(0, 1fr); }.project-check { position: absolute; z-index: 2; left: 7px; top: 7px; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; background: rgb(255 253 249 / 88%); box-shadow: 0 3px 10px #30241e26; }
 .project-cover { min-height: 152px; position: relative; display: grid; place-items: center; overflow: hidden; background: #c9ac8a; }.project-cover img { width: 100%; height: 100%; object-fit: cover; }.cover-2 { background: #9aad9d; }.cover-3 { background: #c99791; }.cover-4 { background: #aaa6bb; }.cover-5 { background: #9daeb7; }.cover-6 { background: #c3aa83; }.cover-mark { font-size: 24px; opacity: .75; filter: grayscale(.3); }.duration { position: absolute; right: 6px; bottom: 6px; padding: 3px 6px; border-radius: 7px; color: white; background: #40362f99; font-size: 9px; }
-.project-body { min-width: 0; padding: 12px 11px; display: flex; flex-direction: column; }.project-title-line { display: flex; align-items: start; gap: 4px; }.project-title-line h3 { min-width: 0; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }.project-title-line span { color: #c77956; font-size: 11px; }.project-body > p { min-height: 36px; margin: 6px 0 8px; display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.project-body { min-width: 0; padding: 12px 11px; display: flex; flex-direction: column; }.project-title-line { display: flex; align-items: start; gap: 4px; }.project-title-line h3 { min-width: 0; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }.project-title-line span { color: #c77956; font-size: 11px; }.series-chip { width: fit-content; max-width: 100%; margin-top: 5px; padding: 3px 6px; overflow: hidden; border-radius: 6px; color: #526b58; background: var(--sage-soft); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }.project-body > p { min-height: 36px; margin: 6px 0 8px; display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .project-context { min-height: 21px; display: flex; gap: 4px; overflow: hidden; white-space: nowrap; }.collection-chip, .tag-chip { max-width: 92px; padding: 3px 5px; overflow: hidden; border-radius: 6px; color: #756d65; background: #f2ede6; font-size: 9px; text-overflow: ellipsis; }.project-status { margin-top: auto; padding-top: 8px; display: flex; justify-content: space-between; gap: 5px; align-items: center; color: #8a8178; font-size: 10px; }.attention-needs_attention { color: #aa573c; font-weight: 700; }.attention-running { color: #4d7559; font-weight: 700; }.attention-normal { color: #756d65; }
 .management-list { overflow: visible; border-radius: 14px; }.list-row { min-height: 59px; padding: 7px 11px; display: grid; grid-template-columns: 26px minmax(220px, 1.4fr) minmax(150px, 1fr) 85px 110px 90px 90px 44px; gap: 10px; align-items: center; border-bottom: 1px solid #eee7df; color: #645c55; background: var(--surface); font-size: 11px; }.list-row:first-child { border-radius: 14px 14px 0 0; }.list-row:last-child { border-bottom: 0; border-radius: 0 0 14px 14px; }.list-head { min-height: 38px; color: #999087; background: #faf7f2; font-size: 10px; }.list-project { min-width: 0; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 8px; align-items: center; }.list-project img, .list-cover { width: 32px; height: 44px; object-fit: cover; border-radius: 6px; background: #e8ddd1; display: grid; place-items: center; }.list-project span, .list-tags { min-width: 0; display: grid; gap: 3px; }.list-project b, .list-project small, .list-tags b, .list-tags small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.list-project small, .list-tags small { color: #978e85; }
 .row-actions { position: relative; }.row-actions summary { width: 32px; height: 30px; display: grid; place-items: center; border-radius: 8px; cursor: pointer; list-style: none; }.row-actions summary::-webkit-details-marker { display: none; }.row-actions[open] summary { background: #f3e9df; }.row-actions div { position: absolute; z-index: 8; right: 0; top: 34px; min-width: 105px; padding: 5px; display: grid; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: white; box-shadow: var(--shadow); }.row-actions button { padding: 7px 9px; border: 0; border-radius: 7px; background: transparent; color: #625a53; cursor: pointer; text-align: left; }.row-actions button:hover, .row-actions button:focus-visible { background: #f7eee7; }

@@ -42,6 +42,39 @@ class TypedGatewayStub:
             request_hash="c" * 64,
         )
 
+    def plan_series(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return StructuredProviderResult(
+            payload={"seriesBible": {}, "episodes": []},
+            response_id="series-response",
+            model="planning-model",
+            usage={"inputTokens": 800, "outputTokens": 1200},
+            request_hash="d" * 64,
+        )
+
+    def plan_series_episode(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return StructuredProviderResult(
+            payload={"title": "准备野餐", "targetDurationSeconds": 12},
+            response_id="episode-response",
+            model="planning-model",
+            usage={"inputTokens": 300, "outputTokens": 500},
+            request_hash="e" * 64,
+        )
+
+    def analyze_story_source(
+        self, *, prompt: str, output_schema: dict[str, object]
+    ) -> StructuredProviderResult:
+        return StructuredProviderResult(
+            payload={"units": [], "relationSuggestions": []},
+            response_id="source-analysis-response",
+            model="planning-model",
+            usage={"inputTokens": 600, "outputTokens": 700},
+            request_hash="f" * 64,
+        )
+
     def generate_image(
         self,
         *,
@@ -148,6 +181,11 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
         kind="generate_video",
         frozen_input={
             "prompt": "12秒生活短片",
+            "negativePrompt": "不得停帧或遗漏最终状态",
+            "compiledProviderPrompt": (
+                "【生成目标】\n12秒生活短片\n\n"
+                "【必须避免】\n不得停帧或遗漏最终状态"
+            ),
             "referenceAssetIds": [str(item) for item in asset_ids],
             "referenceRoles": [
                 "episode_child",
@@ -164,7 +202,10 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
     assert submission.task_id == "video-task-1"
     assert typed.video_calls == [
         {
-            "prompt": "12秒生活短片",
+            "prompt": (
+                "【生成目标】\n12秒生活短片\n\n"
+                "【必须避免】\n不得停帧或遗漏最终状态"
+            ),
             "reference_paths": paths,
             "reference_roles": (
                 "episode_child",
@@ -173,10 +214,77 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
                 "environment",
                 "style_board",
             ),
+            "reference_video_url": None,
             "duration_seconds": 12,
             "resolution": "480p",
         }
     ]
+
+
+def test_ark_job_gateway_publishes_an_explicit_previous_episode_video_once(
+    tmp_path: Path,
+) -> None:
+    image_ids = tuple(uuid.uuid4() for _ in range(5))
+    image_paths = tuple(tmp_path / f"reference-{index}.png" for index in range(5))
+    video_id = uuid.uuid4()
+    video_path = tmp_path / "previous.mp4"
+    typed = TypedGatewayStub()
+    publications: list[tuple[uuid.UUID, uuid.UUID, Path]] = []
+
+    class Publisher:
+        def publish_asset(
+            self, job_id: uuid.UUID, asset_id: uuid.UUID, path: Path
+        ) -> PublishedSegmentReference:
+            publications.append((job_id, asset_id, path))
+            return PublishedSegmentReference(
+                publication_id=uuid.UUID("22222222-2222-4222-8222-222222222222"),
+                url="https://media.example.test/previous.mp4?X-Amz-Signature=secret",
+            )
+
+    def resolve(ids: tuple[uuid.UUID, ...]) -> tuple[Path, ...]:
+        if ids == image_ids:
+            return image_paths
+        if ids == (video_id,):
+            return (video_path,)
+        return ()
+
+    gateway = ArkProviderJobGateway(
+        typed,
+        resolve_asset_paths=resolve,
+        extract_video_frames=lambda _asset_id, _seconds: (),
+        publish_segment_reference=Publisher(),
+    )
+    job_id = uuid.uuid4()
+    frozen_input: dict[str, object] = {
+        "prompt": "承接上一集结尾开始野餐",
+        "negativePrompt": "不得复制上一集的动作节奏",
+        "compiledProviderPrompt": (
+            "【生成目标】\n承接上一集结尾开始野餐\n\n"
+            "【必须避免】\n不得复制上一集的动作节奏"
+        ),
+        "referenceAssetIds": [str(item) for item in image_ids],
+        "referenceRoles": [
+            "episode_child",
+            "episode_cat",
+            "pair_scale",
+            "environment",
+            "style_board",
+        ],
+        "previousEpisodeVideoAssetId": str(video_id),
+        "durationSeconds": 12,
+        "resolution": "480p",
+    }
+
+    gateway.prepare_submission(job_id=job_id, kind="generate_video", frozen_input=frozen_input)
+    submission = gateway.submit(
+        job_id=job_id, kind="generate_video", frozen_input=frozen_input
+    )
+
+    assert publications == [(job_id, video_id, video_path)]
+    assert typed.video_calls[0]["reference_video_url"].startswith("https://")
+    assert submission.metadata == {
+        "publicationId": "22222222-2222-4222-8222-222222222222"
+    }
 
 
 def test_ark_job_gateway_uses_the_professional_director_planning_boundary() -> None:
@@ -198,6 +306,34 @@ def test_ark_job_gateway_uses_the_professional_director_planning_boundary() -> N
     assert submission.result is not None
     assert submission.result["responseId"] == "director-response"
     assert submission.usage == {"inputTokens": 600, "outputTokens": 900}
+
+
+def test_ark_job_gateway_routes_each_series_planning_kind_once() -> None:
+    gateway = ArkProviderJobGateway(
+        TypedGatewayStub(),
+        resolve_asset_paths=lambda _ids: (),
+        extract_video_frames=lambda _asset_id, _seconds: (),
+    )
+
+    series = gateway.submit(
+        job_id=uuid.uuid4(),
+        kind="plan_series",
+        frozen_input={"prompt": "规划三集", "outputSchema": {"type": "object"}},
+    )
+    episode = gateway.submit(
+        job_id=uuid.uuid4(),
+        kind="plan_series_episode",
+        frozen_input={"prompt": "扩写第一集", "outputSchema": {"type": "object"}},
+    )
+    source = gateway.submit(
+        job_id=uuid.uuid4(),
+        kind="analyze_story_source",
+        frozen_input={"prompt": "分析导入文本", "outputSchema": {"type": "object"}},
+    )
+
+    assert series.result is not None and series.result["responseId"] == "series-response"
+    assert episode.result is not None and episode.result["responseId"] == "episode-response"
+    assert source.result is not None and source.result["responseId"] == "source-analysis-response"
 
 
 def test_ark_job_gateway_preserves_image_usage_and_request_id() -> None:

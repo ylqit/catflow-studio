@@ -29,6 +29,18 @@ EXPECTED_TABLES = {
     "provider_rate_cards",
     "project_collections",
     "project_tags",
+    "story_series",
+    "series_plan_versions",
+    "series_episodes",
+    "series_episode_outline_versions",
+    "story_source_documents",
+    "story_source_units",
+    "story_source_relation_suggestions",
+    "story_source_materializations",
+    "episode_continuity_snapshots",
+    "series_asset_bindings",
+    "project_asset_bindings",
+    "episode_reference_manifests",
 }
 
 
@@ -169,6 +181,18 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
         "provider_rate_cards",
         "project_collections",
         "project_tags",
+        "story_series",
+        "series_plan_versions",
+        "series_episodes",
+        "series_episode_outline_versions",
+        "story_source_documents",
+        "story_source_units",
+        "story_source_relation_suggestions",
+        "story_source_materializations",
+        "episode_continuity_snapshots",
+        "series_asset_bindings",
+        "project_asset_bindings",
+        "episode_reference_manifests",
     }:
         assert f"CREATE TABLE {SCHEMA_NAME}.{table_name}" in sql
     assert "production_runs" not in sql

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { api } from "../api/client";
-import type { RuntimeBootstrapDto, WorkspaceDto } from "../api/types";
+import type { ProjectSeriesContextDto, RuntimeBootstrapDto, WorkspaceDto } from "../api/types";
 import AssetsStep from "../components/workspace/AssetsStep.vue";
 import DeliveryStep from "../components/workspace/DeliveryStep.vue";
 import GenerationStep from "../components/workspace/GenerationStep.vue";
@@ -14,9 +14,11 @@ import { useUiStore } from "../stores/ui";
 
 const props = defineProps<{ step: "planner" | "assets" | "storyboard" | "generation" | "delivery" }>();
 const route = useRoute();
+const router = useRouter();
 const store = useUiStore();
 const workspace = ref<WorkspaceDto | null>(null);
 const runtime = ref<RuntimeBootstrapDto | null>(null);
+const seriesContext = ref<ProjectSeriesContextDto | null>(null);
 const loading = ref(true);
 const error = ref("");
 const projectId = computed(() => String(route.params.projectId));
@@ -33,12 +35,14 @@ const steps = [
 
 async function loadWorkspace() {
   try {
-    const [nextWorkspace, nextRuntime] = await Promise.all([
+    const [nextWorkspace, nextRuntime, nextSeriesContext] = await Promise.all([
       api.workspace(projectId.value),
       api.runtime().catch(() => null),
+      api.projectSeriesContext(projectId.value).catch(() => null),
     ]);
     workspace.value = nextWorkspace;
     runtime.value = nextRuntime;
+    seriesContext.value = nextSeriesContext;
     store.lastEventId = Math.max(store.lastEventId, workspace.value.eventCursor);
     store.setProject(projectId.value);
     error.value = "";
@@ -47,6 +51,11 @@ async function loadWorkspace() {
   } finally {
     loading.value = false;
   }
+}
+
+async function switchEpisode(event: Event) {
+  const selectedProjectId = (event.target as HTMLSelectElement).value;
+  if (selectedProjectId) await router.push(`/projects/${selectedProjectId}/${props.step}`);
 }
 
 async function refreshRuntime() {
@@ -112,9 +121,10 @@ onBeforeUnmount(() => {
     <section v-else-if="error || !workspace" class="page"><div class="card empty"><h2>工作区暂时不可用</h2><p class="notice error">{{ error }}</p><button class="secondary" @click="loadWorkspace">重新检查</button></div></section>
     <template v-else>
       <header class="workspace-heading">
-        <div class="workspace-title"><RouterLink to="/projects">←</RouterLink><div><p class="eyebrow">{{ workspace.project.theme }}</p><h1>{{ workspace.project.title }}</h1></div></div>
+        <div class="workspace-title"><RouterLink :to="seriesContext ? `/series/${seriesContext.series.id}` : '/projects'">←</RouterLink><div><p v-if="seriesContext" class="series-breadcrumb"><RouterLink :to="`/series/${seriesContext.series.id}`">{{ seriesContext.series.title }}</RouterLink> · 第 {{ seriesContext.episode.order }} 集</p><p v-else class="eyebrow">{{ workspace.project.theme }}</p><h1>{{ workspace.project.title }}</h1></div></div>
         <div class="workspace-status"><span v-if="!store.sseConnected" class="connection-warning"><i />正在恢复连接</span><b>{{ workspace.project.targetDurationSeconds }}s</b><b>9:16</b></div>
       </header>
+      <div v-if="seriesContext" class="episode-switcher"><label>切换剧集<select :value="projectId" @change="switchEpisode"><option v-for="episode in seriesContext.episodes" :key="episode.id" :value="episode.projectId ?? ''" :disabled="!episode.projectId">第 {{ episode.order }} 集 · {{ episode.title }}{{ episode.projectId ? '' : '（未开始）' }}</option></select></label></div>
       <nav class="step-nav" aria-label="五步创作流程">
         <RouterLink v-for="item in steps" :key="item.id" :to="`/projects/${projectId}/${item.id}`" :class="{ current: step === item.id, ready: workspace.steps.find((state) => state.id === item.id)?.ready }">
           <span>{{ item.number }}</span><div><b>{{ item.label }}</b><small>{{ item.hint }}</small></div><i>✓</i>
@@ -159,4 +169,5 @@ onBeforeUnmount(() => {
 .step-nav a.current > span, .step-nav a.current b { color: var(--accent-dark); }
 .workspace-content { width: min(1480px, calc(100% - 56px)); margin: 0 auto; padding: 20px 0 55px; }
 .worker-warning { width: min(1480px, calc(100% - 56px)); box-sizing: border-box; margin: 14px auto 0; padding: 11px 14px; border: 1px solid #d8b28d; border-radius: 11px; color: #815741; background: #fff4e8; font-size: 11px; }
+.series-breadcrumb { margin: 0 0 3px; color: var(--muted); font-size: 11px; }.series-breadcrumb a { color: var(--accent-dark); }.episode-switcher { width: min(1480px, calc(100% - 56px)); margin: 0 auto 10px; display: flex; justify-content: flex-end; }.episode-switcher label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }.episode-switcher select { min-width: 220px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 </style>

@@ -986,6 +986,1412 @@
         }
       }
     },
+    "/api/v1/story-series": {
+      "get": {
+        "summary": "Story Series",
+        "operationId": "story_series_api_v1_story_series_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StorySeriesDto"
+                  },
+                  "type": "array",
+                  "title": "Response Story Series Api V1 Story Series Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Story Series",
+        "operationId": "create_story_series_api_v1_story_series_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesCreateCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorySeriesDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}": {
+      "get": {
+        "summary": "Get Story Series",
+        "operationId": "get_story_series_api_v1_story_series__series_id__get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorySeriesDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Patch Story Series",
+        "operationId": "patch_story_series_api_v1_story_series__series_id__patch",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesPatchCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorySeriesDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/plans/preview": {
+      "post": {
+        "summary": "Preview Series Plan",
+        "operationId": "preview_series_plan_api_v1_story_series__series_id__plans_preview_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesPlanPreviewDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/plans/generations": {
+      "post": {
+        "summary": "Generate Series Plan",
+        "operationId": "generate_series_plan_api_v1_story_series__series_id__plans_generations_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesPlanGenerationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/plans": {
+      "get": {
+        "summary": "Series Plans",
+        "operationId": "series_plans_api_v1_story_series__series_id__plans_get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesPlanVersionDto"
+                  },
+                  "title": "Response Series Plans Api V1 Story Series  Series Id  Plans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/plans/{plan_version_id}/materialize": {
+      "post": {
+        "summary": "Materialize Series Plan",
+        "operationId": "materialize_series_plan_api_v1_story_series__series_id__plans__plan_version_id__materialize_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "plan_version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesPlanMaterializeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/plans/{plan_version_id}/activate": {
+      "post": {
+        "summary": "Activate Series Plan",
+        "operationId": "activate_series_plan_api_v1_story_series__series_id__plans__plan_version_id__activate_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "plan_version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesPlanActivationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/plans/{plan_version_id}/reject": {
+      "post": {
+        "summary": "Reject Series Plan",
+        "operationId": "reject_series_plan_api_v1_story_series__series_id__plans__plan_version_id__reject_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "plan_version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": " Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes": {
+      "get": {
+        "summary": "Series Episodes",
+        "operationId": "series_episodes_api_v1_story_series__series_id__episodes_get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesEpisodeDto"
+                  },
+                  "title": "Response Series Episodes Api V1 Story Series  Series Id  Episodes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/jobs": {
+      "get": {
+        "summary": "Series Jobs",
+        "operationId": "series_jobs_api_v1_story_series__series_id__jobs_get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobDto"
+                  },
+                  "title": "Response Series Jobs Api V1 Story Series  Series Id  Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/series-context": {
+      "get": {
+        "summary": "Project Series Context",
+        "operationId": "project_series_context_api_v1_projects__project_id__series_context_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ProjectSeriesContextDto"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Project Series Context Api V1 Projects  Project Id  Series Context Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/materialize": {
+      "post": {
+        "summary": "Materialize Series Episode",
+        "operationId": "materialize_series_episode_api_v1_story_series__series_id__episodes__episode_id__materialize_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesEpisodeMaterializeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations/preview": {
+      "post": {
+        "summary": "Preview Series Episode Story",
+        "operationId": "preview_series_episode_story_api_v1_story_series__series_id__episodes__episode_id__story_generations_preview_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesEpisodeStoryPreviewCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesEpisodeStoryPreviewDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations": {
+      "post": {
+        "summary": "Generate Series Episode Story",
+        "operationId": "generate_series_episode_story_api_v1_story_series__series_id__episodes__episode_id__story_generations_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesEpisodeStoryGenerationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity": {
+      "get": {
+        "summary": "Series Episode Continuity",
+        "operationId": "series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeContinuityDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/confirm": {
+      "post": {
+        "summary": "Confirm Series Episode Continuity",
+        "operationId": "confirm_series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_confirm_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EpisodeContinuityConfirmCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeContinuitySnapshotDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/reset": {
+      "post": {
+        "summary": "Reset Series Episode Continuity",
+        "operationId": "reset_series_episode_continuity_api_v1_story_series__series_id__episodes__episode_id__continuity_reset_post",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EpisodeContinuityResetCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeContinuitySnapshotDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/frames": {
+      "get": {
+        "summary": "Series Episode Continuity Frames",
+        "operationId": "series_episode_continuity_frames_api_v1_story_series__series_id__episodes__episode_id__continuity_frames_get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeContinuityFramesDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/episodes/{episode_id}/continuity/keyframes": {
+      "put": {
+        "summary": "Select Series Episode Continuity Keyframes",
+        "operationId": "select_series_episode_continuity_keyframes_api_v1_story_series__series_id__episodes__episode_id__continuity_keyframes_put",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          },
+          {
+            "name": "episode_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Episode Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EpisodeContinuityKeyframesCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AssetDto"
+                  },
+                  "title": "Response Select Series Episode Continuity Keyframes Api V1 Story Series  Series Id  Episodes  Episode Id  Continuity Keyframes Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-series/{series_id}/assets": {
+      "get": {
+        "summary": "Series Assets",
+        "operationId": "series_assets_api_v1_story_series__series_id__assets_get",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesAssetBindingDto"
+                  },
+                  "title": "Response Series Assets Api V1 Story Series  Series Id  Assets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update Series Assets",
+        "operationId": "update_series_assets_api_v1_story_series__series_id__assets_patch",
+        "parameters": [
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Series Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesAssetBindingsPatchCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesAssetBindingDto"
+                  },
+                  "title": "Response Update Series Assets Api V1 Story Series  Series Id  Assets Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-imports/preview": {
+      "post": {
+        "summary": "Preview Story Import",
+        "operationId": "preview_story_import_api_v1_story_imports_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoryImportPreviewCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoryImportPreviewDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-imports": {
+      "get": {
+        "summary": "Story Imports",
+        "operationId": "story_imports_api_v1_story_imports_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StorySourceDocumentDto"
+                  },
+                  "type": "array",
+                  "title": "Response Story Imports Api V1 Story Imports Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Story Import",
+        "operationId": "create_story_import_api_v1_story_imports_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoryImportCreateCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoryImportCreateResultDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-imports/{document_id}": {
+      "get": {
+        "summary": "Get Story Import",
+        "operationId": "get_story_import_api_v1_story_imports__document_id__get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorySourceDocumentDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-imports/{document_id}/reanalyze": {
+      "post": {
+        "summary": "Reanalyze Story Import",
+        "operationId": "reanalyze_story_import_api_v1_story_imports__document_id__reanalyze_post",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoryImportReanalyzeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/story-imports/{document_id}/confirm": {
+      "post": {
+        "summary": "Confirm Story Import",
+        "operationId": "confirm_story_import_api_v1_story_imports__document_id__confirm_post",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoryImportConfirmCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoryImportMaterializationDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}": {
       "get": {
         "summary": "Get Project",
@@ -2233,10 +3639,8 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "default": {},
-                "title": " Payload"
+                "$ref": "#/components/schemas/GenerationPreviewCommand",
+                "default": {}
               }
             }
           }
@@ -3274,6 +4678,11 @@
       },
       "AssetGenerationCommand": {
         "properties": {
+          "includePreviousEpisodeVideo": {
+            "type": "boolean",
+            "title": "Includepreviousepisodevideo",
+            "default": false
+          },
           "expectedInputHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
@@ -3596,7 +5005,10 @@
               "pair_scale",
               "environment",
               "style_board",
-              "style_source"
+              "style_source",
+              "previous_episode_last_frame",
+              "previous_episode_keyframe_1",
+              "previous_episode_keyframe_2"
             ],
             "title": "Role"
           },
@@ -3723,6 +5135,64 @@
           "finalFrame"
         ],
         "title": "ContinuityDesign"
+      },
+      "ContinuityPropState": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "State"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "child",
+                  "cat",
+                  "environment"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "state"
+        ],
+        "title": "ContinuityPropState"
       },
       "DirectorMicroEvent": {
         "properties": {
@@ -4482,6 +5952,358 @@
         ],
         "title": "EmotionalArc"
       },
+      "EpisodeContinuityConfirmCommand": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "incoming",
+              "outgoing"
+            ],
+            "title": "Direction"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EpisodeContinuityState"
+          },
+          "decisions": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "inherit",
+                "adjust",
+                "reset"
+              ]
+            },
+            "type": "object",
+            "title": "Decisions"
+          },
+          "expectedSnapshotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsnapshotid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "state",
+          "idempotencyKey"
+        ],
+        "title": "EpisodeContinuityConfirmCommand"
+      },
+      "EpisodeContinuityDto": {
+        "properties": {
+          "episodeId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Episodeid"
+          },
+          "previousEpisodeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousepisodeid"
+          },
+          "incoming": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EpisodeContinuitySnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outgoing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EpisodeContinuitySnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "episodeId"
+        ],
+        "title": "EpisodeContinuityDto"
+      },
+      "EpisodeContinuityFramesDto": {
+        "properties": {
+          "episodeId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Episodeid"
+          },
+          "sourceVideoAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcevideoassetid"
+          },
+          "lastFrame": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/AssetDto"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "selectedKeyframes": {
+            "items": {
+              "$ref": "#/components/schemas/AssetDto"
+            },
+            "type": "array",
+            "title": "Selectedkeyframes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "episodeId"
+        ],
+        "title": "EpisodeContinuityFramesDto"
+      },
+      "EpisodeContinuityKeyframesCommand": {
+        "properties": {
+          "assetIds": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Assetids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assetIds"
+        ],
+        "title": "EpisodeContinuityKeyframesCommand"
+      },
+      "EpisodeContinuityResetCommand": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "incoming",
+              "outgoing"
+            ],
+            "title": "Direction"
+          },
+          "expectedSnapshotId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Expectedsnapshotid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "expectedSnapshotId"
+        ],
+        "title": "EpisodeContinuityResetCommand"
+      },
+      "EpisodeContinuitySnapshotDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "episodeId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Episodeid"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "incoming",
+              "outgoing"
+            ],
+            "title": "Direction"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "confirmed",
+              "final_video"
+            ],
+            "title": "Source"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EpisodeContinuityState"
+          },
+          "decisions": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "inherit",
+                "adjust",
+                "reset"
+              ]
+            },
+            "type": "object",
+            "title": "Decisions"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "episodeId",
+          "direction",
+          "source",
+          "state",
+          "confirmed",
+          "active",
+          "createdAt"
+        ],
+        "title": "EpisodeContinuitySnapshotDto"
+      },
+      "EpisodeContinuityState": {
+        "properties": {
+          "wardrobe": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Wardrobe"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Location"
+          },
+          "weather": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Weather"
+          },
+          "timeOfDay": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Timeofday"
+          },
+          "lighting": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Lighting"
+          },
+          "childState": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Childstate"
+          },
+          "catState": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Catstate"
+          },
+          "spatialPositions": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Spatialpositions"
+          },
+          "props": {
+            "items": {
+              "$ref": "#/components/schemas/ContinuityPropState"
+            },
+            "type": "array",
+            "title": "Props"
+          },
+          "unfinishedActions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unfinishedactions"
+          },
+          "endingImage": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Endingimage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "wardrobe",
+          "location",
+          "weather",
+          "timeOfDay",
+          "lighting",
+          "childState",
+          "catState",
+          "spatialPositions",
+          "endingImage"
+        ],
+        "title": "EpisodeContinuityState"
+      },
       "ExportCommand": {
         "properties": {
           "editVersionId": {
@@ -4542,6 +6364,11 @@
       },
       "GenerationCommand": {
         "properties": {
+          "includePreviousEpisodeVideo": {
+            "type": "boolean",
+            "title": "Includepreviousepisodevideo",
+            "default": false
+          },
           "expectedInputHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
@@ -4625,7 +6452,10 @@
         "properties": {
           "schemaVersion": {
             "type": "integer",
-            "const": 1,
+            "enum": [
+              1,
+              2
+            ],
             "title": "Schemaversion"
           },
           "kind": {
@@ -4669,12 +6499,37 @@
             "type": "string",
             "title": "Negativeprompt"
           },
+          "promptSummary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promptsummary"
+          },
+          "promptSections": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationPromptSectionDto"
+            },
+            "type": "array",
+            "title": "Promptsections"
+          },
           "references": {
             "items": {
               "$ref": "#/components/schemas/GenerationInputReferenceDto"
             },
             "type": "array",
             "title": "References"
+          },
+          "videoReferences": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationInputVideoReferenceDto"
+            },
+            "type": "array",
+            "title": "Videoreferences"
           },
           "video": {
             "$ref": "#/components/schemas/GenerationVideoSpecDto"
@@ -4793,6 +6648,62 @@
         "type": "object",
         "title": "GenerationInputSourceDto"
       },
+      "GenerationInputVideoReferenceDto": {
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "role": {
+            "type": "string",
+            "const": "previous_episode_video",
+            "title": "Role"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "durationSeconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationseconds"
+          },
+          "included": {
+            "type": "boolean",
+            "title": "Included"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assetId",
+          "role",
+          "sha256",
+          "included"
+        ],
+        "title": "GenerationInputVideoReferenceDto"
+      },
+      "GenerationPreviewCommand": {
+        "properties": {
+          "includePreviousEpisodeVideo": {
+            "type": "boolean",
+            "title": "Includepreviousepisodevideo",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GenerationPreviewCommand"
+      },
       "GenerationPreviewDto": {
         "properties": {
           "inputHash": {
@@ -4825,12 +6736,30 @@
             "type": "string",
             "title": "Negativeprompt"
           },
+          "promptSummary": {
+            "type": "string",
+            "title": "Promptsummary"
+          },
+          "promptSections": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationPromptSectionDto"
+            },
+            "type": "array",
+            "title": "Promptsections"
+          },
           "references": {
             "items": {
               "$ref": "#/components/schemas/CompiledReference"
             },
             "type": "array",
             "title": "References"
+          },
+          "videoReferences": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationInputVideoReferenceDto"
+            },
+            "type": "array",
+            "title": "Videoreferences"
           },
           "expectedCostMicros": {
             "anyOf": [
@@ -4881,6 +6810,30 @@
               }
             ]
           },
+          "seriesEpisodeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seriesepisodeid"
+          },
+          "continuitySnapshotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuitysnapshotid"
+          },
           "warnings": {
             "items": {
               "additionalProperties": {
@@ -4901,6 +6854,8 @@
           "capabilityRevision",
           "prompt",
           "negativePrompt",
+          "promptSummary",
+          "promptSections",
           "references",
           "costEstimateStatus",
           "storyVersionId",
@@ -4909,6 +6864,36 @@
           "durationSeconds"
         ],
         "title": "GenerationPreviewDto"
+      },
+      "GenerationPromptSectionDto": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "identity_style",
+              "creative_treatment",
+              "shot_execution",
+              "ending_constraints"
+            ],
+            "title": "Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "title",
+          "content"
+        ],
+        "title": "GenerationPromptSectionDto"
       },
       "GenerationRisk": {
         "properties": {
@@ -5107,15 +7092,50 @@
             "title": "Id"
           },
           "projectId": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Projectid"
+          },
+          "seriesId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seriesid"
+          },
+          "storySourceDocumentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storysourcedocumentid"
           },
           "kind": {
             "type": "string",
             "enum": [
               "plan_story",
               "plan_shots",
+              "plan_series",
+              "plan_series_episode",
+              "analyze_story_source",
+              "extract_continuity_frames",
               "generate_image",
               "diagnose_image",
               "generate_video",
@@ -5410,7 +7430,6 @@
         "type": "object",
         "required": [
           "id",
-          "projectId",
           "kind",
           "status",
           "inputHash",
@@ -6568,6 +8587,16 @@
             ],
             "title": "Coverassetid"
           },
+          "series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectLibrarySeriesDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "collection": {
             "anyOf": [
               {
@@ -6687,6 +8716,38 @@
           "facets"
         ],
         "title": "ProjectLibraryPageDto"
+      },
+      "ProjectLibrarySeriesDto": {
+        "properties": {
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesid"
+          },
+          "seriesTitle": {
+            "type": "string",
+            "title": "Seriestitle"
+          },
+          "episodeId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Episodeid"
+          },
+          "episodeOrder": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Episodeorder"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "seriesId",
+          "seriesTitle",
+          "episodeId",
+          "episodeOrder"
+        ],
+        "title": "ProjectLibrarySeriesDto"
       },
       "ProjectOrganizationCommand": {
         "properties": {
@@ -6841,6 +8902,31 @@
           "createdAt"
         ],
         "title": "ProjectSelectionDto"
+      },
+      "ProjectSeriesContextDto": {
+        "properties": {
+          "series": {
+            "$ref": "#/components/schemas/StorySeriesDto"
+          },
+          "episode": {
+            "$ref": "#/components/schemas/SeriesEpisodeDto"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesEpisodeDto"
+            },
+            "type": "array",
+            "title": "Episodes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "series",
+          "episode",
+          "episodes"
+        ],
+        "title": "ProjectSeriesContextDto"
       },
       "ProjectTagDto": {
         "properties": {
@@ -7114,6 +9200,56 @@
           "denominator"
         ],
         "title": "RationalFrameRate"
+      },
+      "RecurringLocationDraft": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Key",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Name",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 800,
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RecurringLocationDraft"
+      },
+      "RecurringPropDraft": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Key",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Name",
+            "default": ""
+          },
+          "continuityRule": {
+            "type": "string",
+            "maxLength": 800,
+            "title": "Continuityrule",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RecurringPropDraft"
       },
       "SegmentEditInputDto": {
         "properties": {
@@ -7571,6 +9707,1088 @@
           "assetId"
         ],
         "title": "SelectionCommand"
+      },
+      "SeriesAssetBindingCommand": {
+        "properties": {
+          "bindingKey": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Bindingkey"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "bindingKey",
+          "role",
+          "assetId"
+        ],
+        "title": "SeriesAssetBindingCommand"
+      },
+      "SeriesAssetBindingDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesid"
+          },
+          "bindingKey": {
+            "type": "string",
+            "title": "Bindingkey"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "assetSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Assetsha256"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "seriesId",
+          "bindingKey",
+          "role",
+          "assetId",
+          "assetSha256",
+          "active",
+          "createdAt"
+        ],
+        "title": "SeriesAssetBindingDto"
+      },
+      "SeriesAssetBindingsPatchCommand": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesAssetBindingCommand"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Bindings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "bindings"
+        ],
+        "title": "SeriesAssetBindingsPatchCommand"
+      },
+      "SeriesBibleDraft": {
+        "properties": {
+          "logline": {
+            "type": "string",
+            "maxLength": 800,
+            "title": "Logline",
+            "default": ""
+          },
+          "centralTheme": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Centraltheme",
+            "default": ""
+          },
+          "narrativeMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "continuous",
+                  "lightly_serialized",
+                  "anthology"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrativemode"
+          },
+          "worldRules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Worldrules"
+          },
+          "emotionalArc": {
+            "$ref": "#/components/schemas/SeriesEmotionalArcDraft"
+          },
+          "recurringLocations": {
+            "items": {
+              "$ref": "#/components/schemas/RecurringLocationDraft"
+            },
+            "type": "array",
+            "title": "Recurringlocations"
+          },
+          "recurringProps": {
+            "items": {
+              "$ref": "#/components/schemas/RecurringPropDraft"
+            },
+            "type": "array",
+            "title": "Recurringprops"
+          },
+          "wardrobeRules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Wardroberules"
+          },
+          "continuityRules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Continuityrules"
+          },
+          "visualMotifs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Visualmotifs"
+          },
+          "soundMotifs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Soundmotifs"
+          },
+          "forbiddenChanges": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbiddenchanges"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SeriesBibleDraft"
+      },
+      "SeriesCreateCommand": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "premise": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Premise"
+          },
+          "narrativeMode": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "lightly_serialized",
+              "anthology"
+            ],
+            "title": "Narrativemode"
+          },
+          "plannedEpisodeCount": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 2.0,
+            "title": "Plannedepisodecount"
+          },
+          "defaultEpisodeDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 8.0,
+            "title": "Defaultepisodedurationseconds"
+          },
+          "worldSetting": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Worldsetting"
+          },
+          "emotionalDirection": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Emotionaldirection"
+          },
+          "endingGoal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endinggoal"
+          },
+          "recurringElements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Recurringelements"
+          },
+          "mustKeep": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Mustkeep"
+          },
+          "mustAvoid": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Mustavoid"
+          },
+          "additionalNotes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additionalnotes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "premise",
+          "narrativeMode",
+          "plannedEpisodeCount",
+          "defaultEpisodeDurationSeconds",
+          "worldSetting",
+          "emotionalDirection"
+        ],
+        "title": "SeriesCreateCommand"
+      },
+      "SeriesEmotionalArcDraft": {
+        "properties": {
+          "opening": {
+            "type": "string",
+            "maxLength": 600,
+            "title": "Opening",
+            "default": ""
+          },
+          "development": {
+            "type": "string",
+            "maxLength": 600,
+            "title": "Development",
+            "default": ""
+          },
+          "climax": {
+            "type": "string",
+            "maxLength": 600,
+            "title": "Climax",
+            "default": ""
+          },
+          "resolution": {
+            "type": "string",
+            "maxLength": 600,
+            "title": "Resolution",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SeriesEmotionalArcDraft"
+      },
+      "SeriesEpisodeDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesid"
+          },
+          "order": {
+            "type": "integer",
+            "title": "Order"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "targetDurationSeconds": {
+            "type": "integer",
+            "title": "Targetdurationseconds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "outline",
+              "story_review",
+              "assets",
+              "storyboard",
+              "generating",
+              "selecting",
+              "editing",
+              "completed",
+              "needs_attention"
+            ],
+            "title": "Status"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "activeOutlineVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Activeoutlineversionid"
+          },
+          "outline": {
+            "$ref": "#/components/schemas/SeriesEpisodeOutlineDraft"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "seriesId",
+          "order",
+          "title",
+          "targetDurationSeconds",
+          "status",
+          "activeOutlineVersionId",
+          "outline",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "SeriesEpisodeDto"
+      },
+      "SeriesEpisodeMaterializeCommand": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotencyKey"
+        ],
+        "title": "SeriesEpisodeMaterializeCommand"
+      },
+      "SeriesEpisodeOutlineDraft": {
+        "properties": {
+          "order": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 0.0,
+            "title": "Order",
+            "default": 0
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Title",
+            "default": ""
+          },
+          "targetDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 0.0,
+            "title": "Targetdurationseconds",
+            "default": 0
+          },
+          "premise": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Premise",
+            "default": ""
+          },
+          "openingState": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Openingstate",
+            "default": ""
+          },
+          "trigger": {
+            "type": "string",
+            "maxLength": 800,
+            "title": "Trigger",
+            "default": ""
+          },
+          "childIntent": {
+            "type": "string",
+            "maxLength": 800,
+            "title": "Childintent",
+            "default": ""
+          },
+          "childAction": {
+            "type": "string",
+            "maxLength": 1200,
+            "title": "Childaction",
+            "default": ""
+          },
+          "catResponse": {
+            "type": "string",
+            "maxLength": 1200,
+            "title": "Catresponse",
+            "default": ""
+          },
+          "visibleChange": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Visiblechange",
+            "default": ""
+          },
+          "endingState": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Endingstate",
+            "default": ""
+          },
+          "continuityCarryover": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Continuitycarryover"
+          },
+          "recurringLocationKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recurringlocationkeys"
+          },
+          "recurringPropKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recurringpropkeys"
+          },
+          "productionWarnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Productionwarnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SeriesEpisodeOutlineDraft"
+      },
+      "SeriesEpisodeStoryGenerationCommand": {
+        "properties": {
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "additionalNotes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additionalnotes"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "SeriesEpisodeStoryGenerationCommand"
+      },
+      "SeriesEpisodeStoryPreviewCommand": {
+        "properties": {
+          "additionalNotes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additionalnotes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SeriesEpisodeStoryPreviewCommand"
+      },
+      "SeriesEpisodeStoryPreviewDto": {
+        "properties": {
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesid"
+          },
+          "seriesPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesplanversionid"
+          },
+          "seriesEpisodeId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesepisodeid"
+          },
+          "episodeOutlineVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Episodeoutlineversionid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "incomingContinuity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incomingcontinuity"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Outputschema"
+          },
+          "promptRevision": {
+            "type": "string",
+            "title": "Promptrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "seriesId",
+          "seriesPlanVersionId",
+          "seriesEpisodeId",
+          "episodeOutlineVersionId",
+          "projectId",
+          "provider",
+          "model",
+          "capabilityRevision",
+          "inputHash",
+          "prompt",
+          "outputSchema",
+          "promptRevision"
+        ],
+        "title": "SeriesEpisodeStoryPreviewDto"
+      },
+      "SeriesPatchCommand": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "premise": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premise"
+          },
+          "worldSetting": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worldsetting"
+          },
+          "emotionalDirection": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotionaldirection"
+          },
+          "endingGoal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endinggoal"
+          },
+          "additionalNotes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additionalnotes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SeriesPatchCommand"
+      },
+      "SeriesPlanActivationCommand": {
+        "properties": {
+          "expectedActivePlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedactiveplanversionid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotencyKey"
+        ],
+        "title": "SeriesPlanActivationCommand"
+      },
+      "SeriesPlanDraft": {
+        "properties": {
+          "seriesBible": {
+            "$ref": "#/components/schemas/SeriesBibleDraft"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesEpisodeOutlineDraft"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Episodes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "seriesBible",
+          "episodes"
+        ],
+        "title": "SeriesPlanDraft"
+      },
+      "SeriesPlanGenerationCommand": {
+        "properties": {
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "SeriesPlanGenerationCommand"
+      },
+      "SeriesPlanMaterializeCommand": {
+        "properties": {
+          "basePlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Baseplanversionid"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/SeriesPlanDraft"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "basePlanVersionId",
+          "plan",
+          "idempotencyKey"
+        ],
+        "title": "SeriesPlanMaterializeCommand"
+      },
+      "SeriesPlanPreviewDto": {
+        "properties": {
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesid"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Outputschema"
+          },
+          "plannedEpisodeCount": {
+            "type": "integer",
+            "title": "Plannedepisodecount"
+          },
+          "defaultEpisodeDurationSeconds": {
+            "type": "integer",
+            "title": "Defaultepisodedurationseconds"
+          },
+          "promptRevision": {
+            "type": "string",
+            "title": "Promptrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "seriesId",
+          "provider",
+          "model",
+          "capabilityRevision",
+          "inputHash",
+          "prompt",
+          "outputSchema",
+          "plannedEpisodeCount",
+          "defaultEpisodeDurationSeconds",
+          "promptRevision"
+        ],
+        "title": "SeriesPlanPreviewDto"
+      },
+      "SeriesPlanVersionDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "seriesId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Seriesid"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "accepted",
+              "rejected",
+              "superseded"
+            ],
+            "title": "Status"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "candidate_ready",
+              "needs_input",
+              "invalid"
+            ],
+            "title": "Disposition"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/SeriesPlanDraft"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "promptRevision": {
+            "type": "string",
+            "title": "Promptrevision"
+          },
+          "producingJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producingjobid"
+          },
+          "basePlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseplanversionid"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesValidationIssueDto"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "decidedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidedat"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "seriesId",
+          "revision",
+          "status",
+          "active",
+          "disposition",
+          "plan",
+          "inputHash",
+          "promptRevision",
+          "createdAt"
+        ],
+        "title": "SeriesPlanVersionDto"
+      },
+      "SeriesValidationIssueDto": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "fatal",
+              "blocking",
+              "warning"
+            ],
+            "title": "Severity"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "suggestedAction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedaction"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "path",
+          "message"
+        ],
+        "title": "SeriesValidationIssueDto"
       },
       "ShotPlanActivationCommand": {
         "properties": {
@@ -8459,6 +11677,893 @@
           "environmentIntent"
         ],
         "title": "StoryCreateCommand"
+      },
+      "StoryImportAnalysisJobDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "submitting",
+              "submitted",
+              "polling",
+              "storing",
+              "succeeded",
+              "failed",
+              "cancel_requested",
+              "cancelled",
+              "submission_unknown"
+            ],
+            "title": "Status"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "actualUsage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualusage"
+          },
+          "actualCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualcostmicros"
+          },
+          "billingStatus": {
+            "type": "string",
+            "title": "Billingstatus",
+            "default": "pending"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "StoryImportAnalysisJobDto"
+      },
+      "StoryImportConfirmCommand": {
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Suggestionid"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "independent",
+              "new_series",
+              "append_series",
+              "revision",
+              "reference"
+            ],
+            "title": "Target"
+          },
+          "targetSeriesId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetseriesid"
+          },
+          "targetProjectId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetprojectid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "suggestionId",
+          "target",
+          "idempotencyKey"
+        ],
+        "title": "StoryImportConfirmCommand"
+      },
+      "StoryImportCreateCommand": {
+        "properties": {
+          "rawText": {
+            "type": "string",
+            "maxLength": 500000,
+            "minLength": 1,
+            "title": "Rawtext"
+          },
+          "sourceFormat": {
+            "type": "string",
+            "enum": [
+              "paste",
+              "txt",
+              "md"
+            ],
+            "title": "Sourceformat"
+          },
+          "fileName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 260
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rawText",
+          "sourceFormat",
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "StoryImportCreateCommand"
+      },
+      "StoryImportCreateResultDto": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/StorySourceDocumentDto"
+          },
+          "analysisJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoryImportAnalysisJobDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reused": {
+            "type": "boolean",
+            "title": "Reused"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document",
+          "reused"
+        ],
+        "title": "StoryImportCreateResultDto"
+      },
+      "StoryImportMaterializationDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "suggestionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Suggestionid"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "independent",
+              "new_series",
+              "append_series",
+              "revision",
+              "reference"
+            ],
+            "title": "Target"
+          },
+          "targetSeriesId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetseriesid"
+          },
+          "targetProjectId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetprojectid"
+          },
+          "series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StorySeriesDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/StoryImportProjectDto"
+            },
+            "type": "array",
+            "title": "Projects"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "suggestionId",
+          "target",
+          "createdAt"
+        ],
+        "title": "StoryImportMaterializationDto"
+      },
+      "StoryImportPreviewCommand": {
+        "properties": {
+          "rawText": {
+            "type": "string",
+            "maxLength": 500000,
+            "minLength": 1,
+            "title": "Rawtext"
+          },
+          "sourceFormat": {
+            "type": "string",
+            "enum": [
+              "paste",
+              "txt",
+              "md"
+            ],
+            "title": "Sourceformat"
+          },
+          "fileName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 260
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rawText",
+          "sourceFormat"
+        ],
+        "title": "StoryImportPreviewCommand"
+      },
+      "StoryImportPreviewDto": {
+        "properties": {
+          "contentHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Contenthash"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "characterCount": {
+            "type": "integer",
+            "title": "Charactercount"
+          },
+          "duplicateDocumentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicatedocumentid"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Outputschema"
+          },
+          "promptRevision": {
+            "type": "string",
+            "title": "Promptrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contentHash",
+          "inputHash",
+          "characterCount",
+          "prompt",
+          "outputSchema",
+          "promptRevision"
+        ],
+        "title": "StoryImportPreviewDto"
+      },
+      "StoryImportProjectDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "theme": {
+            "type": "string",
+            "title": "Theme"
+          },
+          "targetDurationSeconds": {
+            "type": "integer",
+            "title": "Targetdurationseconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "theme",
+          "targetDurationSeconds"
+        ],
+        "title": "StoryImportProjectDto"
+      },
+      "StoryImportReanalyzeCommand": {
+        "properties": {
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "StoryImportReanalyzeCommand"
+      },
+      "StorySeriesDto": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "premise": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Premise"
+          },
+          "narrativeMode": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "lightly_serialized",
+              "anthology"
+            ],
+            "title": "Narrativemode"
+          },
+          "plannedEpisodeCount": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 2.0,
+            "title": "Plannedepisodecount"
+          },
+          "defaultEpisodeDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 8.0,
+            "title": "Defaultepisodedurationseconds"
+          },
+          "worldSetting": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Worldsetting"
+          },
+          "emotionalDirection": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Emotionaldirection"
+          },
+          "endingGoal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endinggoal"
+          },
+          "recurringElements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Recurringelements"
+          },
+          "mustKeep": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Mustkeep"
+          },
+          "mustAvoid": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Mustavoid"
+          },
+          "additionalNotes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additionalnotes"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "canonProfileId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Canonprofileid"
+          },
+          "activePlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activeplanversionid"
+          },
+          "plannedCount": {
+            "type": "integer",
+            "title": "Plannedcount",
+            "default": 0
+          },
+          "materializedCount": {
+            "type": "integer",
+            "title": "Materializedcount",
+            "default": 0
+          },
+          "completedCount": {
+            "type": "integer",
+            "title": "Completedcount",
+            "default": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "premise",
+          "narrativeMode",
+          "plannedEpisodeCount",
+          "defaultEpisodeDurationSeconds",
+          "worldSetting",
+          "emotionalDirection",
+          "id",
+          "canonProfileId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "StorySeriesDto"
+      },
+      "StorySourceDocumentDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "contentHash": {
+            "type": "string",
+            "title": "Contenthash"
+          },
+          "sourceFormat": {
+            "type": "string",
+            "enum": [
+              "paste",
+              "txt",
+              "md"
+            ],
+            "title": "Sourceformat"
+          },
+          "fileName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "rawText": {
+            "type": "string",
+            "title": "Rawtext"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "analyzing",
+              "analyzed",
+              "confirmed",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "analysisJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysisjobid"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/StorySourceUnitDto"
+            },
+            "type": "array",
+            "title": "Units"
+          },
+          "relationSuggestions": {
+            "items": {
+              "$ref": "#/components/schemas/StorySourceRelationSuggestionDto"
+            },
+            "type": "array",
+            "title": "Relationsuggestions"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "contentHash",
+          "sourceFormat",
+          "rawText",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "StorySourceDocumentDto"
+      },
+      "StorySourceRelationSuggestionDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid"
+          },
+          "relationType": {
+            "type": "string",
+            "enum": [
+              "independent",
+              "new_series",
+              "append_series",
+              "revision",
+              "reference"
+            ],
+            "title": "Relationtype"
+          },
+          "unitIds": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Unitids"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "narrativeMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "continuous",
+                  "lightly_serialized",
+                  "anthology"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrativemode"
+          },
+          "suggestedSeriesId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedseriesid"
+          },
+          "confidence": {
+            "type": "integer",
+            "title": "Confidence"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "suggested",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "documentId",
+          "relationType",
+          "unitIds",
+          "title",
+          "confidence",
+          "rationale",
+          "status",
+          "createdAt"
+        ],
+        "title": "StorySourceRelationSuggestionDto"
+      },
+      "StorySourceUnitDto": {
+        "properties": {
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Ordinal"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
+          },
+          "rawText": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Rawtext"
+          },
+          "analysis": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Analysis"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ordinal",
+          "title",
+          "rawText",
+          "id",
+          "documentId",
+          "createdAt"
+        ],
+        "title": "StorySourceUnitDto"
       },
       "StoryVersionDto": {
         "properties": {

@@ -15,6 +15,7 @@ vi.mock("../../api/client", () => ({ api: client }));
 describe("PlannerStep", () => {
   const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
+    vi.clearAllMocks();
     client.planner.mockResolvedValue({
       sessionId: "session-1",
       projectId: "project-1",
@@ -120,5 +121,34 @@ describe("PlannerStep", () => {
 
     expect(wrapper.get("button.primary").attributes("disabled")).toBeDefined();
     expect(wrapper.text()).toContain("尚未配置模型服务密钥");
+  });
+
+  it("keeps story generation disabled while a restored job is still running", async () => {
+    client.planner.mockResolvedValue({
+      sessionId: "session-1",
+      projectId: "project-1",
+      contextRevision: 1,
+      messages: [],
+      proposals: [],
+      latestJob: {
+        id: "episode-story-job-1",
+        status: "submitting",
+        provider: "ark",
+        model: "doubao-seed-2-1-pro-260628",
+        billingStatus: "pending",
+        createdAt: "2026-09-04T08:00:00Z",
+        updatedAt: "2026-09-04T08:00:01Z",
+      },
+    });
+
+    const wrapper = mount(PlannerStep, { props: { projectId: "project-1", runtime } });
+    await flushPromises();
+    await wrapper.get("textarea").setValue("不要重复创建任务");
+
+    const button = wrapper.get(".composer button.primary");
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("当前故事任务正在处理");
+    await wrapper.get("form").trigger("submit");
+    expect(client.plannerMessage).not.toHaveBeenCalled();
   });
 });

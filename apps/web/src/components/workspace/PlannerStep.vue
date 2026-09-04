@@ -21,6 +21,10 @@ const latestJobPresentation = computed(() => snapshot.value?.latestJob
 const latestBillingPresentation = computed(() => snapshot.value?.latestJob
   ? billingPresentation(snapshot.value.latestJob.billingStatus, snapshot.value.latestJob.actualCostMicros, snapshot.value.latestJob.provider)
   : null);
+const latestJobRunning = computed(() => Boolean(
+  snapshot.value?.latestJob
+  && !["succeeded", "failed", "cancelled"].includes(snapshot.value.latestJob.status),
+));
 const paidBlockedReason = computed(() => paidModelBlockedReason(props.runtime));
 
 function proposalStatus(status: "draft" | "adopted" | "outdated") {
@@ -49,7 +53,7 @@ async function load() {
 }
 
 async function sendMessage() {
-  if (!snapshot.value || !message.value.trim() || paidBlockedReason.value) return;
+  if (!snapshot.value || !message.value.trim() || paidBlockedReason.value || latestJobRunning.value || sending.value) return;
   sending.value = true;
   error.value = "";
   const text = message.value.trim();
@@ -133,7 +137,7 @@ onMounted(load);
       </div>
       <form class="composer" @submit.prevent="sendMessage">
         <textarea v-model="message" rows="3" maxlength="4000" placeholder="例如：雨停后，孩子发现猫咪在门口留下一串湿脚印……" @keydown.ctrl.enter="sendMessage" />
-        <div><small>{{ paidBlockedReason || "Ctrl + Enter · 本次会使用付费模型，完成后显示实际用量。" }}</small><button class="primary" :disabled="sending || !message.trim() || Boolean(paidBlockedReason)"><span v-if="sending" class="spinner" />生成提案</button></div>
+        <div><small>{{ latestJobRunning ? "当前故事任务正在处理，完成前不会创建第二条任务。" : paidBlockedReason || "Ctrl + Enter · 本次会使用付费模型，完成后显示实际用量。" }}</small><button class="primary" :disabled="sending || latestJobRunning || !message.trim() || Boolean(paidBlockedReason)"><span v-if="sending" class="spinner" />生成提案</button></div>
       </form>
     </div>
 

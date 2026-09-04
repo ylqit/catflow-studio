@@ -19,7 +19,7 @@ const errorDetail = ref("");
 const generationPreview = ref<AssetGenerationPreviewDto | null>(null);
 const previewBusy = ref(false);
 const previewReason = ref("");
-const currentJob = ref<JobDto | null>(null);
+const currentJob = ref<JobDto | null>(props.workspace.latestAssetJob ?? null);
 const viewerOpen = ref(false);
 const viewerTitle = ref("");
 const viewerAssets = ref<AssetDto[]>([]);
@@ -47,10 +47,15 @@ const grouped = computed(() => Object.fromEntries(slots.map((slot) => [slot.id, 
 const currentJobLabel = computed(() => currentJob.value?.kind === "diagnose_image" ? "画面检查" : "环境生成");
 const currentJobPresentation = computed(() => currentJob.value ? jobPresentation(currentJob.value.status) : null);
 const currentBillingPresentation = computed(() => currentJob.value ? billingPresentation(currentJob.value.billingStatus, currentJob.value.actualCostMicros, currentJob.value.provider) : null);
+const currentJobRunning = computed(() => Boolean(
+  currentJob.value
+  && !["succeeded", "failed", "cancelled"].includes(currentJob.value.status),
+));
 const paidBlockedReason = computed(() => paidModelBlockedReason(props.runtime));
 const fixedReferencesReady = computed(() => environmentGenerationRoles.every((role) => Boolean(props.workspace.selections[role])));
 const previewSummary = computed(() => generationPreview.value?.imageInputSnapshot?.environmentIntent ?? "");
 const generateBlockedReason = computed(() => {
+  if (currentJobRunning.value) return currentJob.value?.kind === "diagnose_image" ? "画面检查任务正在处理，请等待完成。" : "环境生成任务正在处理，请等待完成。";
   if (!props.workspace.activeStory) return "请先采用一个故事。";
   if (!fixedReferencesReady.value) return "请先到运行设置完成固定角色与画风。";
   if (previewBusy.value) return "正在更新环境内容。";
@@ -183,7 +188,7 @@ async function generateEnvironment() {
 }
 
 async function diagnose(asset: AssetDto) {
-  if (busySlot.value || paidBlockedReason.value) return;
+  if (busySlot.value || paidBlockedReason.value || currentJobRunning.value) return;
   error.value = "";
   busySlot.value = asset.role as AssetGenerationKind;
   const scope = `asset-diagnosis:${props.projectId}:${asset.id}`;
@@ -253,12 +258,19 @@ function connectEvents() {
     if (currentJob.value?.id === jobEvent.jobId) currentJob.value = await api.job(jobEvent.jobId);
     if (jobEvent.eventType === "job.succeeded") await load();
   };
-  for (const type of ["job.succeeded", "job.failed", "job.submission_unknown"]) events.addEventListener(type, (event) => { void refresh(event); });
+  for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.storing", "job.succeeded", "job.failed", "job.submission_unknown", "job.cancel_requested", "job.cancelled"]) events.addEventListener(type, (event) => { void refresh(event); });
 }
 
 watch(
   () => [props.projectId, props.workspace.activeStory?.id, props.workspace.selections.episode_child?.id, props.workspace.selections.episode_cat?.id, props.workspace.selections.style_board?.id],
   () => scheduleEnvironmentPreview(),
+);
+watch(
+  () => props.workspace.latestAssetJob,
+  (job) => {
+    if (!job) return;
+    if (!currentJob.value || Date.parse(job.updatedAt) >= Date.parse(currentJob.value.updatedAt)) currentJob.value = job;
+  },
 );
 
 onMounted(async () => {
@@ -312,11 +324,11 @@ onBeforeUnmount(() => {
             <div class="candidates environment-candidates">
               <div v-if="workspace.selections[slot.id]" class="candidate selected">
                 <button class="image-open" @click="openViewer(slot.id, workspace.selections[slot.id]!)"><img :src="`/api/v1/assets/${workspace.selections[slot.id]!.id}/content`" :alt="`${slot.title}当前选择`" /><span class="current-badge">已选择当前环境</span><span class="view-label">查看大图</span></button>
-                <div class="candidate-actions single"><button :disabled="busySlot === slot.id || Boolean(paidBlockedReason)" @click="diagnose(workspace.selections[slot.id]!)">画面检查</button></div>
+                <div class="candidate-actions single"><button :disabled="busySlot === slot.id || Boolean(paidBlockedReason) || currentJobRunning" @click="diagnose(workspace.selections[slot.id]!)">画面检查</button></div>
               </div>
               <div v-for="asset in grouped[slot.id].filter((candidate) => candidate.id !== workspace.selections[slot.id]?.id)" :key="asset.id" class="candidate">
                 <button class="image-open" @click="openViewer(slot.id, asset)"><img :src="`/api/v1/assets/${asset.id}/content`" :alt="slot.title" /><span v-if="reportStatus(asset)" class="quality-badge">{{ reportStatus(asset) }}</span><span class="view-label">查看大图</span></button>
-                <div class="candidate-actions"><button :disabled="busySlot === slot.id || Boolean(paidBlockedReason)" @click="diagnose(asset)">画面检查</button><button v-if="workspace.selections[slot.id]?.id !== asset.id" :disabled="busySlot === slot.id" @click="select(slot.id, asset.id)">选择</button></div>
+                <div class="candidate-actions"><button :disabled="busySlot === slot.id || Boolean(paidBlockedReason) || currentJobRunning" @click="diagnose(asset)">画面检查</button><button v-if="workspace.selections[slot.id]?.id !== asset.id" :disabled="busySlot === slot.id" @click="select(slot.id, asset.id)">选择</button></div>
               </div>
               <label class="upload-candidate" :class="{ busy: busySlot === slot.id }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="upload(slot.id, $event)" /><b>上传</b><span>{{ busySlot === slot.id ? "处理中…" : "上传候选" }}</span></label>
               <button class="generate-candidate" :disabled="busySlot === slot.id || Boolean(generateBlockedReason)" @click="generateEnvironment"><b>生成</b><span>环境候选</span></button>

@@ -21,7 +21,7 @@ from .project_posters import ProjectPosterGenerator
 
 
 class LocalMediaJobExecutor:
-    """Render immutable EDL exports and their local project posters."""
+    """Own deterministic FFmpeg jobs that create immutable local media assets."""
 
     def __init__(
         self,
@@ -47,6 +47,9 @@ class LocalMediaJobExecutor:
             job = session.get(JobRecord, job_id)
             if job is None:
                 raise ValueError("job not found")
+            if job.kind == "extract_continuity_frames":
+                self._extract_continuity_frames(job_id)
+                return
             if job.kind != "render_export":
                 raise ValueError(f"job kind is not a local media job: {job.kind}")
             expected_role = "final"
@@ -74,6 +77,94 @@ class LocalMediaJobExecutor:
             )
             if primary is not None:
                 self._poster_generator.ensure_for_asset(primary.id)
+
+    def _extract_continuity_frames(self, job_id: uuid.UUID) -> None:
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if job is None or job.kind != "extract_continuity_frames":
+                raise ValueError("continuity frame job not found")
+            frozen = dict(job.frozen_input_json)
+            source_id = uuid.UUID(str(frozen["sourceVideoAssetId"]))
+            source = session.get(AssetRecord, source_id)
+            if (
+                source is None
+                or source.project_id != job.project_id
+                or source.media_type != "video"
+            ):
+                raise ValueError("continuity source video not found")
+            if source.sha256 != frozen.get("sourceVideoSha256"):
+                raise ValueError("continuity source video hash changed")
+            source_path = self._media_store.resolve(source.storage_key)
+            if not source_path.is_file():
+                raise ValueError("continuity source video content not found")
+            episode_id = uuid.UUID(str(frozen["seriesEpisodeId"]))
+            keyframe_seconds = [float(value) for value in frozen.get("keyframeSeconds", [])]
+            if len(keyframe_seconds) > 2 or any(value < 0 for value in keyframe_seconds):
+                raise ValueError("continuity keyframe timestamps are invalid")
+            duration_seconds = (source.duration_ms or 0) / 1000
+            if duration_seconds and any(value >= duration_seconds for value in keyframe_seconds):
+                raise ValueError("continuity keyframe exceeds source duration")
+            project_id = job.project_id
+
+        destination_root = f"generated/{project_id}/continuity/{job_id}"
+        frame_specs: list[tuple[str, int, float | None]] = []
+        if bool(frozen.get("extractLastFrame", True)):
+            frame_specs.append(("episode_last_frame", 0, None))
+        frame_specs.extend(
+            ("episode_keyframe", index, timestamp)
+            for index, timestamp in enumerate(keyframe_seconds)
+        )
+        for role, candidate_index, timestamp in frame_specs:
+            suffix = (
+                "last-frame"
+                if role == "episode_last_frame"
+                else f"keyframe-{candidate_index + 1}"
+            )
+            storage_key = f"{destination_root}/{suffix}.png"
+            destination = self._media_store.resolve(storage_key)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if timestamp is None:
+                command = [
+                    str(self._ffmpeg_path),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-sseof",
+                    "-0.05",
+                    "-i",
+                    str(source_path),
+                ]
+            else:
+                command = [
+                    str(self._ffmpeg_path),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-ss",
+                    f"{timestamp:.6f}",
+                    "-i",
+                    str(source_path),
+                ]
+            command.extend(["-frames:v", "1", "-update", "1", str(destination)])
+            self._run(command)
+            dimensions = self._probe_still(destination)
+            self._persist_asset(
+                job_id,
+                role=role,
+                candidate_index=candidate_index,
+                storage_key=storage_key,
+                path=destination,
+                media_type="image",
+                metadata={
+                    **dimensions,
+                    "seriesEpisodeId": str(episode_id),
+                    "sourceVideoAssetId": str(source_id),
+                    "sourceVideoSha256": source.sha256,
+                    "timestampSeconds": timestamp if timestamp is not None else duration_seconds,
+                },
+            )
 
     def _render_edit(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:
@@ -396,6 +487,7 @@ class LocalMediaJobExecutor:
         job_id: uuid.UUID,
         *,
         role: str,
+        candidate_index: int = 0,
         storage_key: str,
         path: Path,
         media_type: str,
@@ -404,9 +496,10 @@ class LocalMediaJobExecutor:
         digest = _sha256(path)
         with self._sessions.begin() as session:
             existing = session.scalar(
-                select(AssetRecord).where(
-                    AssetRecord.producing_job_id == job_id,
-                    AssetRecord.role == role,
+                    select(AssetRecord).where(
+                        AssetRecord.producing_job_id == job_id,
+                        AssetRecord.role == role,
+                        AssetRecord.candidate_index == candidate_index,
                 )
             )
             if existing is not None:
@@ -417,7 +510,7 @@ class LocalMediaJobExecutor:
             record = AssetRecord(
                 project_id=job.project_id,
                 producing_job_id=job.id,
-                candidate_index=0,
+                candidate_index=candidate_index,
                 role=role,
                 media_type=media_type,
                 storage_key=storage_key,
@@ -431,6 +524,29 @@ class LocalMediaJobExecutor:
             session.add(record)
             session.flush()
             return record.id
+
+    def _probe_still(self, path: Path) -> dict[str, object]:
+        completed = self._run(
+            [
+                str(self._ffprobe_path),
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height,codec_name",
+                "-of",
+                "json",
+                str(path),
+            ]
+        )
+        document = json.loads(completed.stdout)
+        stream = document["streams"][0]
+        return {
+            "width": int(stream["width"]),
+            "height": int(stream["height"]),
+            "codec": stream.get("codec_name"),
+        }
 
     def _probe(
         self,

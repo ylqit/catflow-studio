@@ -33,6 +33,11 @@ export interface RuntimeBootstrapDto {
     capabilityRevision: string;
     paidCallsEnabled: boolean;
     apiKeyConfigured: boolean;
+    videoGeneration: {
+      maximumImageReferences: number;
+      maximumVideoReferences: number;
+      previousEpisodeVideoSupported: boolean;
+    };
     segmentRepair: {
       supported: boolean;
       blockedReason: string | null;
@@ -67,6 +72,250 @@ export interface ProjectDto extends ProjectCreate {
   updatedAt: string;
 }
 
+export type SeriesNarrativeMode = "continuous" | "lightly_serialized" | "anthology";
+
+export interface SeriesCreateCommand {
+  title: string;
+  premise: string;
+  narrativeMode: SeriesNarrativeMode;
+  plannedEpisodeCount: number;
+  defaultEpisodeDurationSeconds: number;
+  worldSetting: string;
+  emotionalDirection: string;
+  endingGoal?: string | null;
+  recurringElements: string[];
+  mustKeep: string[];
+  mustAvoid: string[];
+  additionalNotes?: string | null;
+}
+
+export interface StorySeriesDto extends SeriesCreateCommand {
+  id: string;
+  canonProfileId: string;
+  activePlanVersionId?: string | null;
+  plannedCount: number;
+  materializedCount: number;
+  completedCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SeriesEpisodeOutlineDraft {
+  order: number;
+  title: string;
+  targetDurationSeconds: number;
+  premise: string;
+  openingState: string;
+  trigger: string;
+  childIntent: string;
+  childAction: string;
+  catResponse: string;
+  visibleChange: string;
+  endingState: string;
+  continuityCarryover: string[];
+  recurringLocationKeys: string[];
+  recurringPropKeys: string[];
+  productionWarnings: string[];
+}
+
+export interface SeriesPlanDraft {
+  seriesBible: {
+    logline: string;
+    centralTheme: string;
+    narrativeMode: SeriesNarrativeMode | null;
+    worldRules: string[];
+    emotionalArc: { opening: string; development: string; climax: string; resolution: string };
+    recurringLocations: Array<{ key: string; name: string; description: string }>;
+    recurringProps: Array<{ key: string; name: string; continuityRule: string }>;
+    wardrobeRules: string[];
+    continuityRules: string[];
+    visualMotifs: string[];
+    soundMotifs: string[];
+    forbiddenChanges: string[];
+  };
+  episodes: SeriesEpisodeOutlineDraft[];
+}
+
+export interface SeriesPlanVersionDto {
+  id: string;
+  seriesId: string;
+  revision: number;
+  status: "candidate" | "accepted" | "rejected" | "superseded";
+  active: boolean;
+  disposition: "candidate_ready" | "needs_input" | "invalid";
+  plan: SeriesPlanDraft;
+  inputHash: string;
+  promptRevision: string;
+  producingJobId?: string | null;
+  basePlanVersionId?: string | null;
+  issues: Array<{ code: string; severity: "fatal" | "blocking" | "warning"; path: string; message: string; suggestedAction?: string | null }>;
+  decidedAt?: string | null;
+  createdAt: string;
+}
+
+export interface SeriesEpisodeDto {
+  id: string;
+  seriesId: string;
+  order: number;
+  title: string;
+  targetDurationSeconds: number;
+  status: "outline" | "story_review" | "assets" | "storyboard" | "generating" | "selecting" | "editing" | "completed" | "needs_attention";
+  projectId?: string | null;
+  activeOutlineVersionId: string;
+  outline: SeriesEpisodeOutlineDraft;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectSeriesContextDto {
+  series: StorySeriesDto;
+  episode: SeriesEpisodeDto;
+  episodes: SeriesEpisodeDto[];
+}
+
+export interface SeriesPlanPreviewDto {
+  seriesId: string;
+  provider: string;
+  model: string;
+  capabilityRevision: string;
+  inputHash: string;
+  prompt: string;
+  outputSchema: Record<string, unknown>;
+  plannedEpisodeCount: number;
+  defaultEpisodeDurationSeconds: number;
+  promptRevision: string;
+}
+
+export interface SeriesEpisodeStoryPreviewDto {
+  seriesId: string;
+  seriesPlanVersionId: string;
+  seriesEpisodeId: string;
+  episodeOutlineVersionId: string;
+  projectId: string;
+  incomingContinuity?: string | null;
+  provider: string;
+  model: string;
+  capabilityRevision: string;
+  inputHash: string;
+  prompt: string;
+  outputSchema: Record<string, unknown>;
+  promptRevision: string;
+}
+
+export interface EpisodeContinuityStateDto {
+  wardrobe: string;
+  location: string;
+  weather: string;
+  timeOfDay: string;
+  lighting: string;
+  childState: string;
+  catState: string;
+  spatialPositions: string;
+  props: Array<{ key: string; name: string; state: string; location?: string | null; owner?: "child" | "cat" | "environment" | null }>;
+  unfinishedActions: string[];
+  endingImage: string;
+}
+
+export interface EpisodeContinuitySnapshotDto {
+  id: string;
+  episodeId: string;
+  direction: "incoming" | "outgoing";
+  source: "planned" | "confirmed" | "final_video";
+  state: EpisodeContinuityStateDto;
+  decisions: Record<string, "inherit" | "adjust" | "reset">;
+  confirmed: boolean;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface EpisodeContinuityDto {
+  episodeId: string;
+  previousEpisodeId?: string | null;
+  incoming?: EpisodeContinuitySnapshotDto | null;
+  outgoing?: EpisodeContinuitySnapshotDto | null;
+}
+
+export interface EpisodeContinuityFramesDto {
+  episodeId: string;
+  sourceVideoAssetId?: string | null;
+  lastFrame?: AssetDto | null;
+  candidates: AssetDto[];
+  selectedKeyframes: AssetDto[];
+}
+
+export interface SeriesAssetBindingDto {
+  id: string;
+  seriesId: string;
+  bindingKey: string;
+  role: string;
+  assetId: string;
+  assetSha256: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface StoryImportPreviewDto {
+  contentHash: string;
+  inputHash: string;
+  characterCount: number;
+  duplicateDocumentId?: string | null;
+  prompt: string;
+  outputSchema: Record<string, unknown>;
+  promptRevision: string;
+}
+
+export interface StorySourceUnitDto {
+  id: string;
+  documentId: string;
+  ordinal: number;
+  title: string;
+  theme?: string | null;
+  rawText: string;
+  analysis: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface StorySourceRelationSuggestionDto {
+  id: string;
+  documentId: string;
+  relationType: "independent" | "new_series" | "append_series" | "revision" | "reference";
+  unitIds: string[];
+  title: string;
+  narrativeMode?: SeriesNarrativeMode | null;
+  suggestedSeriesId?: string | null;
+  confidence: number;
+  rationale: string;
+  status: "suggested" | "accepted" | "rejected";
+  createdAt: string;
+}
+
+export interface StorySourceDocumentDto {
+  id: string;
+  contentHash: string;
+  sourceFormat: "paste" | "txt" | "md";
+  fileName?: string | null;
+  rawText: string;
+  status: "pending" | "analyzing" | "analyzed" | "confirmed" | "failed";
+  analysisJobId?: string | null;
+  units: StorySourceUnitDto[];
+  relationSuggestions: StorySourceRelationSuggestionDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoryImportCreateResultDto {
+  document: StorySourceDocumentDto;
+  analysisJob?: JobDto | null;
+  reused: boolean;
+}
+
+export interface StoryImportProjectDto {
+  id: string;
+  title: string;
+  theme: string;
+  targetDurationSeconds: number;
+}
+
 export type ProjectStage = "story" | "assets" | "storyboard" | "generation" | "editing" | "completed";
 export type ProjectAttention = "normal" | "running" | "needs_attention";
 export type ProjectSystemView = "all" | "recent" | "in_progress" | "needs_attention" | "completed" | "pinned" | "archived";
@@ -86,6 +335,13 @@ export interface ProjectCollectionDto {
 
 export interface ProjectTagDto { name: string; normalizedName: string }
 
+export interface ProjectLibrarySeriesDto {
+  seriesId: string;
+  seriesTitle: string;
+  episodeId: string;
+  episodeOrder: number;
+}
+
 export interface ProjectLibraryItemDto {
   id: string;
   title: string;
@@ -93,6 +349,7 @@ export interface ProjectLibraryItemDto {
   targetDurationSeconds: number;
   aspectRatio: "9:16";
   coverAssetId?: string | null;
+  series?: ProjectLibrarySeriesDto | null;
   collection?: ProjectCollectionDto | null;
   tags: ProjectTagDto[];
   stage: ProjectStage;
@@ -144,12 +401,15 @@ export type ProjectLibraryBatchAction =
   | { action: "pin" | "unpin" | "archive" | "restore"; projectIds: string[] };
 
 export type GenerationInputSnapshotDto = components["schemas"]["GenerationInputSnapshotDto"];
+export type GenerationPromptSectionDto = components["schemas"]["GenerationPromptSectionDto"];
 export type ImageGenerationInputSnapshotDto = components["schemas"]["ImageGenerationInputSnapshotDto"];
 
 export interface JobDto {
   id: string;
-  projectId: string;
-  kind: "plan_story" | "plan_shots" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
+  projectId?: string | null;
+  seriesId?: string | null;
+  storySourceDocumentId?: string | null;
+  kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
   status:
     | "queued"
     | "submitting"
@@ -437,6 +697,8 @@ export interface GenerationPreviewDto {
   provider: string;
   model: string;
   prompt: string;
+  promptSummary: string;
+  promptSections: GenerationPromptSectionDto[];
   negativePrompt: string;
   expectedCostMicros: number | null;
   costEstimateStatus: "priced" | "unmetered_paid";
@@ -445,6 +707,8 @@ export interface GenerationPreviewDto {
   shotPlanVersionId: string;
   selectionHash: string;
   durationSeconds: number;
+  seriesEpisodeId?: string | null;
+  continuitySnapshotId?: string | null;
   inputSnapshot?: GenerationInputSnapshotDto | null;
   references: Array<{
     assetId: string;
@@ -453,6 +717,13 @@ export interface GenerationPreviewDto {
     included: boolean;
     omittedReason?: string;
     sha256: string;
+  }>;
+  videoReferences: Array<{
+    assetId: string;
+    role: "previous_episode_video";
+    sha256: string;
+    durationSeconds?: number | null;
+    included: boolean;
   }>;
   warnings: Array<{ code: string; message: string }>;
 }
@@ -522,4 +793,5 @@ export interface WorkspaceDto {
   latestVideoJob?: JobDto | null;
   latestDirectorJob?: JobDto | null;
   latestRepairJob?: JobDto | null;
+  latestAssetJob?: JobDto | null;
 }

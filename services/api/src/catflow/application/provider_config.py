@@ -17,6 +17,7 @@ class ProviderRuntime:
     capability_revision: str
     paid_calls_enabled: bool
     maximum_video_references: int
+    maximum_video_input_references: int = 3
     maximum_segment_image_references: int = 9
     maximum_segment_video_references: int = 1
     segment_reference_publishing_ready: bool = False
@@ -56,7 +57,8 @@ class ProviderRuntime:
             capability_revision="ark-seedance-2.0-v1",
             paid_calls_enabled=os.environ.get("CATFLOW_PAID_CALLS_ENABLED", "false").lower()
             == "true",
-            maximum_video_references=5,
+            maximum_video_references=int(os.environ.get("ARK_MAX_VIDEO_IMAGE_REFERENCES", "9")),
+            maximum_video_input_references=int(os.environ.get("ARK_MAX_VIDEO_REFERENCES", "3")),
             maximum_segment_image_references=int(
                 os.environ.get("ARK_MAX_SEGMENT_IMAGE_REFERENCES", "9")
             ),

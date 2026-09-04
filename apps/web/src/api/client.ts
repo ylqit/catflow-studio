@@ -18,10 +18,26 @@ import type {
   ProjectLibraryItemDto,
   ProjectLibraryPageDto,
   ProjectLibraryQuery,
+  ProjectSeriesContextDto,
   ProjectTagSuggestionDto,
   ProjectUsageSummaryDto,
   RateCardRevisionDto,
   RuntimeBootstrapDto,
+  SeriesCreateCommand,
+  SeriesEpisodeDto,
+  SeriesEpisodeStoryPreviewDto,
+  SeriesAssetBindingDto,
+  SeriesPlanDraft,
+  SeriesPlanPreviewDto,
+  SeriesPlanVersionDto,
+  StoryImportCreateResultDto,
+  StoryImportPreviewDto,
+  StoryImportProjectDto,
+  StorySeriesDto,
+  StorySourceDocumentDto,
+  EpisodeContinuityDto,
+  EpisodeContinuityFramesDto,
+  EpisodeContinuitySnapshotDto,
   SegmentRepairApproveCommand,
   SegmentRepairCreateCommand,
   SegmentRepairPreviewCommand,
@@ -130,8 +146,202 @@ export class CatFlowClient {
     return this.json("/api/v1/projects", "POST", draft);
   }
 
+  storySeries(): Promise<StorySeriesDto[]> {
+    return this.request("/api/v1/story-series");
+  }
+
+  createStorySeries(command: SeriesCreateCommand): Promise<StorySeriesDto> {
+    return this.json("/api/v1/story-series", "POST", command);
+  }
+
+  storySeriesDetail(seriesId: string): Promise<StorySeriesDto> {
+    return this.request(`/api/v1/story-series/${seriesId}`);
+  }
+
+  previewSeriesPlan(seriesId: string): Promise<SeriesPlanPreviewDto> {
+    return this.json(`/api/v1/story-series/${seriesId}/plans/preview`, "POST", {});
+  }
+
+  generateSeriesPlan(
+    seriesId: string,
+    command: { expectedInputHash: string; idempotencyKey: string },
+  ): Promise<JobDto> {
+    return this.json(`/api/v1/story-series/${seriesId}/plans/generations`, "POST", command);
+  }
+
+  seriesPlans(seriesId: string): Promise<SeriesPlanVersionDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/plans`);
+  }
+
+  materializeSeriesPlan(
+    seriesId: string,
+    planVersionId: string,
+    command: { basePlanVersionId: string; plan: SeriesPlanDraft; idempotencyKey: string },
+  ): Promise<SeriesPlanVersionDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/plans/${planVersionId}/materialize`,
+      "POST",
+      command,
+    );
+  }
+
+  activateSeriesPlan(
+    seriesId: string,
+    planVersionId: string,
+    command: { expectedActivePlanVersionId?: string | null; idempotencyKey: string },
+  ): Promise<SeriesPlanVersionDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/plans/${planVersionId}/activate`,
+      "POST",
+      command,
+    );
+  }
+
+  rejectSeriesPlan(seriesId: string, planVersionId: string): Promise<SeriesPlanVersionDto> {
+    return this.json(`/api/v1/story-series/${seriesId}/plans/${planVersionId}/reject`, "POST", {});
+  }
+
+  seriesEpisodes(seriesId: string): Promise<SeriesEpisodeDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/episodes`);
+  }
+
+  seriesJobs(seriesId: string): Promise<JobDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/jobs`);
+  }
+
+  materializeSeriesEpisode(seriesId: string, episodeId: string, idempotencyKey: string): Promise<ProjectDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/episodes/${episodeId}/materialize`,
+      "POST",
+      { idempotencyKey },
+    );
+  }
+
+  previewSeriesEpisodeStory(
+    seriesId: string,
+    episodeId: string,
+    additionalNotes?: string | null,
+  ): Promise<SeriesEpisodeStoryPreviewDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/episodes/${episodeId}/story-generations/preview`,
+      "POST",
+      { additionalNotes: additionalNotes ?? null },
+    );
+  }
+
+  generateSeriesEpisodeStory(
+    seriesId: string,
+    episodeId: string,
+    command: { expectedInputHash: string; additionalNotes?: string | null; idempotencyKey: string },
+  ): Promise<JobDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/episodes/${episodeId}/story-generations`,
+      "POST",
+      command,
+    );
+  }
+
+  seriesEpisodeContinuity(seriesId: string, episodeId: string): Promise<EpisodeContinuityDto> {
+    return this.request(`/api/v1/story-series/${seriesId}/episodes/${episodeId}/continuity`);
+  }
+
+  seriesEpisodeContinuityFrames(seriesId: string, episodeId: string): Promise<EpisodeContinuityFramesDto> {
+    return this.request(`/api/v1/story-series/${seriesId}/episodes/${episodeId}/continuity/frames`);
+  }
+
+  selectSeriesEpisodeContinuityKeyframes(
+    seriesId: string,
+    episodeId: string,
+    assetIds: string[],
+  ): Promise<AssetDto[]> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/episodes/${episodeId}/continuity/keyframes`,
+      "PUT",
+      { assetIds },
+    );
+  }
+
+  seriesAssets(seriesId: string): Promise<SeriesAssetBindingDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/assets`);
+  }
+
+  updateSeriesAssets(
+    seriesId: string,
+    bindings: Array<{ bindingKey: string; role: string; assetId: string }>,
+  ): Promise<SeriesAssetBindingDto[]> {
+    return this.json(`/api/v1/story-series/${seriesId}/assets`, "PATCH", { bindings });
+  }
+
+  confirmSeriesEpisodeContinuity(
+    seriesId: string,
+    episodeId: string,
+    command: {
+      direction: "incoming" | "outgoing";
+      state: EpisodeContinuitySnapshotDto["state"];
+      decisions: Record<string, "inherit" | "adjust" | "reset">;
+      expectedSnapshotId?: string | null;
+      idempotencyKey: string;
+    },
+  ): Promise<EpisodeContinuitySnapshotDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/episodes/${episodeId}/continuity/confirm`,
+      "POST",
+      command,
+    );
+  }
+
+  previewStoryImport(command: {
+    rawText: string;
+    sourceFormat: "paste" | "txt" | "md";
+    fileName?: string | null;
+  }): Promise<StoryImportPreviewDto> {
+    return this.json("/api/v1/story-imports/preview", "POST", command);
+  }
+
+  createStoryImport(command: {
+    rawText: string;
+    sourceFormat: "paste" | "txt" | "md";
+    fileName?: string | null;
+    expectedInputHash: string;
+    idempotencyKey: string;
+  }): Promise<StoryImportCreateResultDto> {
+    return this.json("/api/v1/story-imports", "POST", command);
+  }
+
+  storyImports(): Promise<StorySourceDocumentDto[]> {
+    return this.request("/api/v1/story-imports");
+  }
+
+  storyImport(documentId: string): Promise<StorySourceDocumentDto> {
+    return this.request(`/api/v1/story-imports/${documentId}`);
+  }
+
+  reanalyzeStoryImport(
+    documentId: string,
+    command: { expectedInputHash: string; idempotencyKey: string },
+  ): Promise<JobDto> {
+    return this.json(`/api/v1/story-imports/${documentId}/reanalyze`, "POST", command);
+  }
+
+  confirmStoryImport(
+    documentId: string,
+    command: {
+      suggestionId: string;
+      target: "new_series" | "append_series" | "independent" | "revision" | "reference";
+      targetSeriesId?: string | null;
+      targetProjectId?: string | null;
+      idempotencyKey: string;
+    },
+  ): Promise<{ series?: StorySeriesDto | null; projects: StoryImportProjectDto[] }> {
+    return this.json(`/api/v1/story-imports/${documentId}/confirm`, "POST", command);
+  }
+
   project(projectId: string): Promise<ProjectDto> {
     return this.request(`/api/v1/projects/${projectId}`);
+  }
+
+  projectSeriesContext(projectId: string): Promise<ProjectSeriesContextDto | null> {
+    return this.request(`/api/v1/projects/${projectId}/series-context`);
   }
 
   workspace(projectId: string): Promise<WorkspaceDto> {
@@ -267,13 +477,22 @@ export class CatFlowClient {
     });
   }
 
-  previewVideo(projectId: string): Promise<GenerationPreviewDto> {
-    return this.json(`/api/v1/projects/${projectId}/video-generations/preview`, "POST", {});
+  previewVideo(
+    projectId: string,
+    includePreviousEpisodeVideo = false,
+  ): Promise<GenerationPreviewDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-generations/preview`, "POST", {
+      includePreviousEpisodeVideo,
+    });
   }
 
   createVideoJob(
     projectId: string,
-    command: { expectedInputHash: string; idempotencyKey: string },
+    command: {
+      expectedInputHash: string;
+      idempotencyKey: string;
+      includePreviousEpisodeVideo?: boolean;
+    },
   ): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/video-generations`, "POST", command);
   }

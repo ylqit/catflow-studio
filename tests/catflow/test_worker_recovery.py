@@ -15,12 +15,18 @@ from catflow.application.service import (
     SegmentRepairPreviewCommand,
     StudioService,
 )
+from catflow.application.story_imports import StoryImportCreateCommand, StoryImportPreviewCommand
 from catflow.infrastructure.database import (
     DatabaseSettings,
     create_database_engine,
     create_session_factory,
 )
-from catflow.infrastructure.models import JobRecord, ProjectRecord
+from catflow.infrastructure.models import (
+    JobEventRecord,
+    JobRecord,
+    ProjectRecord,
+    StorySourceDocumentRecord,
+)
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow_worker.runner import (
     DurableJobWorker,
@@ -170,6 +176,57 @@ def _ark_runtime() -> ProviderRuntime:
         maximum_video_references=5,
         segment_reference_publishing_ready=True,
     )
+
+
+def test_worker_events_keep_the_story_import_scope_of_the_claimed_job() -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
+    source_text = "森林野餐：孩子整理野餐篮，猫咪把毛线球放进去。"
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=source_text, sourceFormat="paste")
+    )
+    created = service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=source_text,
+            sourceFormat="paste",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey=f"worker-story-import-scope-{uuid.uuid4()}",
+        )
+    )
+    assert created.analysis_job is not None
+    try:
+        provider = RecordingProvider()
+        worker = DurableJobWorker(sessions, provider, worker_id="story-import-scope-worker")
+
+        assert worker.run_once() is True
+
+        with sessions() as session:
+            persisted = session.get(JobRecord, created.analysis_job.id)
+            assert persisted is not None
+            assert persisted.status == "submitted"
+            events = list(
+                session.scalars(
+                    select(JobEventRecord)
+                    .where(JobEventRecord.job_id == created.analysis_job.id)
+                    .order_by(JobEventRecord.id)
+                )
+            )
+            assert events
+            assert all(event.project_id is None for event in events)
+            assert all(event.series_id is None for event in events)
+            assert all(
+                event.story_source_document_id == created.document.id for event in events
+            )
+    finally:
+        with sessions.begin() as session:
+            session.execute(
+                delete(StorySourceDocumentRecord).where(
+                    StorySourceDocumentRecord.id == created.document.id
+                )
+            )
+        engine.dispose()
 
 
 def test_local_input_preparation_failure_happens_before_provider_submission_boundary() -> None:

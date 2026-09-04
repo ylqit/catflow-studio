@@ -41,7 +41,7 @@ class PublishedSegmentReference:
 
 
 class SegmentReferencePublisher:
-    """Own durable publication before the provider submission boundary."""
+    """Own durable, job-scoped video publication before Provider submission."""
 
     def __init__(
         self,
@@ -52,9 +52,31 @@ class SegmentReferencePublisher:
         self._store = object_store
 
     def publish(self, job_id: uuid.UUID, context_path: Path) -> PublishedSegmentReference:
-        publication = self._ensure_record(job_id, context_path)
+        with self._sessions() as session:
+            source = session.scalar(
+                select(AssetRecord).where(
+                    AssetRecord.producing_job_id == job_id,
+                    AssetRecord.role == "repair_context",
+                )
+            )
+            if source is None:
+                raise ObjectPublisherError(
+                    "publication_source_missing",
+                    "repair context asset does not match the provider job",
+                )
+            source_asset_id = source.id
+        return self.publish_asset(job_id, source_asset_id, context_path)
+
+    def publish_asset(
+        self,
+        job_id: uuid.UUID,
+        source_asset_id: uuid.UUID,
+        source_path: Path,
+    ) -> PublishedSegmentReference:
+        """Publish the exact durable video asset frozen by a Provider job."""
+        publication = self._ensure_record(job_id, source_asset_id, source_path)
         try:
-            stored = self._reuse_or_upload(publication, context_path)
+            stored = self._reuse_or_upload(publication, source_path)
             signed_url = self._store.presign_get(publication.object_key)
         except ObjectPublisherError as exc:
             self._mark_failed(publication.id, exc)
@@ -121,35 +143,54 @@ class SegmentReferencePublisher:
         return deleted
 
     def _ensure_record(
-        self, job_id: uuid.UUID, context_path: Path
+        self,
+        job_id: uuid.UUID,
+        source_asset_id: uuid.UUID,
+        source_path: Path,
     ) -> MediaPublicationRecord:
         with self._sessions.begin() as session:
             existing = session.scalar(
                 select(MediaPublicationRecord).where(MediaPublicationRecord.job_id == job_id)
             )
             if existing is not None:
-                self._require_same_source(existing, context_path)
+                if existing.source_asset_id != source_asset_id:
+                    raise ObjectPublisherError(
+                        "publication_source_mismatch",
+                        "provider job already references a different published video asset",
+                    )
+                self._require_same_source(existing, source_path)
                 return existing
             job = session.get(JobRecord, job_id)
-            source = session.scalar(
-                select(AssetRecord).where(
-                    AssetRecord.producing_job_id == job_id,
-                    AssetRecord.role == "repair_context",
-                )
-            )
-            if job is None or source is None or source.project_id != job.project_id:
+            source = session.get(AssetRecord, source_asset_id)
+            if job is None or source is None or source.media_type != "video":
                 raise ObjectPublisherError(
                     "publication_source_missing",
-                    "repair context asset does not match the provider job",
+                    "published video asset does not match the provider job",
+                )
+            frozen_asset_id = job.frozen_input_json.get("previousEpisodeVideoAssetId")
+            is_repair_context = (
+                source.producing_job_id == job_id
+                and source.project_id == job.project_id
+                and source.role == "repair_context"
+            )
+            is_frozen_previous_episode = (
+                job.kind == "generate_video"
+                and frozen_asset_id is not None
+                and str(source.id) == str(frozen_asset_id)
+            )
+            if not is_repair_context and not is_frozen_previous_episode:
+                raise ObjectPublisherError(
+                    "publication_source_mismatch",
+                    "video asset is not frozen as an input of the provider job",
                 )
             if (
-                not context_path.is_file()
-                or context_path.stat().st_size != source.byte_size
-                or _sha256(context_path) != source.sha256
+                not source_path.is_file()
+                or source_path.stat().st_size != source.byte_size
+                or _sha256(source_path) != source.sha256
             ):
                 raise ObjectPublisherError(
                     "publication_source_mismatch",
-                    "repair context file does not match its durable asset",
+                    "video reference file does not match its durable asset",
                 )
             object_key = (
                 f"{self._store.settings.prefix}/{job.project_id}/{job_id}/{source.sha256}.mp4"
@@ -176,7 +217,7 @@ class SegmentReferencePublisher:
     def _reuse_or_upload(
         self,
         publication: MediaPublicationRecord,
-        context_path: Path,
+        source_path: Path,
     ) -> StoredObject:
         try:
             return self._store.verify_object(
@@ -188,21 +229,21 @@ class SegmentReferencePublisher:
             if exc.code not in {"object_head_failed", "object_not_found"}:
                 raise
         return self._store.upload_verified(
-            context_path,
+            source_path,
             object_key=publication.object_key,
             expected_sha256=publication.source_sha256,
         )
 
     @staticmethod
-    def _require_same_source(record: MediaPublicationRecord, context_path: Path) -> None:
+    def _require_same_source(record: MediaPublicationRecord, source_path: Path) -> None:
         if record.state == "deleted":
             raise ObjectPublisherError(
                 "publication_deleted", "segment publication was already deleted"
             )
         if (
-            not context_path.is_file()
-            or context_path.stat().st_size != record.byte_size
-            or _sha256(context_path) != record.source_sha256
+            not source_path.is_file()
+            or source_path.stat().st_size != record.byte_size
+            or _sha256(source_path) != record.source_sha256
         ):
             raise ObjectPublisherError(
                 "publication_source_mismatch",

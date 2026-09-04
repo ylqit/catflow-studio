@@ -6,6 +6,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from catflow.application.continuity import (
+    EpisodeContinuityConfirmCommand,
+    EpisodeContinuityResetCommand,
+    EpisodeContinuitySnapshotDto,
+    SeriesAssetBindingDto,
+    SeriesAssetBindingsPatchCommand,
+    planned_continuity_state,
+)
 from catflow.application.project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -21,6 +29,16 @@ from catflow.application.project_library import (
     normalize_tags,
     project_library_page,
     suggested_theme_tags,
+)
+from catflow.application.series import (
+    SeriesCreateCommand,
+    SeriesEpisodeDto,
+    SeriesPatchCommand,
+    SeriesPlanDraft,
+    SeriesPlanVersionDto,
+    SeriesValidationIssueDto,
+    StorySeriesDto,
+    validate_series_plan,
 )
 from catflow.application.service import (
     FIXED_CANON_ROLES,
@@ -54,6 +72,16 @@ from catflow.application.service import (
     ValidationRunDto,
     VideoRepairDto,
     VideoRepairStatus,
+)
+from catflow.application.story_imports import (
+    StoryImportAnalysisDraft,
+    StoryImportConfirmCommand,
+    StoryImportCreateCommand,
+    StoryImportMaterializationDto,
+    StoryImportProjectDto,
+    StorySourceDocumentDto,
+    StorySourceRelationSuggestionDto,
+    StorySourceUnitDto,
 )
 from catflow.domain.billing import rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
@@ -115,6 +143,20 @@ class MemoryStudioRepository:
             )
         ]
         self._projects: dict[uuid.UUID, ProjectDto] = {}
+        self._story_series: dict[uuid.UUID, StorySeriesDto] = {}
+        self._series_plans: dict[uuid.UUID, list[SeriesPlanVersionDto]] = {}
+        self._series_episodes: dict[uuid.UUID, list[SeriesEpisodeDto]] = {}
+        self._series_activation_idempotency: dict[str, uuid.UUID] = {}
+        self._series_plan_materialization_idempotency: dict[str, uuid.UUID] = {}
+        self._series_materialization_idempotency: dict[str, uuid.UUID] = {}
+        self._episode_continuity: dict[
+            uuid.UUID, list[EpisodeContinuitySnapshotDto]
+        ] = {}
+        self._continuity_idempotency: dict[str, uuid.UUID] = {}
+        self._series_asset_bindings: dict[uuid.UUID, list[SeriesAssetBindingDto]] = {}
+        self._episode_reference_manifests: dict[uuid.UUID, list[dict[str, Any]]] = {}
+        self._story_source_documents: dict[uuid.UUID, StorySourceDocumentDto] = {}
+        self._story_source_materializations: dict[str, StoryImportMaterializationDto] = {}
         self._project_collections: dict[uuid.UUID, ProjectCollectionDto] = {}
         self._project_collection_ids: dict[uuid.UUID, uuid.UUID | None] = {}
         self._project_tags: dict[uuid.UUID, tuple[ProjectTagDto, ...]] = {}
@@ -582,6 +624,20 @@ class MemoryStudioRepository:
             None,
         )
         cover = poster or selections.get("environment")
+        series_context = next(
+            (
+                {
+                    "seriesId": str(episode.series_id),
+                    "seriesTitle": self._story_series[episode.series_id].title,
+                    "episodeId": str(episode.id),
+                    "episodeOrder": episode.order,
+                }
+                for episodes in self._series_episodes.values()
+                for episode in episodes
+                if episode.project_id == project.id
+            ),
+            None,
+        )
         return ProjectLibraryItemDto(
             id=project.id,
             title=project.title,
@@ -589,6 +645,7 @@ class MemoryStudioRepository:
             targetDurationSeconds=project.target_duration_seconds,
             aspectRatio=project.aspect_ratio,
             coverAssetId=cover.id if cover is not None and cover.media_type == "image" else None,
+            series=series_context,
             collection=collection,
             tags=self._project_tags.get(project_id, ()),
             stage=stage,
@@ -603,6 +660,769 @@ class MemoryStudioRepository:
 
     def get_project(self, project_id: uuid.UUID) -> ProjectDto | None:
         return self._projects.get(project_id)
+
+    def create_story_series(
+        self, command: SeriesCreateCommand, *, canon_profile_id: uuid.UUID
+    ) -> StorySeriesDto:
+        now = datetime.now(UTC)
+        series = StorySeriesDto(
+            id=uuid.uuid4(),
+            canonProfileId=canon_profile_id,
+            activePlanVersionId=None,
+            plannedCount=0,
+            materializedCount=0,
+            completedCount=0,
+            createdAt=now,
+            updatedAt=now,
+            **command.model_dump(mode="python", by_alias=True),
+        )
+        self._story_series[series.id] = series
+        self._series_plans[series.id] = []
+        self._series_episodes[series.id] = []
+        return series
+
+    def list_story_series(self) -> list[StorySeriesDto]:
+        return sorted(
+            self._story_series.values(),
+            key=lambda item: (item.updated_at, item.id.hex),
+            reverse=True,
+        )
+
+    def get_story_series(self, series_id: uuid.UUID) -> StorySeriesDto | None:
+        return self._story_series.get(series_id)
+
+    def update_story_series(
+        self, series_id: uuid.UUID, command: SeriesPatchCommand
+    ) -> StorySeriesDto:
+        series = self._story_series.get(series_id)
+        if series is None:
+            raise StudioNotFoundError("story series not found")
+        changes = {
+            name: value
+            for name, value in command.model_dump(mode="python").items()
+            if name in command.model_fields_set
+        }
+        changes["updated_at"] = datetime.now(UTC)
+        updated = series.model_copy(update=changes)
+        self._story_series[series_id] = updated
+        return updated
+
+    def create_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        plan: SeriesPlanDraft,
+        input_hash: str,
+        prompt_revision: str,
+        producing_job_id: uuid.UUID,
+        validation_issues: list[SeriesValidationIssueDto] | None = None,
+    ) -> SeriesPlanVersionDto:
+        series = self._story_series.get(series_id)
+        if series is None:
+            raise StudioNotFoundError("story series not found")
+        plans = self._series_plans.setdefault(series_id, [])
+        existing = next((item for item in plans if item.producing_job_id == producing_job_id), None)
+        if existing is not None:
+            return existing
+        now = datetime.now(UTC)
+        for item in plans:
+            if item.status == "candidate":
+                item.status = "superseded"
+                item.decided_at = now
+        if validation_issues is None:
+            disposition, issues = validate_series_plan(
+                plan,
+                expected_episode_count=series.planned_episode_count,
+                narrative_mode=series.narrative_mode,
+            )
+        else:
+            issues = validation_issues
+            disposition = (
+                "needs_input"
+                if any(issue.severity == "blocking" for issue in issues)
+                else "candidate_ready"
+            )
+        version = SeriesPlanVersionDto(
+            id=uuid.uuid4(),
+            seriesId=series_id,
+            revision=len(plans) + 1,
+            status="candidate",
+            active=False,
+            disposition=disposition,
+            plan=plan,
+            inputHash=input_hash,
+            promptRevision=prompt_revision,
+            producingJobId=producing_job_id,
+            issues=issues,
+            createdAt=now,
+        )
+        plans.append(version)
+        job = self._jobs.get(producing_job_id)
+        if job is not None:
+            completed = job.model_copy(update={"status": "succeeded", "updated_at": now})
+            self._jobs[producing_job_id] = completed
+            self._record_event(
+                completed,
+                "series.plan.candidate_created",
+                {"seriesPlanVersionId": str(version.id)},
+            )
+        return version
+
+    def list_series_plan_versions(self, series_id: uuid.UUID) -> list[SeriesPlanVersionDto]:
+        return list(reversed(self._series_plans.get(series_id, [])))
+
+    def materialize_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        base_plan_version_id: uuid.UUID,
+        plan: SeriesPlanDraft,
+        idempotency_key: str,
+    ) -> SeriesPlanVersionDto:
+        plans = self._series_plans.get(series_id, [])
+        prior_id = self._series_plan_materialization_idempotency.get(idempotency_key)
+        if prior_id is not None:
+            prior = next((item for item in plans if item.id == prior_id), None)
+            if prior is None or prior.base_plan_version_id != base_plan_version_id:
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            return prior
+        series = self._story_series.get(series_id)
+        base = next((item for item in plans if item.id == base_plan_version_id), None)
+        if series is None or base is None:
+            raise StudioNotFoundError("series plan version not found")
+        if base.active or base.status != "candidate":
+            raise StudioConflictError("only a pending series plan can be completed")
+        now = datetime.now(UTC)
+        for item in plans:
+            if item.status == "candidate":
+                item.status = "superseded"
+                item.decided_at = now
+        disposition, issues = validate_series_plan(
+            plan,
+            expected_episode_count=series.planned_episode_count,
+            narrative_mode=series.narrative_mode,
+        )
+        input_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "basePlanVersionId": str(base_plan_version_id),
+                    "plan": plan.model_dump(mode="json", by_alias=True),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        version = SeriesPlanVersionDto(
+            id=uuid.uuid4(),
+            seriesId=series_id,
+            revision=len(plans) + 1,
+            status="candidate",
+            active=False,
+            disposition=disposition,
+            plan=plan,
+            inputHash=input_hash,
+            promptRevision="manual-series-plan-v1",
+            producingJobId=None,
+            basePlanVersionId=base_plan_version_id,
+            issues=issues,
+            createdAt=now,
+        )
+        plans.append(version)
+        self._series_plan_materialization_idempotency[idempotency_key] = version.id
+        return version
+
+    def activate_series_plan_version(
+        self,
+        series_id: uuid.UUID,
+        plan_version_id: uuid.UUID,
+        *,
+        expected_active_plan_version_id: uuid.UUID | None,
+        idempotency_key: str,
+    ) -> SeriesPlanVersionDto:
+        existing_id = self._series_activation_idempotency.get(idempotency_key)
+        if existing_id is not None:
+            existing = next(
+                (item for item in self._series_plans.get(series_id, []) if item.id == existing_id),
+                None,
+            )
+            if existing is None or existing.id != plan_version_id:
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            return existing
+        series = self._story_series.get(series_id)
+        plans = self._series_plans.get(series_id, [])
+        selected = next((item for item in plans if item.id == plan_version_id), None)
+        if series is None or selected is None:
+            raise StudioNotFoundError("series plan version not found")
+        if selected.status != "candidate" or selected.disposition != "candidate_ready":
+            raise StudioConflictError("series plan requires completion before adoption")
+        if series.active_plan_version_id != expected_active_plan_version_id:
+            raise StudioConflictError("active series plan changed")
+        now = datetime.now(UTC)
+        for item in plans:
+            item.active = item.id == selected.id
+        selected.status = "accepted"
+        selected.decided_at = now
+        existing_by_order = {
+            item.order: item for item in self._series_episodes.get(series_id, [])
+        }
+        episodes: list[SeriesEpisodeDto] = []
+        for outline in selected.plan.episodes:
+            existing_episode = existing_by_order.get(outline.order)
+            if existing_episode is None:
+                episodes.append(
+                    SeriesEpisodeDto(
+                        id=uuid.uuid4(),
+                        seriesId=series_id,
+                        order=outline.order,
+                        title=outline.title,
+                        targetDurationSeconds=outline.target_duration_seconds,
+                        status="outline",
+                        projectId=None,
+                        activeOutlineVersionId=uuid.uuid4(),
+                        outline=outline,
+                        createdAt=now,
+                        updatedAt=now,
+                    )
+                )
+                continue
+            episodes.append(
+                existing_episode.model_copy(
+                    update={
+                        "title": outline.title,
+                        "target_duration_seconds": outline.target_duration_seconds,
+                        "active_outline_version_id": uuid.uuid4(),
+                        "outline": outline,
+                        "updated_at": now,
+                    }
+                )
+            )
+        self._series_episodes[series_id] = episodes
+        for index, episode in enumerate(episodes):
+            history = self._episode_continuity.setdefault(episode.id, [])
+            history[:] = [
+                item.model_copy(update={"active": False}) if item.active else item
+                for item in history
+            ]
+            previous_outline = episodes[index - 1].outline if index > 0 else None
+            for direction in ("incoming", "outgoing"):
+                history.append(
+                    EpisodeContinuitySnapshotDto(
+                        id=uuid.uuid4(),
+                        episodeId=episode.id,
+                        direction=direction,
+                        source="planned",
+                        state=planned_continuity_state(
+                            bible=selected.plan.series_bible,
+                            episode=episode.outline,
+                            direction=direction,
+                            previous_episode=previous_outline,
+                        ),
+                        decisions={},
+                        confirmed=False,
+                        active=True,
+                        createdAt=now,
+                    )
+                )
+        self._story_series[series_id] = series.model_copy(
+            update={
+                "active_plan_version_id": selected.id,
+                "planned_count": len(episodes),
+                "updated_at": now,
+            }
+        )
+        self._series_activation_idempotency[idempotency_key] = selected.id
+        return selected
+
+    def reject_series_plan_version(
+        self, series_id: uuid.UUID, plan_version_id: uuid.UUID
+    ) -> SeriesPlanVersionDto:
+        selected = next(
+            (item for item in self._series_plans.get(series_id, []) if item.id == plan_version_id),
+            None,
+        )
+        if selected is None:
+            raise StudioNotFoundError("series plan version not found")
+        if selected.active or selected.status != "candidate":
+            raise StudioConflictError("only a pending series plan can be rejected")
+        selected.status = "rejected"
+        selected.decided_at = datetime.now(UTC)
+        return selected
+
+    def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]:
+        return sorted(self._series_episodes.get(series_id, []), key=lambda item: item.order)
+
+    def list_series_jobs(self, series_id: uuid.UUID) -> list[JobDto]:
+        episode_project_ids = {
+            episode.project_id
+            for episode in self._series_episodes.get(series_id, [])
+            if episode.project_id is not None
+        }
+        return sorted(
+            [
+                item
+                for item in self._jobs.values()
+                if item.series_id == series_id or item.project_id in episode_project_ids
+            ],
+            key=lambda item: (item.created_at, item.id.hex),
+            reverse=True,
+        )
+
+    def materialize_series_episode(
+        self,
+        series_id: uuid.UUID,
+        episode_id: uuid.UUID,
+        *,
+        idempotency_key: str,
+    ) -> ProjectDto:
+        prior_project_id = self._series_materialization_idempotency.get(idempotency_key)
+        if prior_project_id is not None:
+            prior = self._projects.get(prior_project_id)
+            if prior is None:
+                raise StudioConflictError("materialized project is missing")
+            return prior
+        series = self._story_series.get(series_id)
+        episode = next(
+            (item for item in self._series_episodes.get(series_id, []) if item.id == episode_id),
+            None,
+        )
+        if series is None or episode is None:
+            raise StudioNotFoundError("series episode not found")
+        if episode.project_id is not None:
+            project = self._projects.get(episode.project_id)
+            if project is None:
+                raise StudioConflictError("materialized project is missing")
+            self._series_materialization_idempotency[idempotency_key] = project.id
+            return project
+        project = self.create_project(
+            ProjectCreate(
+                title=f"第{episode.order}集 · {episode.title}",
+                theme=episode.outline.premise,
+                targetDurationSeconds=episode.target_duration_seconds,
+            ),
+            canon_profile_id=series.canon_profile_id,
+        )
+        now = datetime.now(UTC)
+        episode.project_id = project.id
+        episode.status = "story_review"
+        episode.updated_at = now
+        current = self._story_series[series_id]
+        self._story_series[series_id] = current.model_copy(
+            update={
+                "materialized_count": current.materialized_count + 1,
+                "updated_at": now,
+            }
+        )
+        self._series_materialization_idempotency[idempotency_key] = project.id
+        return project
+
+    def list_episode_continuity(
+        self, episode_id: uuid.UUID
+    ) -> list[EpisodeContinuitySnapshotDto]:
+        return sorted(
+            self._episode_continuity.get(episode_id, []),
+            key=lambda item: (item.created_at, item.id.hex),
+            reverse=True,
+        )
+
+    def confirm_episode_continuity(
+        self, episode_id: uuid.UUID, command: EpisodeContinuityConfirmCommand
+    ) -> EpisodeContinuitySnapshotDto:
+        prior_id = self._continuity_idempotency.get(command.idempotency_key)
+        history = self._episode_continuity.get(episode_id, [])
+        if prior_id is not None:
+            prior = next((item for item in history if item.id == prior_id), None)
+            if prior is None or prior.direction != command.direction:
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            return prior
+        active = next(
+            (
+                item
+                for item in history
+                if item.direction == command.direction and item.active
+            ),
+            None,
+        )
+        if active is None:
+            raise StudioNotFoundError("episode continuity snapshot not found")
+        if command.expected_snapshot_id is not None and active.id != command.expected_snapshot_id:
+            raise StudioConflictError("episode continuity changed")
+        active.active = False
+        created = EpisodeContinuitySnapshotDto(
+            id=uuid.uuid4(),
+            episodeId=episode_id,
+            direction=command.direction,
+            source="confirmed",
+            state=command.state,
+            decisions=command.decisions,
+            confirmed=True,
+            active=True,
+            createdAt=datetime.now(UTC),
+        )
+        history.append(created)
+        self._continuity_idempotency[command.idempotency_key] = created.id
+        return created
+
+    def reset_episode_continuity(
+        self, episode_id: uuid.UUID, command: EpisodeContinuityResetCommand
+    ) -> EpisodeContinuitySnapshotDto:
+        history = self._episode_continuity.get(episode_id, [])
+        active = next(
+            (
+                item
+                for item in history
+                if item.direction == command.direction and item.active
+            ),
+            None,
+        )
+        if active is None or active.id != command.expected_snapshot_id:
+            raise StudioConflictError("episode continuity changed")
+        planned = next(
+            (
+                item
+                for item in history
+                if item.direction == command.direction and item.source == "planned"
+            ),
+            None,
+        )
+        if planned is None:
+            raise StudioNotFoundError("planned episode continuity not found")
+        active.active = False
+        restored = planned.model_copy(
+            update={"id": uuid.uuid4(), "active": True, "created_at": datetime.now(UTC)}
+        )
+        history.append(restored)
+        return restored
+
+    def series_episode_for_project(self, project_id: uuid.UUID) -> SeriesEpisodeDto | None:
+        return next(
+            (
+                episode
+                for episodes in self._series_episodes.values()
+                for episode in episodes
+                if episode.project_id == project_id
+            ),
+            None,
+        )
+
+    def list_series_asset_bindings(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesAssetBindingDto]:
+        return [
+            item
+            for item in self._series_asset_bindings.get(series_id, [])
+            if item.active
+        ]
+
+    def replace_series_asset_bindings(
+        self, series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
+    ) -> list[SeriesAssetBindingDto]:
+        if series_id not in self._story_series:
+            raise StudioNotFoundError("story series not found")
+        current = self.list_series_asset_bindings(series_id)
+        desired = {
+            item.binding_key: (item.role, item.asset_id) for item in command.bindings
+        }
+        existing = {
+            item.binding_key: (item.role, item.asset_id) for item in current
+        }
+        if desired == existing:
+            return current
+        for binding in command.bindings:
+            if binding.asset_id not in self._assets:
+                raise StudioNotFoundError("series asset not found")
+        history = self._series_asset_bindings.setdefault(series_id, [])
+        history[:] = [
+            item.model_copy(update={"active": False}) if item.active else item
+            for item in history
+        ]
+        now = datetime.now(UTC)
+        for binding in command.bindings:
+            asset = self._assets[binding.asset_id]
+            history.append(
+                SeriesAssetBindingDto(
+                    id=uuid.uuid4(),
+                    seriesId=series_id,
+                    bindingKey=binding.binding_key,
+                    role=binding.role,
+                    assetId=asset.id,
+                    assetSha256=asset.sha256,
+                    active=True,
+                    createdAt=now,
+                )
+            )
+        return self.list_series_asset_bindings(series_id)
+
+    def find_story_source_document(self, *, content_hash: str) -> StorySourceDocumentDto | None:
+        return next(
+            (
+                item
+                for item in self._story_source_documents.values()
+                if item.content_hash == content_hash
+            ),
+            None,
+        )
+
+    def list_story_source_documents(self) -> list[StorySourceDocumentDto]:
+        return sorted(
+            (
+                self._story_source_document_with_job_status(item)
+                for item in self._story_source_documents.values()
+            ),
+            key=lambda item: (item.created_at, item.id.hex),
+            reverse=True,
+        )
+
+    def get_story_source_document(self, document_id: uuid.UUID) -> StorySourceDocumentDto | None:
+        document = self._story_source_documents.get(document_id)
+        return (
+            self._story_source_document_with_job_status(document)
+            if document is not None
+            else None
+        )
+
+    def create_story_source_document(
+        self,
+        command: StoryImportCreateCommand,
+        *,
+        document_id: uuid.UUID,
+        content_hash: str,
+        job: JobDto,
+    ) -> StorySourceDocumentDto:
+        duplicate = self.find_story_source_document(content_hash=content_hash)
+        if duplicate is not None:
+            return duplicate
+        now = datetime.now(UTC)
+        document = StorySourceDocumentDto(
+            id=document_id,
+            contentHash=content_hash,
+            sourceFormat=command.source_format,
+            fileName=command.file_name,
+            rawText=command.raw_text.replace("\r\n", "\n").replace("\r", "\n").strip(),
+            status="analyzing",
+            analysisJobId=job.id,
+            units=[],
+            relationSuggestions=[],
+            createdAt=now,
+            updatedAt=now,
+        )
+        self._story_source_documents[document.id] = document
+        self.create_job(job)
+        return document
+
+    def restart_story_source_analysis(
+        self, document_id: uuid.UUID, job: JobDto
+    ) -> JobDto:
+        existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
+        if existing is not None:
+            if existing.story_source_document_id != document_id:
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            return existing
+        document = self._story_source_documents.get(document_id)
+        if document is None:
+            raise StudioNotFoundError("story source document not found")
+        materialized_suggestion_ids = {
+            item.suggestion_id for item in self._story_source_materializations.values()
+        }
+        if document.status == "confirmed" or any(
+            item.id in materialized_suggestion_ids for item in document.relation_suggestions
+        ):
+            raise StudioConflictError("confirmed story relationships cannot be reanalyzed")
+        previous = (
+            self._jobs.get(document.analysis_job_id)
+            if document.analysis_job_id is not None
+            else None
+        )
+        if previous is not None and previous.status == "submission_unknown":
+            raise StudioConflictError("story source analysis submission is unresolved")
+        if previous is not None and previous.status not in {"failed", "cancelled", "succeeded"}:
+            raise StudioConflictError("story source analysis is still running")
+        persisted = self.create_job(job)
+        self._story_source_documents[document_id] = document.model_copy(
+            update={
+                "status": "analyzing",
+                "analysis_job_id": persisted.id,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        return persisted
+
+    def _story_source_document_with_job_status(
+        self, document: StorySourceDocumentDto
+    ) -> StorySourceDocumentDto:
+        if document.status != "analyzing" or document.analysis_job_id is None:
+            return document
+        job = self._jobs.get(document.analysis_job_id)
+        if job is not None and job.status in {"failed", "cancelled"}:
+            return document.model_copy(update={"status": "failed"})
+        return document
+
+    def complete_story_source_analysis(
+        self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
+    ) -> StorySourceDocumentDto:
+        job = self._jobs.get(job_id)
+        if job is None or job.story_source_document_id is None:
+            raise StudioNotFoundError("story source analysis job not found")
+        document = self._story_source_documents.get(job.story_source_document_id)
+        if document is None:
+            raise StudioNotFoundError("story source document not found")
+        if document.analysis_job_id != job_id:
+            raise StudioConflictError("story source analysis is no longer current")
+        if document.status == "analyzed" and document.units:
+            return document
+        materialized_suggestion_ids = {
+            item.suggestion_id for item in self._story_source_materializations.values()
+        }
+        if any(item.id in materialized_suggestion_ids for item in document.relation_suggestions):
+            raise StudioConflictError("confirmed story relationships cannot be replaced")
+        now = datetime.now(UTC)
+        units = [
+            StorySourceUnitDto(
+                id=uuid.uuid4(),
+                documentId=document.id,
+                createdAt=now,
+                **item.model_dump(mode="python", by_alias=True),
+            )
+            for item in analysis.units
+        ]
+        units_by_ordinal = {item.ordinal: item.id for item in units}
+        suggestions = [
+            StorySourceRelationSuggestionDto(
+                id=uuid.uuid4(),
+                documentId=document.id,
+                relationType=item.relation_type,
+                unitIds=[units_by_ordinal[ordinal] for ordinal in item.unit_ordinals],
+                title=item.title,
+                narrativeMode=item.narrative_mode,
+                suggestedSeriesId=item.suggested_series_id,
+                confidence=item.confidence,
+                rationale=item.rationale,
+                status="suggested",
+                createdAt=now,
+            )
+            for item in analysis.relation_suggestions
+        ]
+        updated = document.model_copy(
+            update={
+                "status": "analyzed",
+                "units": units,
+                "relation_suggestions": suggestions,
+                "updated_at": now,
+            }
+        )
+        self._story_source_documents[document.id] = updated
+        completed = job.model_copy(update={"status": "succeeded", "updated_at": now})
+        self._jobs[job.id] = completed
+        self._record_event(completed, "story_source.analysis.completed")
+        return updated
+
+    def confirm_story_source(
+        self, document_id: uuid.UUID, command: StoryImportConfirmCommand
+    ) -> StoryImportMaterializationDto:
+        existing = self._story_source_materializations.get(command.idempotency_key)
+        if existing is not None:
+            if (
+                existing.suggestion_id != command.suggestion_id
+                or existing.target != command.target
+                or existing.target_series_id != command.target_series_id
+                or existing.target_project_id != command.target_project_id
+            ):
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            return existing
+        document = self._story_source_documents.get(document_id)
+        if document is None:
+            raise StudioNotFoundError("story source document not found")
+        suggestion = next(
+            (item for item in document.relation_suggestions if item.id == command.suggestion_id),
+            None,
+        )
+        if suggestion is None:
+            raise StudioNotFoundError("story source relation suggestion not found")
+        unit_by_id = {item.id: item for item in document.units}
+        units = [unit_by_id[item] for item in suggestion.unit_ids]
+        series: StorySeriesDto | None = None
+        projects: list[ProjectDto] = []
+        if command.target == "new_series":
+            if len(units) < 2:
+                raise StudioConflictError("a series requires at least two source units")
+            series = self.create_story_series(
+                SeriesCreateCommand(
+                    title=suggestion.title,
+                    premise="\n".join(item.raw_text for item in units),
+                    narrativeMode=suggestion.narrative_mode or "continuous",
+                    plannedEpisodeCount=len(units),
+                    defaultEpisodeDurationSeconds=12,
+                    worldSetting="由已导入原文中的地点、时间和环境归纳",
+                    emotionalDirection="保持原文的情绪变化",
+                    recurringElements=[],
+                    mustKeep=["保留来源文本中的核心事件"],
+                    mustAvoid=["不得无依据改写来源事实"],
+                    additionalNotes=f"来源文档 {document.id}",
+                ),
+                canon_profile_id=self._canon_profile_id,
+            )
+        elif command.target == "append_series":
+            if command.target_series_id is None:
+                raise StudioConflictError("append_series requires a target series")
+            series = self._story_series.get(command.target_series_id)
+            if series is None:
+                raise StudioNotFoundError("target story series not found")
+        elif command.target == "independent":
+            projects = [
+                self.create_project(
+                    ProjectCreate(
+                        title=item.title,
+                        theme=item.raw_text,
+                        targetDurationSeconds=12,
+                    ),
+                    canon_profile_id=self._canon_profile_id,
+                )
+                for item in units
+            ]
+        elif command.target_series_id is not None:
+            series = self._story_series.get(command.target_series_id)
+            if series is None:
+                raise StudioNotFoundError("target story series not found")
+        elif command.target_project_id is not None:
+            if command.target_project_id not in self._projects:
+                raise StudioNotFoundError("target project not found")
+        else:
+            raise StudioConflictError("story relationship target is missing")
+        now = datetime.now(UTC)
+        suggestion.status = "accepted"
+        materialization = StoryImportMaterializationDto(
+            id=uuid.uuid4(),
+            suggestionId=suggestion.id,
+            target=command.target,
+            targetSeriesId=command.target_series_id,
+            targetProjectId=command.target_project_id,
+            series=series,
+            projects=[
+                StoryImportProjectDto(
+                    id=item.id,
+                    title=item.title,
+                    theme=item.theme,
+                    targetDurationSeconds=item.target_duration_seconds,
+                )
+                for item in projects
+            ],
+            createdAt=now,
+        )
+        self._story_source_materializations[command.idempotency_key] = materialization
+        if all(item.status != "suggested" for item in document.relation_suggestions):
+            document.status = "confirmed"
+            document.updated_at = now
+        return materialization
 
     def update_project(self, project_id: uuid.UUID, patch: ProjectPatch) -> ProjectDto:
         project = self._projects.get(project_id)
@@ -637,7 +1457,8 @@ class MemoryStudioRepository:
             (
                 job
                 for job in self._jobs.values()
-                if job.project_id == project_id and job.kind == "plan_story"
+                if job.project_id == project_id
+                and job.kind in {"plan_story", "plan_series_episode"}
             ),
             key=lambda job: (job.created_at, job.id.hex),
             default=None,
@@ -700,8 +1521,10 @@ class MemoryStudioRepository:
             job = self._jobs[job_id]
         except KeyError as exc:
             raise StudioNotFoundError("job not found") from exc
-        if job.kind != "plan_story":
+        if job.kind not in {"plan_story", "plan_series_episode"}:
             raise StudioConflictError("job is not a planner job")
+        if job.project_id is None:
+            raise StudioConflictError("planner job has no project")
         existing = next(
             (
                 item
@@ -830,10 +1653,7 @@ class MemoryStudioRepository:
                     plan.decided_at = now
         if active and base_shot_plan_version_id is not None:
             for plan in plans:
-                if (
-                    plan.id == base_shot_plan_version_id
-                    and plan.review_status == "candidate"
-                ):
+                if plan.id == base_shot_plan_version_id and plan.review_status == "candidate":
                     plan.review_status = "superseded"
                     plan.decided_at = now
         plan = ShotPlanVersionDto(
@@ -884,9 +1704,8 @@ class MemoryStudioRepository:
         if selected.review_status in {"rejected", "superseded"}:
             raise StudioConflictError("shot plan version cannot be activated")
         current = next((plan for plan in plans if plan.active), None)
-        if (
-            expected_active_shot_plan_version_id is not None
-            and (current is None or current.id != expected_active_shot_plan_version_id)
+        if expected_active_shot_plan_version_id is not None and (
+            current is None or current.id != expected_active_shot_plan_version_id
         ):
             raise StudioConflictError("active shot plan version changed")
         for plan in plans:
@@ -983,7 +1802,42 @@ class MemoryStudioRepository:
         for selection in self._selections.get(project_id, []):
             if selection.decision in {"selected", "approved"}:
                 current[selection.slot] = self._assets[selection.asset_id]
+            else:
+                current.pop(selection.slot, None)
         return current
+
+    def replace_continuity_keyframes(
+        self, project_id: uuid.UUID, asset_ids: list[uuid.UUID]
+    ) -> list[AssetDto]:
+        current = self.current_selections(project_id)
+        selected: list[AssetDto] = []
+        for index, slot in enumerate(("continuity_keyframe_1", "continuity_keyframe_2")):
+            if index < len(asset_ids):
+                asset = self._assets.get(asset_ids[index])
+                if asset is None or asset.project_id != project_id or asset.media_type != "image":
+                    raise StudioNotFoundError("continuity keyframe not found")
+                self.select_asset(project_id, slot=slot, asset_id=asset.id)
+                selected.append(asset)
+            elif slot in current:
+                self.select_asset(
+                    project_id,
+                    slot=slot,
+                    asset_id=current[slot].id,
+                    decision="rejected",
+                )
+        return selected
+
+    def save_episode_reference_manifest(
+        self,
+        episode_id: uuid.UUID,
+        job_id: uuid.UUID,
+        continuity_snapshot_id: uuid.UUID | None,
+        references: list[dict[str, Any]],
+    ) -> None:
+        existing = self._episode_reference_manifests.get(job_id)
+        if existing is not None and existing != references:
+            raise StudioConflictError("episode reference manifest changed")
+        self._episode_reference_manifests[job_id] = references
 
     def list_assets(self, project_id: uuid.UUID) -> list[AssetDto]:
         return sorted(
@@ -1008,6 +1862,18 @@ class MemoryStudioRepository:
         return self._jobs.get(job_id)
 
     def record_director_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto:
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise StudioNotFoundError("job not found")
+        provider_result = dict(job.provider_result or {})
+        provider_result["validation"] = validation
+        updated = job.model_copy(update={"provider_result": provider_result})
+        self._jobs[job_id] = updated
+        return updated
+
+    def record_series_plan_validation(
         self, job_id: uuid.UUID, validation: dict[str, object]
     ) -> JobDto:
         job = self._jobs.get(job_id)
@@ -1259,6 +2125,8 @@ class MemoryStudioRepository:
                 id=len(self._job_events) + 1,
                 jobId=job.id,
                 projectId=job.project_id,
+                seriesId=job.series_id,
+                storySourceDocumentId=job.story_source_document_id,
                 eventType=event_type,
                 payload=payload or {"jobId": str(job.id), "status": job.status},
                 createdAt=datetime.now(UTC),

@@ -14,6 +14,7 @@ from catflow.application.gateways import (
     StructuredProviderResult,
     VideoGenerationGateway,
 )
+from catflow.application.video_generation import compile_provider_video_prompt
 from catflow.infrastructure.object_storage import ObjectPublisherError
 
 from .runner import ProviderPoll, ProviderSubmission
@@ -50,7 +51,10 @@ class ArkProviderJobGateway:
         self._resolve_asset_paths = resolve_asset_paths
         self._extract_video_frames = extract_video_frames
         self._prepare_segment_media = prepare_segment_media
-        self._publish_segment_reference = publish_segment_reference
+        self._video_reference_publisher = publish_segment_reference
+        self._prepared_video_references: dict[
+            uuid.UUID, PublishedSegmentReference
+        ] = {}
         self._prepared_segment_media: dict[
             uuid.UUID, tuple[Path, Path, Path, PublishedSegmentReference]
         ] = {}
@@ -58,11 +62,38 @@ class ArkProviderJobGateway:
     def prepare_submission(
         self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
     ) -> None:
+        if kind == "generate_video":
+            asset_value = frozen_input.get("previousEpisodeVideoAssetId")
+            if asset_value is None:
+                return
+            if self._video_reference_publisher is None:
+                raise ProviderGatewayError(
+                    code="video_reference_publisher_unavailable",
+                    message="Ark video continuity reference requires a configured HTTPS publisher",
+                    retryable=False,
+                    submission_unknown=False,
+                )
+            asset_id = uuid.UUID(str(asset_value))
+            paths = self._resolve_asset_paths((asset_id,))
+            if len(paths) != 1:
+                raise ValueError("previous episode video must resolve to exactly one durable file")
+            try:
+                self._prepared_video_references[job_id] = (
+                    self._video_reference_publisher.publish_asset(job_id, asset_id, paths[0])
+                )
+            except ObjectPublisherError as exc:
+                raise ProviderGatewayError(
+                    code=exc.code,
+                    message=exc.message,
+                    retryable=False,
+                    submission_unknown=False,
+                ) from exc
+            return
         if kind != "regenerate_video_segment":
             return
         if self._prepare_segment_media is None:
             raise ValueError("segment media preparation is not configured")
-        if self._publish_segment_reference is None:
+        if self._video_reference_publisher is None:
             raise ProviderGatewayError(
                 code="segment_reference_publisher_unavailable",
                 message="Ark segment repair requires a configured HTTPS object publisher",
@@ -83,7 +114,7 @@ class ArkProviderJobGateway:
             duration_seconds,
         )
         try:
-            published = self._publish_segment_reference.publish(job_id, context)
+            published = self._video_reference_publisher.publish(job_id, context)
         except ObjectPublisherError as exc:
             raise ProviderGatewayError(
                 code=exc.code,
@@ -113,6 +144,24 @@ class ArkProviderJobGateway:
             return _structured_submission(result)
         if kind == "plan_shots":
             result = self._gateway.plan_shots(
+                prompt=_required_string(frozen_input, "prompt"),
+                output_schema=_required_dict(frozen_input, "outputSchema"),
+            )
+            return _structured_submission(result)
+        if kind == "plan_series":
+            result = self._gateway.plan_series(
+                prompt=_required_string(frozen_input, "prompt"),
+                output_schema=_required_dict(frozen_input, "outputSchema"),
+            )
+            return _structured_submission(result)
+        if kind == "plan_series_episode":
+            result = self._gateway.plan_series_episode(
+                prompt=_required_string(frozen_input, "prompt"),
+                output_schema=_required_dict(frozen_input, "outputSchema"),
+            )
+            return _structured_submission(result)
+        if kind == "analyze_story_source":
+            result = self._gateway.analyze_story_source(
                 prompt=_required_string(frozen_input, "prompt"),
                 output_schema=_required_dict(frozen_input, "outputSchema"),
             )
@@ -148,21 +197,41 @@ class ArkProviderJobGateway:
             )
             return _structured_submission(result)
         if kind == "generate_video":
+            if (
+                frozen_input.get("previousEpisodeVideoAssetId") is not None
+                and job_id not in self._prepared_video_references
+            ):
+                self.prepare_submission(job_id=job_id, kind=kind, frozen_input=frozen_input)
+            published_video = self._prepared_video_references.pop(job_id, None)
             reference_ids = _uuid_tuple(frozen_input.get("referenceAssetIds", []))
             reference_roles = tuple(
                 str(item)
                 for item in frozen_input.get("referenceRoles", [])  # type: ignore[union-attr]
             )
+            compiled_prompt = frozen_input.get("compiledProviderPrompt")
+            if not isinstance(compiled_prompt, str) or not compiled_prompt.strip():
+                compiled_prompt = compile_provider_video_prompt(
+                    prompt=_required_string(frozen_input, "prompt"),
+                    negative_prompt=_required_string(frozen_input, "negativePrompt"),
+                )
             result = self._gateway.submit_video(
-                prompt=_required_string(frozen_input, "prompt"),
+                prompt=compiled_prompt,
                 reference_paths=self._resolve_asset_paths(reference_ids),
                 reference_roles=reference_roles,
+                reference_video_url=(
+                    published_video.url if published_video is not None else None
+                ),
                 duration_seconds=int(frozen_input.get("durationSeconds", 12)),
                 resolution=_required_string(frozen_input, "resolution"),
             )
+            metadata: dict[str, str] = {}
+            if result.request_id:
+                metadata["requestId"] = result.request_id
+            if published_video is not None:
+                metadata["publicationId"] = str(published_video.publication_id)
             return ProviderSubmission(
                 taskId=result.task_id,
-                metadata={"requestId": result.request_id} if result.request_id else None,
+                metadata=metadata or None,
             )
         if kind == "diagnose_video":
             video_asset_id = uuid.UUID(_required_string(frozen_input, "videoAssetId"))

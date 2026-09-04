@@ -16,6 +16,9 @@ ReferenceRole = Literal[
     "environment",
     "style_board",
     "style_source",
+    "previous_episode_last_frame",
+    "previous_episode_keyframe_1",
+    "previous_episode_keyframe_2",
 ]
 
 REFERENCE_PRIORITY: dict[str, int] = {
@@ -25,6 +28,9 @@ REFERENCE_PRIORITY: dict[str, int] = {
     "environment": 40,
     "style_board": 50,
     "style_source": 60,
+    "previous_episode_last_frame": 60,
+    "previous_episode_keyframe_1": 70,
+    "previous_episode_keyframe_2": 80,
 }
 
 

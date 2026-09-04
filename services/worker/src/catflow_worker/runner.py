@@ -539,6 +539,8 @@ class DurableJobWorker:
             JobEventRecord(
                 job_id=job.id,
                 project_id=job.project_id,
+                series_id=job.series_id,
+                story_source_document_id=job.story_source_document_id,
                 event_type=event_type,
                 payload_json={"jobId": str(job.id), "status": job.status},
             )
