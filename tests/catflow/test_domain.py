@@ -210,13 +210,13 @@ def test_professional_shot_keeps_action_path_continuity_sound_and_generation_ris
     assert "脚垫" in shot.continuity.final_frame
     assert shot.duration_frames == 96
 
-    with pytest.raises(ValidationError, match="at most 3"):
-        BlockingDesign(
-            initialState="开始",
-            movementPath="移动",
-            endState="结束",
-            microMotions=["一", "二", "三", "四"],
-        )
+    dense_blocking = BlockingDesign(
+        initialState="开始",
+        movementPath="移动",
+        endState="结束",
+        microMotions=["一", "二", "三", "四"],
+    )
+    assert dense_blocking.micro_motions == ["一", "二", "三", "四"]
 
 
 def _professional_director_payload() -> dict[str, object]:

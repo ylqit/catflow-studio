@@ -50,10 +50,28 @@ def test_start_script_discards_stale_worker_readiness_before_launch() -> None:
 
     ready_path = script.index("$workerReadyFile =")
     remove_ready = script.index("Remove-Item -LiteralPath $workerReadyFile")
-    launch_worker = script.index("$workerProcess = Start-Process @workerStart")
+    launch_worker = script.index("$workerSupervisorProcess = Start-Process @workerStart")
 
     assert ready_path < remove_ready < launch_worker
-    assert "ArgumentList = @('run')" in script
+    assert "ArgumentList = @('-m', 'catflow_worker.cli', 'supervise')" in script
+    assert "workerSupervisorPid = $workerSupervisorProcess.Id" in script
+    assert "ArgumentList = @('-m', 'catflow.interfaces.cli', 'serve'" in script
+    assert "$env:__PYVENV_LAUNCHER__ = $venvPythonExecutable" in script
+    assert "getattr(sys, '_base_executable', sys.executable)" in script
+
+
+def test_stop_script_stops_supervisor_before_its_exact_worker_child() -> None:
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "stop-local.ps1"
+    ).read_text(encoding="utf-8")
+
+    supervisor_stop = script.index("Stop-RecordedProcess -ProcessId $recorded.workerSupervisorPid")
+    worker_stop = script.index("Stop-RecordedProcess -ProcessId $workerProcessId")
+    api_stop = script.index("Stop-RecordedProcess -ProcessId $recorded.apiPid")
+
+    assert supervisor_stop < worker_stop < api_stop
+    assert "$recorded.workerPid" in script
+    assert "Get-Process -Name" not in script
 
 
 def test_start_script_invokes_the_serve_subcommand_before_its_port_option() -> None:
@@ -61,4 +79,7 @@ def test_start_script_invokes_the_serve_subcommand_before_its_port_option() -> N
         Path(__file__).resolve().parents[2] / "scripts" / "start-local.ps1"
     ).read_text(encoding="utf-8")
 
-    assert "ArgumentList = @('serve', '--port', $catflowPort.ToString())" in script
+    assert (
+        "ArgumentList = @('-m', 'catflow.interfaces.cli', 'serve', "
+        "'--port', $catflowPort.ToString())"
+    ) in script

@@ -14,11 +14,11 @@ def _table_order() -> tuple[str, ...]:
     return module.TABLE_ORDER
 
 
-def test_backup_covers_paid_authorization_and_shared_environment_state() -> None:
+def test_backup_covers_paid_authorization_and_project_scoped_environment_state() -> None:
     table_order = _table_order()
 
     assert "validation_runs" in table_order
-    assert "environment_presets" in table_order
+    assert "environment_presets" not in table_order
     assert table_order.index("validation_runs") < table_order.index("jobs")
-    assert table_order.index("assets") < table_order.index("environment_presets")
+    assert table_order.index("assets") < table_order.index("project_selections")
     assert "provider_rate_cards" in table_order

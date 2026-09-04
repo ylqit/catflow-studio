@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 
 import httpx
+import pytest
 from dotenv import load_dotenv
 from PIL import Image
 from sqlalchemy import delete, select
@@ -25,13 +26,13 @@ from catflow.infrastructure.database import (
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import (
     AssetRecord,
-    EnvironmentPresetRecord,
     JobRecord,
     ProjectRecord,
 )
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow_worker.ark_results import ArkResultLandingService
 from catflow_worker.provider_media import LandedProviderMedia, ProviderMediaDownloader
+from catflow_worker.runner import JobResultError
 
 
 def _ark_runtime() -> ProviderRuntime:
@@ -111,6 +112,64 @@ def test_ark_result_landing_creates_planner_proposal_from_persisted_result(
         snapshot = service.get_planner(project.id)
         assert snapshot.proposals[0].title == "雨天擦爪"
         assert snapshot.proposals[0].micro_event.warm_ending.endswith("走两步")
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_ark_result_landing_classifies_invalid_director_payload(tmp_path: Path) -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    engine = create_database_engine(DatabaseSettings.from_env())
+    sessions = create_session_factory(engine)
+    service = StudioService(PostgresStudioRepository(sessions), provider_runtime=_ark_runtime())
+    project = service.create_project(
+        ProjectCreate(title="错误分镜落地", theme="浇花", targetDurationSeconds=12)
+    )
+    job_id = uuid.uuid4()
+    try:
+        with sessions.begin() as session:
+            session.add(
+                JobRecord(
+                    id=job_id,
+                    project_id=project.id,
+                    kind="plan_shots",
+                    status="storing",
+                    input_hash="6" * 64,
+                    idempotency_key=f"invalid-director-landing-{job_id}",
+                    provider="ark",
+                    model="planning-model",
+                    frozen_input_json={},
+                    provider_result_json={
+                        "responseId": "response-invalid-director",
+                        "payload": {
+                            "targetDurationSeconds": 12,
+                            "directorTreatment": {},
+                            "shots": "not-an-array",
+                        },
+                    },
+                )
+            )
+        landing = ArkResultLandingService(
+            sessions,
+            LocalMediaStore(tmp_path),
+            studio_service=service,
+            downloader=ProviderMediaDownloader(
+                client=httpx.Client(transport=httpx.MockTransport(lambda _request: None)),
+                resolve_host=lambda _host: ("8.8.8.8",),
+            ),
+            ffprobe_path=Path("ffprobe"),
+        )
+
+        with pytest.raises(JobResultError) as caught:
+            landing.store_result(job_id)
+
+        assert caught.value.code == "director_output_validation_failed"
+        assert "镜头列表" in caught.value.detail
+        with sessions() as session:
+            persisted = session.get(JobRecord, job_id)
+            assert persisted is not None
+            assert persisted.provider_result_json["validation"]["disposition"] == "invalid"
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
@@ -311,6 +370,17 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
         )
         service.select_asset(project.id, slot="video", asset_id=base.id)
         service.select_asset(project.id, slot="environment", asset_id=environment.id)
+        for index, role in enumerate(
+            ("episode_child", "episode_cat", "pair_scale", "style_board"),
+            start=1,
+        ):
+            reference = service.register_asset(
+                project.id,
+                role=role,
+                media_type="image",
+                sha256=f"{index}" * 64,
+            )
+            service.select_asset(project.id, slot=role, asset_id=reference.id)
         preview = service.preview_video_repair(
             project.id,
             SegmentRepairPreviewCommand(
@@ -363,10 +433,5 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
         assert "videoUrl" not in service.get_job(job.id).provider_result
     finally:
         with sessions.begin() as session:
-            session.execute(
-                delete(EnvironmentPresetRecord).where(
-                    EnvironmentPresetRecord.source_project_id == project.id
-                )
-            )
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
         engine.dispose()

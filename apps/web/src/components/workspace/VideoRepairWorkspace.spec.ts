@@ -98,6 +98,8 @@ const recoveredRepairJob: JobDto = {
   },
   frozenInput: {},
   resultAssetIds: [],
+  createdAt: "2026-09-02T12:20:00Z",
+  updatedAt: "2026-09-02T12:21:00Z",
 };
 
 describe("VideoRepairWorkspace", () => {

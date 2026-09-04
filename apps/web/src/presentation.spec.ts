@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason } from "./presentation";
+import { backgroundTaskBlockedReason, billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason } from "./presentation";
 
 describe("creator-facing presentation", () => {
   it.each([
@@ -41,9 +41,15 @@ describe("creator-facing presentation", () => {
   });
 
   it("explains why a real model submission is unavailable", () => {
-    expect(paidModelBlockedReason({ provider: { apiKeyConfigured: false, paidCallsEnabled: true } })).toContain("密钥");
-    expect(paidModelBlockedReason({ provider: { apiKeyConfigured: true, paidCallsEnabled: false } })).toContain("已关闭");
-    expect(paidModelBlockedReason({ provider: { apiKeyConfigured: true, paidCallsEnabled: true } })).toBe("");
+    const readyWorker = { ready: true, state: "ready" as const };
+    expect(paidModelBlockedReason({ worker: readyWorker, provider: { apiKeyConfigured: false, paidCallsEnabled: true } })).toContain("密钥");
+    expect(paidModelBlockedReason({ worker: readyWorker, provider: { apiKeyConfigured: true, paidCallsEnabled: false } })).toContain("已关闭");
+    expect(paidModelBlockedReason({ worker: readyWorker, provider: { apiKeyConfigured: true, paidCallsEnabled: true } })).toBe("");
+    expect(paidModelBlockedReason({
+      worker: { ready: false, state: "restarting" },
+      provider: { apiKeyConfigured: true, paidCallsEnabled: true },
+    })).toContain("自动恢复");
+    expect(backgroundTaskBlockedReason({ worker: { ready: false, state: "degraded" } })).toContain("需要检查");
   });
 
   it("turns stale production input into a creator action", () => {

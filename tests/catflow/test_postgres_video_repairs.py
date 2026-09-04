@@ -19,7 +19,6 @@ from catflow.infrastructure.database import (
     create_session_factory,
 )
 from catflow.infrastructure.models import (
-    EnvironmentPresetRecord,
     JobRecord,
     ProjectRecord,
     VideoRepairRecord,
@@ -62,6 +61,17 @@ def test_postgres_recovers_repair_job_and_approves_one_active_edit_version() -> 
         )
         service.select_asset(project.id, slot="video", asset_id=base.id)
         service.select_asset(project.id, slot="environment", asset_id=environment.id)
+        for index, role in enumerate(
+            ("episode_child", "episode_cat", "pair_scale", "style_board"),
+            start=1,
+        ):
+            reference = service.register_asset(
+                project.id,
+                role=role,
+                media_type="image",
+                sha256=f"{index}" * 64,
+            )
+            service.select_asset(project.id, slot=role, asset_id=reference.id)
         preview = service.preview_video_repair(
             project.id,
             SegmentRepairPreviewCommand(
@@ -150,10 +160,5 @@ def test_postgres_recovers_repair_job_and_approves_one_active_edit_version() -> 
         assert approved_repair.candidate_core_range.end_frame == 121
     finally:
         with sessions.begin() as session:
-            session.execute(
-                delete(EnvironmentPresetRecord).where(
-                    EnvironmentPresetRecord.source_project_id == project.id
-                )
-            )
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
         engine.dispose()

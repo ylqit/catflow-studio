@@ -20,7 +20,6 @@ from catflow.infrastructure.models import (
     Base,
     CanonProfileRecord,
     EditVersionRecord,
-    EnvironmentPresetRecord,
     JobEventRecord,
     JobRecord,
     MediaPublicationRecord,
@@ -458,14 +457,6 @@ class CleanupService:
             )
         )
         session.execute(
-            delete(EnvironmentPresetRecord).where(
-                or_(
-                    EnvironmentPresetRecord.source_project_id.in_(projects),
-                    EnvironmentPresetRecord.asset_id.in_(assets),
-                )
-            )
-        )
-        session.execute(
             delete(ProjectSelectionRecord).where(
                 or_(
                     ProjectSelectionRecord.project_id.in_(projects),
@@ -573,6 +564,9 @@ class CleanupService:
         ready_file = self._paths.work_root / "worker-ready.json"
         if ready_file.is_file():
             raise RuntimeError("remove stale Worker readiness by running stop-local.ps1")
+        supervisor_file = self._paths.work_root / "worker-supervisor.json"
+        if supervisor_file.is_file():
+            raise RuntimeError("remove stale Worker supervisor state by running stop-local.ps1")
 
     def _git_state(self) -> dict[str, Any]:
         def run(*arguments: str) -> str:

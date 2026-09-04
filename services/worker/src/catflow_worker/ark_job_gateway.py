@@ -119,9 +119,15 @@ class ArkProviderJobGateway:
             return _structured_submission(result)
         if kind == "generate_image":
             reference_ids = _uuid_tuple(frozen_input.get("referenceAssetIds", []))
+            reference_roles = tuple(
+                str(item)
+                for item in frozen_input.get("referenceRoles", [])  # type: ignore[union-attr]
+            )
             result = self._gateway.generate_image(
                 prompt=_required_string(frozen_input, "prompt"),
+                negative_prompt=_required_string(frozen_input, "negativePrompt"),
                 reference_paths=self._resolve_asset_paths(reference_ids),
+                reference_roles=reference_roles,
             )
             return ProviderSubmission(
                 result={

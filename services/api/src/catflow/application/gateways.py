@@ -97,7 +97,12 @@ class PlanningGateway(Protocol):
 
 class ImageGenerationGateway(Protocol):
     def generate_image(
-        self, *, prompt: str, reference_paths: tuple[Path, ...]
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        reference_paths: tuple[Path, ...],
+        reference_roles: tuple[str, ...],
     ) -> ImageProviderResult: ...
 
 
@@ -141,6 +146,10 @@ class ProviderGatewayError(RuntimeError):
         submission_unknown: bool,
         request_id: str | None = None,
         timed_out: bool = False,
+        provider_status: str | None = None,
+        incomplete_reason: str | None = None,
+        max_output_tokens: int | None = None,
+        usage: dict[str, int] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -149,9 +158,13 @@ class ProviderGatewayError(RuntimeError):
         self.submission_unknown = submission_unknown
         self.request_id = request_id
         self.timed_out = timed_out
+        self.provider_status = provider_status
+        self.incomplete_reason = incomplete_reason
+        self.max_output_tokens = max_output_tokens
+        self.usage = usage
 
     def as_error_document(self) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "code": self.code,
             "message": self.message,
             "retryable": self.retryable,
@@ -159,3 +172,12 @@ class ProviderGatewayError(RuntimeError):
             "requestId": self.request_id,
             "timedOut": self.timed_out,
         }
+        if self.provider_status is not None:
+            document["providerStatus"] = self.provider_status
+        if self.incomplete_reason is not None:
+            document["incompleteReason"] = self.incomplete_reason
+        if self.max_output_tokens is not None:
+            document["maxOutputTokens"] = self.max_output_tokens
+        if self.usage is not None:
+            document["providerUsage"] = self.usage
+        return document

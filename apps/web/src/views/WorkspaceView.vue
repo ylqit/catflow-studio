@@ -21,6 +21,7 @@ const loading = ref(true);
 const error = ref("");
 const projectId = computed(() => String(route.params.projectId));
 let eventSource: EventSource | null = null;
+let runtimeTimer: number | undefined;
 
 const steps = [
   { id: "planner", number: "01", label: "生活灵感", hint: "一个微事件" },
@@ -48,6 +49,30 @@ async function loadWorkspace() {
   }
 }
 
+async function refreshRuntime() {
+  try {
+    runtime.value = await api.runtime();
+  } catch {
+    // The workspace remains readable while runtime health is temporarily unavailable.
+  }
+}
+
+function syncRuntimePolling() {
+  if (runtimeTimer !== undefined) {
+    window.clearInterval(runtimeTimer);
+    runtimeTimer = undefined;
+  }
+  if (runtime.value?.worker.ready === false) {
+    runtimeTimer = window.setInterval(() => { void refreshRuntime(); }, 5000);
+  }
+}
+
+function refreshRuntimeWhenVisible() {
+  if (document.visibilityState === "visible" && runtime.value?.worker.ready === false) {
+    void refreshRuntime();
+  }
+}
+
 function connectEvents() {
   eventSource?.close();
   eventSource = new EventSource(api.eventsUrl(store.lastEventId));
@@ -58,14 +83,27 @@ function connectEvents() {
     if (!projectJobEvent(event, projectId.value)) return;
     void loadWorkspace();
   };
-  for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.succeeded", "job.failed", "job.cancelled", "planner.proposal.created"]) {
+  for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.storing", "job.succeeded", "job.failed", "job.submission_unknown", "job.cancel_requested", "job.cancelled", "planner.proposal.created"]) {
     eventSource.addEventListener(type, refresh as EventListener);
   }
 }
 
-onMounted(async () => { await loadWorkspace(); connectEvents(); });
+onMounted(async () => {
+  await loadWorkspace();
+  connectEvents();
+  syncRuntimePolling();
+  window.addEventListener("focus", refreshRuntimeWhenVisible);
+  document.addEventListener("visibilitychange", refreshRuntimeWhenVisible);
+});
 watch(projectId, async () => { loading.value = true; await loadWorkspace(); connectEvents(); });
-onBeforeUnmount(() => { eventSource?.close(); store.sseConnected = false; });
+watch(() => [runtime.value?.worker.ready, runtime.value?.worker.state], syncRuntimePolling);
+onBeforeUnmount(() => {
+  eventSource?.close();
+  if (runtimeTimer !== undefined) window.clearInterval(runtimeTimer);
+  window.removeEventListener("focus", refreshRuntimeWhenVisible);
+  document.removeEventListener("visibilitychange", refreshRuntimeWhenVisible);
+  store.sseConnected = false;
+});
 </script>
 
 <template>
@@ -82,12 +120,15 @@ onBeforeUnmount(() => { eventSource?.close(); store.sseConnected = false; });
           <span>{{ item.number }}</span><div><b>{{ item.label }}</b><small>{{ item.hint }}</small></div><i>✓</i>
         </RouterLink>
       </nav>
+      <p v-if="runtime?.worker.ready === false" class="worker-warning" role="status">
+        后台任务暂时不可用。已经保存的任务不会丢失，{{ runtime.worker.retryingAutomatically ? "系统正在尝试恢复；" : "请到运行设置检查；" }}恢复前不能开始新的生成。
+      </p>
       <section class="workspace-content">
         <PlannerStep v-if="step === 'planner'" :project-id="projectId" :runtime="runtime" @changed="loadWorkspace" />
         <AssetsStep v-else-if="step === 'assets'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
         <StoryboardStep v-else-if="step === 'storyboard'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
         <GenerationStep v-else-if="step === 'generation'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
-        <DeliveryStep v-else :project-id="projectId" :workspace="workspace" @changed="loadWorkspace" />
+        <DeliveryStep v-else :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
       </section>
     </template>
   </main>
@@ -117,4 +158,5 @@ onBeforeUnmount(() => { eventSource?.close(); store.sseConnected = false; });
 .step-nav a.current::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: var(--accent); }
 .step-nav a.current > span, .step-nav a.current b { color: var(--accent-dark); }
 .workspace-content { width: min(1480px, calc(100% - 56px)); margin: 0 auto; padding: 20px 0 55px; }
+.worker-warning { width: min(1480px, calc(100% - 56px)); box-sizing: border-box; margin: 14px auto 0; padding: 11px 14px; border: 1px solid #d8b28d; border-radius: 11px; color: #815741; background: #fff4e8; font-size: 11px; }
 </style>

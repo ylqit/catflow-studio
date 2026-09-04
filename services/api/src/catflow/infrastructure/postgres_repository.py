@@ -18,9 +18,9 @@ from catflow.application.service import (
     EditDecisionListDto,
     EditDecisionListV2,
     EditVersionDto,
-    EnvironmentPresetDto,
     FixedCanonRole,
     GenerationInputSnapshotDto,
+    ImageGenerationInputSnapshotDto,
     JobDto,
     JobEventDto,
     JobPublicationDto,
@@ -40,6 +40,7 @@ from catflow.application.service import (
     StoryCreateCommand,
     StoryVersionDto,
     StudioConflictError,
+    StudioIdempotencyInputConflictError,
     StudioNotFoundError,
     ValidationRunDto,
     VideoRepairDto,
@@ -54,7 +55,6 @@ from .models import (
     AssetRecord,
     CanonProfileRecord,
     EditVersionRecord,
-    EnvironmentPresetRecord,
     JobEventRecord,
     JobRecord,
     LifePlannerMessageRecord,
@@ -618,7 +618,16 @@ class PostgresStudioRepository:
             session.flush()
             return _story_dto(record)
 
-    def create_shot_plan(self, project_id: uuid.UUID, draft: ShotPlanDraft) -> ShotPlanVersionDto:
+    def create_shot_plan(
+        self,
+        project_id: uuid.UUID,
+        draft: ShotPlanDraft,
+        *,
+        active: bool = True,
+        review_status: str = "accepted",
+        producing_job_id: uuid.UUID | None = None,
+        base_shot_plan_version_id: uuid.UUID | None = None,
+    ) -> ShotPlanVersionDto:
         with self._sessions.begin() as session:
             session.scalar(
                 select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
@@ -628,14 +637,35 @@ class PostgresStudioRepository:
                     ShotPlanVersionRecord.project_id == project_id
                 )
             )
-            session.execute(
-                update(ShotPlanVersionRecord)
-                .where(
-                    ShotPlanVersionRecord.project_id == project_id,
-                    ShotPlanVersionRecord.active.is_(True),
+            now = datetime.now(UTC)
+            if active:
+                session.execute(
+                    update(ShotPlanVersionRecord)
+                    .where(
+                        ShotPlanVersionRecord.project_id == project_id,
+                        ShotPlanVersionRecord.active.is_(True),
+                    )
+                    .values(active=False)
                 )
-                .values(active=False)
-            )
+            if review_status == "candidate":
+                session.execute(
+                    update(ShotPlanVersionRecord)
+                    .where(
+                        ShotPlanVersionRecord.project_id == project_id,
+                        ShotPlanVersionRecord.review_status == "candidate",
+                    )
+                    .values(review_status="superseded", decided_at=now)
+                )
+            if active and base_shot_plan_version_id is not None:
+                session.execute(
+                    update(ShotPlanVersionRecord)
+                    .where(
+                        ShotPlanVersionRecord.id == base_shot_plan_version_id,
+                        ShotPlanVersionRecord.project_id == project_id,
+                        ShotPlanVersionRecord.review_status == "candidate",
+                    )
+                    .values(review_status="superseded", decided_at=now)
+                )
             record = ShotPlanVersionRecord(
                 project_id=project_id,
                 revision=int(revision or 0) + 1,
@@ -652,7 +682,11 @@ class PostgresStudioRepository:
                 director_model=draft.director_model,
                 director_input_hash=draft.director_input_hash,
                 total_duration_seconds=draft.total_duration_seconds,
-                active=True,
+                review_status=review_status,
+                producing_job_id=producing_job_id,
+                base_shot_plan_version_id=base_shot_plan_version_id,
+                decided_at=now if review_status != "candidate" else None,
+                active=active,
             )
             session.add(record)
             session.flush()
@@ -678,21 +712,66 @@ class PostgresStudioRepository:
             return [_shot_plan_dto(record) for record in records]
 
     def activate_shot_plan(
-        self, project_id: uuid.UUID, shot_plan_id: uuid.UUID
+        self,
+        project_id: uuid.UUID,
+        shot_plan_id: uuid.UUID,
+        *,
+        expected_active_shot_plan_version_id: uuid.UUID | None,
     ) -> ShotPlanVersionDto:
         with self._sessions.begin() as session:
             session.scalar(
                 select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
             )
-            record = session.get(ShotPlanVersionRecord, shot_plan_id)
+            record = session.scalar(
+                select(ShotPlanVersionRecord)
+                .where(ShotPlanVersionRecord.id == shot_plan_id)
+                .with_for_update()
+            )
             if record is None or record.project_id != project_id:
                 raise StudioNotFoundError("shot plan version not found")
+            if record.active and record.review_status == "accepted":
+                return _shot_plan_dto(record)
+            if record.review_status in {"rejected", "superseded"}:
+                raise StudioConflictError("shot plan version cannot be activated")
+            current_active_id = session.scalar(
+                select(ShotPlanVersionRecord.id).where(
+                    ShotPlanVersionRecord.project_id == project_id,
+                    ShotPlanVersionRecord.active.is_(True),
+                )
+            )
+            if (
+                expected_active_shot_plan_version_id is not None
+                and current_active_id != expected_active_shot_plan_version_id
+            ):
+                raise StudioConflictError("active shot plan version changed")
             session.execute(
                 update(ShotPlanVersionRecord)
                 .where(ShotPlanVersionRecord.project_id == project_id)
                 .values(active=False)
             )
             record.active = True
+            record.review_status = "accepted"
+            record.decided_at = datetime.now(UTC)
+            session.flush()
+            return _shot_plan_dto(record)
+
+    def reject_shot_plan(
+        self, project_id: uuid.UUID, shot_plan_id: uuid.UUID
+    ) -> ShotPlanVersionDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(ShotPlanVersionRecord)
+                .where(ShotPlanVersionRecord.id == shot_plan_id)
+                .with_for_update()
+            )
+            if record is None or record.project_id != project_id:
+                raise StudioNotFoundError("shot plan version not found")
+            if record.review_status == "rejected":
+                return _shot_plan_dto(record)
+            if record.review_status != "candidate" or record.active:
+                raise StudioConflictError("only a pending shot plan candidate can be rejected")
+            record.review_status = "rejected"
+            record.decided_at = datetime.now(UTC)
             session.flush()
             return _shot_plan_dto(record)
 
@@ -754,7 +833,7 @@ class PostgresStudioRepository:
             if slot == "environment" and (
                 asset.role != "environment" or asset.media_type != "image"
             ):
-                raise StudioConflictError("shared environment must be an environment image")
+                raise StudioConflictError("project environment must be an environment image")
             record = ProjectSelectionRecord(
                 project_id=project_id,
                 asset_id=asset_id,
@@ -763,19 +842,6 @@ class PostgresStudioRepository:
                 source_hash=_selection_source_hash(project_id, slot, asset.sha256),
             )
             session.add(record)
-            if slot == "environment":
-                session.execute(
-                    update(EnvironmentPresetRecord)
-                    .where(EnvironmentPresetRecord.active.is_(True))
-                    .values(active=False)
-                )
-                session.add(
-                    EnvironmentPresetRecord(
-                        source_project_id=project_id,
-                        asset_id=asset_id,
-                        active=True,
-                    )
-                )
             session.flush()
             return _selection_dto(record)
 
@@ -818,36 +884,7 @@ class PostgresStudioRepository:
             }
             for selection, asset in records:
                 current.setdefault(selection.slot, _asset_dto(asset))
-            active_environment = session.execute(
-                select(EnvironmentPresetRecord, AssetRecord)
-                .join(AssetRecord, AssetRecord.id == EnvironmentPresetRecord.asset_id)
-                .where(EnvironmentPresetRecord.active.is_(True))
-            ).one_or_none()
-            if active_environment is not None:
-                _, asset = active_environment
-                current["environment"] = _asset_dto(asset)
             return current
-
-    def environment_presets(self) -> list[EnvironmentPresetDto]:
-        with self._sessions() as session:
-            records = session.execute(
-                select(EnvironmentPresetRecord, AssetRecord)
-                .join(AssetRecord, AssetRecord.id == EnvironmentPresetRecord.asset_id)
-                .order_by(
-                    EnvironmentPresetRecord.created_at.desc(),
-                    EnvironmentPresetRecord.id.desc(),
-                )
-            ).all()
-            return [
-                EnvironmentPresetDto(
-                    id=preset.id,
-                    sourceProjectId=preset.source_project_id,
-                    asset=_asset_dto(asset),
-                    active=preset.active,
-                    createdAt=preset.created_at,
-                )
-                for preset, asset in records
-            ]
 
     def list_assets(self, project_id: uuid.UUID) -> list[AssetDto]:
         with self._sessions() as session:
@@ -865,10 +902,38 @@ class PostgresStudioRepository:
 
     def create_job(self, job: JobDto) -> JobDto:
         with self._sessions.begin() as session:
+            if job.kind == "plan_shots":
+                session.scalar(
+                    select(ProjectRecord)
+                    .where(ProjectRecord.id == job.project_id)
+                    .with_for_update()
+                )
             existing = _job_by_idempotency(session, job.idempotency_key)
             if existing is not None:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
+            if job.kind == "plan_shots":
+                running = session.scalar(
+                    select(JobRecord.id).where(
+                        JobRecord.project_id == job.project_id,
+                        JobRecord.kind == "plan_shots",
+                        JobRecord.status.in_(
+                            {
+                                "queued",
+                                "submitting",
+                                "submitted",
+                                "polling",
+                                "storing",
+                                "cancel_requested",
+                                "submission_unknown",
+                            }
+                        ),
+                    )
+                )
+                if running is not None:
+                    raise StudioConflictError(
+                        "a shot plan generation job is already running"
+                    )
             record = _new_job_record(job)
             session.add(record)
             session.flush()
@@ -879,6 +944,21 @@ class PostgresStudioRepository:
         with self._sessions() as session:
             record = session.get(JobRecord, job_id)
             return _job_dto(session, record) if record is not None else None
+
+    def record_director_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("job not found")
+            provider_result = dict(record.provider_result_json or {})
+            provider_result["validation"] = validation
+            record.provider_result_json = provider_result
+            session.flush()
+            return _job_dto(session, record)
 
     def list_project_jobs(self, project_id: uuid.UUID) -> list[JobDto]:
         with self._sessions() as session:
@@ -1297,6 +1377,10 @@ def _shot_plan_dto(record: ShotPlanVersionRecord) -> ShotPlanVersionDto:
         directorPromptRevision=record.director_prompt_revision,
         directorModel=record.director_model,
         directorInputHash=record.director_input_hash,
+        reviewStatus=record.review_status,
+        producingJobId=record.producing_job_id,
+        baseShotPlanVersionId=record.base_shot_plan_version_id,
+        decidedAt=record.decided_at,
         active=record.active,
         outdated=False,
         createdAt=record.created_at,
@@ -1533,7 +1617,9 @@ def _rate_card_revision_dto(
 
 def _require_same_input(record: JobRecord, input_hash: str) -> None:
     if record.input_hash != input_hash:
-        raise StudioConflictError("idempotency key already belongs to different input")
+        raise StudioIdempotencyInputConflictError(
+            "idempotency key already belongs to different input"
+        )
 
 
 def _job_dto(session: Session, record: JobRecord) -> JobDto:
@@ -1564,6 +1650,12 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         if isinstance(snapshot_document, dict)
         else _legacy_generation_input_snapshot(record)
     )
+    image_snapshot_document = record.frozen_input_json.get("imageInputSnapshot")
+    image_input_snapshot = (
+        ImageGenerationInputSnapshotDto.model_validate(image_snapshot_document)
+        if isinstance(image_snapshot_document, dict)
+        else None
+    )
     return JobDto(
         id=record.id,
         projectId=record.project_id,
@@ -1589,6 +1681,7 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         pricingSnapshot=record.pricing_snapshot_json,
         providerRequestId=record.provider_request_id,
         inputSnapshot=input_snapshot,
+        imageInputSnapshot=image_input_snapshot,
         frozenInput=record.frozen_input_json,
         resultAssetIds=asset_ids,
         supersedesJobId=record.supersedes_job_id,

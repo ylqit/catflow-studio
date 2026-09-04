@@ -24,7 +24,6 @@ EXPECTED_TABLES = {
     "job_events",
     "edit_versions",
     "validation_runs",
-    "environment_presets",
     "video_repairs",
     "media_publications",
     "provider_rate_cards",
@@ -90,9 +89,16 @@ def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
         "director_prompt_revision",
         "director_model",
         "director_input_hash",
+        "review_status",
+        "producing_job_id",
+        "base_shot_plan_version_id",
+        "decided_at",
     } <= set(
         tables["shot_plan_versions"].columns.keys()
     )
+    assert "uq_shot_plan_versions_candidate" in {
+        index.name for index in tables["shot_plan_versions"].indexes
+    }
     assert {
         "source_selection_hash",
         "edl_json",
@@ -158,7 +164,6 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
     sql = output.getvalue()
     for table_name in EXPECTED_TABLES - {
         "validation_runs",
-        "environment_presets",
         "video_repairs",
         "media_publications",
         "provider_rate_cards",

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from dotenv import load_dotenv
 from sqlalchemy import delete, make_url
 
-from catflow.application.service import PlannerMessageCommand, ProjectCreate, StudioService
+from catflow.application.service import (
+    JobDto,
+    PlannerMessageCommand,
+    ProjectCreate,
+    StudioConflictError,
+    StudioService,
+)
 from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.database import (
     DatabaseSettings,
@@ -19,7 +28,9 @@ from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 def test_postgres_repository_persists_and_recovers_planner_workflow() -> None:
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     settings = DatabaseSettings.from_env()
-    assert make_url(settings.url).database == "catflow_studio"
+    database_name = make_url(settings.url).database
+    assert database_name is not None
+    assert database_name.startswith("catflow_studio_test_")
     engine = create_database_engine(settings)
     sessions = create_session_factory(engine)
     repository = PostgresStudioRepository(sessions)
@@ -68,6 +79,48 @@ def test_postgres_repository_persists_and_recovers_planner_workflow() -> None:
         assert recovered_service.list_stories(project.id)[0].id == story.id
         assert recovered_job.status == "succeeded"
         assert len(recovered_planner.messages) == 2
+    finally:
+        with sessions.begin() as session:
+            session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
+        engine.dispose()
+
+
+def test_postgres_repository_reports_idempotency_input_conflict_without_inserting() -> None:
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    settings = DatabaseSettings.from_env()
+    database_name = make_url(settings.url).database
+    assert database_name is not None
+    assert database_name.startswith("catflow_studio_test_")
+    engine = create_database_engine(settings)
+    sessions = create_session_factory(engine)
+    repository = PostgresStudioRepository(sessions)
+    service = StudioService(repository)
+    project = service.create_project(
+        ProjectCreate(title="幂等冲突测试", theme="雨天擦爪", targetDurationSeconds=10)
+    )
+    now = datetime.now(UTC)
+    first = JobDto(
+        id=uuid.uuid4(),
+        projectId=project.id,
+        kind="plan_shots",
+        status="failed",
+        inputHash="a" * 64,
+        idempotencyKey=f"postgres-conflict-{project.id}",
+        frozenInput={},
+        resultAssetIds=[],
+        createdAt=now,
+        updatedAt=now,
+    )
+
+    try:
+        repository.create_job(first)
+        with pytest.raises(StudioConflictError) as caught:
+            repository.create_job(
+                first.model_copy(update={"id": uuid.uuid4(), "input_hash": "b" * 64})
+            )
+
+        assert getattr(caught.value, "code", None) == "idempotency_input_conflict"
+        assert len(repository.list_project_jobs(project.id)) == 1
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))

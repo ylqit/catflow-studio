@@ -6,7 +6,6 @@ import type {
   CanonProfileDto,
   EditDecisionListDto,
   EditVersionDto,
-  EnvironmentPresetDto,
   GenerationPreviewDto,
   JobDto,
   JobUsageDto,
@@ -27,6 +26,7 @@ import type {
   SegmentRepairCreateCommand,
   SegmentRepairPreviewCommand,
   SegmentRepairPreviewDto,
+  ShotPlanGenerationAttemptDto,
   ShotPlanVersionDto,
   StoryVersionDto,
   WorkspaceDto,
@@ -161,10 +161,6 @@ export class CatFlowClient {
     return this.request(`/api/v1/projects/${projectId}/assets`);
   }
 
-  environmentPresets(): Promise<EnvironmentPresetDto[]> {
-    return this.request("/api/v1/environment-presets");
-  }
-
   shotPlans(projectId: string): Promise<ShotPlanVersionDto[]> {
     return this.request(`/api/v1/projects/${projectId}/shot-plans`);
   }
@@ -177,6 +173,61 @@ export class CatFlowClient {
     return this.json(`/api/v1/projects/${projectId}/shot-plans/generations`, "POST", {
       idempotencyKey,
     });
+  }
+
+  shotPlanGenerationAttempts(
+    projectId: string,
+    limit = 20,
+  ): Promise<ShotPlanGenerationAttemptDto[]> {
+    return this.request(
+      `/api/v1/projects/${projectId}/shot-plans/generations?limit=${limit}`,
+    );
+  }
+
+  recoverShotPlanGeneration(
+    projectId: string,
+    jobId: string,
+    idempotencyKey: string,
+  ): Promise<ShotPlanVersionDto> {
+    return this.json(
+      `/api/v1/projects/${projectId}/shot-plans/generations/${jobId}/recover`,
+      "POST",
+      { idempotencyKey },
+    );
+  }
+
+  materializeShotPlanGeneration(
+    projectId: string,
+    jobId: string,
+    payload: Record<string, unknown>,
+    idempotencyKey: string,
+  ): Promise<ShotPlanVersionDto> {
+    return this.json(
+      `/api/v1/projects/${projectId}/shot-plans/generations/${jobId}/materialize`,
+      "POST",
+      { idempotencyKey, payload },
+    );
+  }
+
+  activateShotPlan(
+    projectId: string,
+    shotPlanVersionId: string,
+    expectedActiveShotPlanVersionId: string | null,
+    idempotencyKey: string,
+  ): Promise<ShotPlanVersionDto> {
+    return this.json(
+      `/api/v1/projects/${projectId}/shot-plans/${shotPlanVersionId}/activate`,
+      "POST",
+      { expectedActiveShotPlanVersionId, idempotencyKey },
+    );
+  }
+
+  rejectShotPlan(projectId: string, shotPlanVersionId: string): Promise<ShotPlanVersionDto> {
+    return this.json(
+      `/api/v1/projects/${projectId}/shot-plans/${shotPlanVersionId}/reject`,
+      "POST",
+      {},
+    );
   }
 
   uploadAsset(projectId: string, role: AssetSlot, file: File): Promise<AssetDto> {

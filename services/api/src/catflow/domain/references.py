@@ -46,7 +46,10 @@ class CompiledReferenceSet(ContractModel):
 
 
 def compile_references(
-    references: list[ProviderReference], *, maximum_references: int
+    references: list[ProviderReference],
+    *,
+    maximum_references: int,
+    role_order: tuple[ReferenceRole, ...] | None = None,
 ) -> CompiledReferenceSet:
     if maximum_references < 0:
         raise ValueError("maximum_references must not be negative")
@@ -57,7 +60,14 @@ def compile_references(
     if duplicate_roles:
         raise ValueError(f"duplicate reference roles: {', '.join(duplicate_roles)}")
 
-    ordered = sorted(references, key=lambda item: REFERENCE_PRIORITY[item.role])
+    if role_order is None:
+        priority = REFERENCE_PRIORITY
+    else:
+        unknown_roles = sorted(set(role_counts) - set(role_order))
+        if unknown_roles:
+            raise ValueError(f"roles absent from requested order: {', '.join(unknown_roles)}")
+        priority = {role: (index + 1) * 10 for index, role in enumerate(role_order)}
+    ordered = sorted(references, key=lambda item: priority[item.role])
     compiled: list[CompiledReference] = []
     included_count = 0
     for reference in ordered:
@@ -74,7 +84,7 @@ def compile_references(
         compiled.append(
             CompiledReference(
                 **reference.model_dump(by_alias=True),
-                priority=REFERENCE_PRIORITY[reference.role],
+                priority=priority[reference.role],
                 included=included,
                 omittedReason=omitted_reason,
             )

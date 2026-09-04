@@ -349,35 +349,6 @@ class MediaPublicationRecord(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class EnvironmentPresetRecord(Base):
-    __tablename__ = "environment_presets"
-    __table_args__ = (
-        Index(
-            "uq_environment_presets_active",
-            "active",
-            unique=True,
-            postgresql_where=text("active = true"),
-        ),
-        {"schema": SCHEMA_NAME},
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source_project_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(f"{SCHEMA_NAME}.projects.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    asset_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-
 class ProjectSelectionRecord(Base):
     __tablename__ = "project_selections"
     __table_args__ = (
@@ -519,6 +490,20 @@ class ShotPlanVersionRecord(Base):
             unique=True,
             postgresql_where=text("active = true"),
         ),
+        Index(
+            "uq_shot_plan_versions_candidate",
+            "project_id",
+            unique=True,
+            postgresql_where=text("review_status = 'candidate'"),
+        ),
+        CheckConstraint(
+            "review_status IN ('accepted','candidate','rejected','superseded')",
+            name="ck_shot_plan_versions_review_status",
+        ),
+        CheckConstraint(
+            "NOT active OR review_status = 'accepted'",
+            name="ck_shot_plan_versions_active_accepted",
+        ),
         {"schema": SCHEMA_NAME},
     )
 
@@ -537,6 +522,17 @@ class ShotPlanVersionRecord(Base):
     director_prompt_revision: Mapped[str | None] = mapped_column(String(80))
     director_model: Mapped[str | None] = mapped_column(String(120))
     director_input_hash: Mapped[str | None] = mapped_column(String(64))
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="accepted")
+    producing_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="RESTRICT"),
+        unique=True,
+    )
+    base_shot_plan_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SCHEMA_NAME}.shot_plan_versions.id", ondelete="RESTRICT"),
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     total_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -5,7 +5,7 @@ import uuid
 from fastapi.testclient import TestClient
 
 from catflow.application.provider_config import ProviderRuntime
-from catflow.application.service import StudioService
+from catflow.application.service import PlannerMessageCommand, ProjectCreate, StudioService
 from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
 from catflow.interfaces.api import AppSettings, create_app
@@ -62,7 +62,9 @@ def test_openapi_exposes_one_goal_focused_api_surface() -> None:
         "/api/v1/projects/{project_id}/stories",
         "/api/v1/projects/{project_id}/stories/{story_version_id}/activate",
         "/api/v1/projects/{project_id}/shot-plans",
+        "/api/v1/projects/{project_id}/shot-plans/generations",
         "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/activate",
+        "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/reject",
         "/api/v1/projects/{project_id}/assets",
         "/api/v1/projects/{project_id}/assets/upload",
         "/api/v1/assets/{asset_id}",
@@ -319,6 +321,88 @@ def test_http_conflict_is_never_disguised_as_server_failure() -> None:
 
     assert response.status_code == 409
     assert response.json()["detail"] == "planner context revision changed"
+
+
+def test_shot_plan_idempotency_input_conflict_is_structured_and_creates_no_job() -> None:
+    service, client = _app_client()
+    project = service.create_project(
+        ProjectCreate(
+            title="雨天擦爪",
+            theme="雨天擦爪",
+            targetDurationSeconds=12,
+        )
+    )
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="做一个雨天擦爪的生活片段",
+            expectedContextRevision=1,
+            idempotencyKey="director-conflict-story",
+        ),
+    )
+    proposal = service.complete_planner_job(
+        planner_job.id,
+        LifeStoryProposalDraft(
+            title="雨天擦爪",
+            summary="孩子替回家的猫咪擦干爪子。",
+            body="孩子在玄关铺开毛巾。",
+            trigger="猫咪踩着湿脚印进门",
+            childAction="孩子铺开毛巾",
+            catResponse="猫咪把前爪放上毛巾",
+            visibleChange="脚印停止延伸",
+            warmEnding="猫咪靠着孩子打呼噜",
+            targetDurationSeconds=12,
+            dialoguePolicy="none",
+            environmentIntent="雨天玄关",
+        ),
+    )
+    service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(
+        project.id, role="environment", media_type="image", sha256="e" * 64
+    )
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+
+    first = client.post(
+        f"/api/v1/projects/{project.id}/shot-plans/generations",
+        json={"idempotencyKey": "director-input-conflict"},
+        headers=WRITE_HEADERS,
+    )
+    repeated = client.post(
+        f"/api/v1/projects/{project.id}/shot-plans/generations",
+        json={"idempotencyKey": "director-input-conflict"},
+        headers=WRITE_HEADERS,
+    )
+    count_before_conflict = len(service.list_shot_plan_generation_attempts(project.id))
+    event_cursor_before_conflict = service.workspace(project.id)["eventCursor"]
+    replacement_environment = service.register_asset(
+        project.id, role="environment", media_type="image", sha256="f" * 64
+    )
+    service.select_asset(
+        project.id, slot="environment", asset_id=replacement_environment.id
+    )
+
+    conflict = client.post(
+        f"/api/v1/projects/{project.id}/shot-plans/generations",
+        json={"idempotencyKey": "director-input-conflict"},
+        headers=WRITE_HEADERS,
+    )
+
+    assert first.status_code == 202
+    assert repeated.status_code == 202
+    assert repeated.json()["id"] == first.json()["id"]
+    assert conflict.status_code == 409
+    assert conflict.json() == {
+        "detail": {
+            "code": "idempotency_input_conflict",
+            "message": "当前生成输入已经变化，旧请求标识不能继续使用。",
+            "retryable": False,
+        }
+    }
+    assert len(service.list_shot_plan_generation_attempts(project.id)) == count_before_conflict
+    assert service.workspace(project.id)["eventCursor"] == event_cursor_before_conflict
+    assert first.json()["providerSubmissionStartedAt"] is None
+    assert first.json()["providerTaskId"] is None
+    assert first.json()["providerRequestId"] is None
 
 
 def test_spa_deep_links_fall_back_to_index_without_masking_api_404(tmp_path) -> None:  # type: ignore[no-untyped-def]

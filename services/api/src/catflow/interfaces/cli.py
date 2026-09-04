@@ -69,6 +69,7 @@ def serve(
             allowed_origins=runtime.allowed_origins,
             ark_api_key_configured=bool(os.environ.get("ARK_API_KEY", "").strip()),
             worker_ready_file=paths.work_root / "worker-ready.json",
+            worker_supervisor_file=paths.work_root / "worker-supervisor.json",
             ffmpeg_ready=_configured_tool_ready("FFMPEG_PATH"),
             ffprobe_ready=_configured_tool_ready("FFPROBE_PATH"),
         ),
@@ -147,3 +148,7 @@ def cleanup_purge_quarantine(run_id: str = typer.Option(..., "--run-id")) -> Non
         typer.echo(f"Purged {removed} quarantined files for cleanup run {run_id}")
     finally:
         engine.dispose()
+
+
+if __name__ == "__main__":
+    app()

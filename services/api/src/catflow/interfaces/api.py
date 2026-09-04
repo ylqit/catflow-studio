@@ -6,11 +6,11 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,7 +39,6 @@ from catflow.application.service import (
     CanonRevisionCreateCommand,
     EditCreateCommand,
     EditVersionDto,
-    EnvironmentPresetDto,
     ExportCommand,
     FinalSelectionCommand,
     FixedCanonRole,
@@ -61,11 +60,16 @@ from catflow.application.service import (
     SegmentRepairCreateCommand,
     SegmentRepairPreviewCommand,
     SegmentRepairPreviewDto,
+    ShotPlanActivationCommand,
+    ShotPlanGenerationAttemptDto,
     ShotPlanGenerationCommand,
+    ShotPlanGenerationMaterializeCommand,
+    ShotPlanGenerationRecoveryCommand,
     ShotPlanVersionDto,
     StoryCreateCommand,
     StoryVersionDto,
     StudioConflictError,
+    StudioIdempotencyInputConflictError,
     StudioInputChangedError,
     StudioNotFoundError,
     StudioService,
@@ -90,6 +94,7 @@ class AppSettings:
     ark_api_key_configured: bool = False
     worker_ready: bool = True
     worker_ready_file: Path | None = None
+    worker_supervisor_file: Path | None = None
     ffmpeg_ready: bool = True
     ffprobe_ready: bool = True
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost")
@@ -160,6 +165,21 @@ def create_app(
             },
         )
 
+    @app.exception_handler(StudioIdempotencyInputConflictError)
+    async def handle_idempotency_input_conflict(
+        _request: Request, exc: StudioIdempotencyInputConflictError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "code": exc.code,
+                    "message": exc.user_message,
+                    "retryable": exc.retryable,
+                }
+            },
+        )
+
     @app.exception_handler(StudioConflictError)
     async def handle_conflict(_request: Request, exc: StudioConflictError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
@@ -204,12 +224,14 @@ def create_app(
             segment_repair_blocked_reason = (
                 publisher_status.error or {"message": "object publisher is not ready"}
             )["message"]
+        worker = _worker_runtime(settings)
         return {
             "csrfToken": settings.csrf_token,
             "baseUrl": settings.base_url,
             "localOnly": True,
             "databaseReady": True,
-            "workerReady": _worker_ready(settings),
+            "workerReady": worker["ready"],
+            "worker": worker,
             "ffmpegReady": settings.ffmpeg_ready,
             "ffprobeReady": settings.ffprobe_ready,
             "objectPublisher": publisher_status.as_document(),
@@ -230,6 +252,21 @@ def create_app(
                 },
             },
         }
+
+    def require_worker_available() -> None:
+        if _worker_runtime(settings)["ready"]:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "worker_unavailable",
+                "message": (
+                    "后台任务暂时不可用，本次操作没有创建任务。"
+                    "系统正在尝试恢复，请稍后再试。"
+                ),
+                "retryable": True,
+            },
+        )
 
     @app.post("/api/v1/runtime/object-publisher/check")
     def check_object_publisher() -> dict[str, object]:
@@ -430,6 +467,7 @@ def create_app(
         "/api/v1/projects/{project_id}/planner/messages",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def planner_message(project_id: uuid.UUID, command: PlannerMessageCommand) -> JobDto:
         return service.enqueue_planner_message(project_id, command)
@@ -475,9 +513,42 @@ def create_app(
         "/api/v1/projects/{project_id}/shot-plans/generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def generate_shot_plan(project_id: uuid.UUID, command: ShotPlanGenerationCommand) -> JobDto:
         return service.create_shot_plan_generation_job(project_id, command)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/shot-plans/generations",
+        response_model=list[ShotPlanGenerationAttemptDto],
+    )
+    def shot_plan_generation_attempts(
+        project_id: uuid.UUID,
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> list[ShotPlanGenerationAttemptDto]:
+        return service.list_shot_plan_generation_attempts(project_id, limit=limit)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-plans/generations/{job_id}/recover",
+        response_model=ShotPlanVersionDto,
+    )
+    def recover_shot_plan_generation_result(
+        project_id: uuid.UUID,
+        job_id: uuid.UUID,
+        command: ShotPlanGenerationRecoveryCommand,
+    ) -> ShotPlanVersionDto:
+        return service.recover_shot_plan_generation_result(project_id, job_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-plans/generations/{job_id}/materialize",
+        response_model=ShotPlanVersionDto,
+    )
+    def materialize_shot_plan_generation_result(
+        project_id: uuid.UUID,
+        job_id: uuid.UUID,
+        command: ShotPlanGenerationMaterializeCommand,
+    ) -> ShotPlanVersionDto:
+        return service.materialize_shot_plan_generation_result(project_id, job_id, command)
 
     @app.post(
         "/api/v1/projects/{project_id}/shot-plans",
@@ -494,20 +565,24 @@ def create_app(
     def activate_shot_plan(
         project_id: uuid.UUID,
         shot_plan_version_id: uuid.UUID,
+        command: ShotPlanActivationCommand,
+    ) -> ShotPlanVersionDto:
+        return service.activate_shot_plan(project_id, shot_plan_version_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/reject",
+        response_model=ShotPlanVersionDto,
+    )
+    def reject_shot_plan(
+        project_id: uuid.UUID,
+        shot_plan_version_id: uuid.UUID,
         _payload: dict[str, Any] = Body(default={}),
     ) -> ShotPlanVersionDto:
-        return service.activate_shot_plan(project_id, shot_plan_version_id)
+        return service.reject_shot_plan(project_id, shot_plan_version_id)
 
     @app.get("/api/v1/projects/{project_id}/assets", response_model=list[AssetDto])
     def assets(project_id: uuid.UUID) -> list[AssetDto]:
         return service.list_assets(project_id)
-
-    @app.get(
-        "/api/v1/environment-presets",
-        response_model=list[EnvironmentPresetDto],
-    )
-    def environment_presets() -> list[EnvironmentPresetDto]:
-        return service.environment_presets()
 
     @app.get("/api/v1/assets/{asset_id}", response_model=AssetDto)
     def asset(asset_id: uuid.UUID) -> AssetDto:
@@ -517,6 +592,7 @@ def create_app(
         "/api/v1/projects/{project_id}/assets/{asset_id}/diagnose",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def diagnose_asset(
         project_id: uuid.UUID,
@@ -578,6 +654,7 @@ def create_app(
         "/api/v1/projects/{project_id}/asset-generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def create_asset_generation(project_id: uuid.UUID, command: AssetGenerationCommand) -> JobDto:
         return service.create_asset_generation_job(project_id, command)
@@ -595,6 +672,7 @@ def create_app(
         "/api/v1/projects/{project_id}/video-generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def create_video_job(project_id: uuid.UUID, command: GenerationCommand) -> JobDto:
         return service.create_video_job(project_id, command)
@@ -603,6 +681,7 @@ def create_app(
         "/api/v1/projects/{project_id}/video-diagnoses",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def diagnose_video(project_id: uuid.UUID, command: VideoDiagnosisCommand) -> JobDto:
         return service.create_video_diagnosis_job(project_id, command)
@@ -620,6 +699,7 @@ def create_app(
         "/api/v1/projects/{project_id}/video-edits",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def create_video_edit(project_id: uuid.UUID, command: SegmentRepairCreateCommand) -> JobDto:
         return service.create_video_repair_job(project_id, command)
@@ -683,7 +763,11 @@ def create_app(
     def cancel_job(job_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})) -> JobDto:
         return service.cancel_job(job_id)
 
-    @app.post("/api/v1/jobs/{job_id}/resume-storage", response_model=JobDto)
+    @app.post(
+        "/api/v1/jobs/{job_id}/resume-storage",
+        response_model=JobDto,
+        dependencies=[Depends(require_worker_available)],
+    )
     def resume_job_storage(
         job_id: uuid.UUID, _payload: dict[str, Any] = Body(default={})
     ) -> JobDto:
@@ -731,6 +815,7 @@ def create_app(
         "/api/v1/projects/{project_id}/exports",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def create_export(project_id: uuid.UUID, command: ExportCommand) -> JobDto:
         return service.create_export_job(project_id, command)
@@ -778,15 +863,100 @@ def create_app(
     return app
 
 
-def _worker_ready(settings: AppSettings) -> bool:
+def _worker_runtime(settings: AppSettings) -> dict[str, object]:
     if settings.worker_ready_file is None:
-        return settings.worker_ready
+        return {
+            "ready": settings.worker_ready,
+            "state": "ready" if settings.worker_ready else "offline",
+            "restartCount": 0,
+            "retryingAutomatically": False,
+        }
+
+    heartbeat = _read_json_document(settings.worker_ready_file)
+    supervisor = _read_json_document(settings.worker_supervisor_file)
+    heartbeat_at = None if heartbeat is None else _parse_timestamp(heartbeat.get("heartbeatAt"))
+    heartbeat_text = None if heartbeat is None else heartbeat.get("heartbeatAt")
+    worker_process_id = _integer_value(None if heartbeat is None else heartbeat.get("pid"))
+    heartbeat_is_fresh = bool(
+        heartbeat is not None
+        and heartbeat.get("schemaVersion") == 2
+        and heartbeat.get("provider") == "ark"
+        and heartbeat_at is not None
+        and (datetime.now(UTC) - heartbeat_at).total_seconds() <= 15
+        and worker_process_id is not None
+        and _process_exists(worker_process_id)
+    )
+
+    supervisor_process_id = _integer_value(
+        None if supervisor is None else supervisor.get("supervisorPid")
+    )
+    supervisor_is_live = bool(
+        supervisor is not None
+        and supervisor.get("schemaVersion") == 1
+        and supervisor_process_id is not None
+        and _process_exists(supervisor_process_id)
+    )
+    supervisor_state = None if supervisor is None else supervisor.get("state")
+    if heartbeat_is_fresh:
+        state = "ready"
+    elif heartbeat_at is not None and worker_process_id is not None and _process_exists(
+        worker_process_id
+    ):
+        state = "stale"
+    elif supervisor_is_live and supervisor_state in {"starting", "ready", "restarting"}:
+        state = "restarting"
+    elif supervisor_is_live and supervisor_state == "degraded":
+        state = "degraded"
+    else:
+        state = "offline"
+
+    document: dict[str, object] = {
+        "ready": heartbeat_is_fresh,
+        "state": state,
+        "restartCount": _integer_value(
+            None if supervisor is None else supervisor.get("restartCount")
+        )
+        or 0,
+        "retryingAutomatically": supervisor_is_live,
+    }
+    if isinstance(heartbeat_text, str) and heartbeat_at is not None:
+        document["lastHeartbeatAt"] = heartbeat_text
+    last_exit_at = None if supervisor is None else supervisor.get("lastExitAt")
+    if isinstance(last_exit_at, str) and _parse_timestamp(last_exit_at) is not None:
+        document["lastExitAt"] = last_exit_at
+    return document
+
+
+def _read_json_document(path: Path | None) -> dict[str, object] | None:
+    if path is None:
+        return None
     try:
-        document = json.loads(settings.worker_ready_file.read_text(encoding="utf-8"))
-        process_id = int(document["pid"])
-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-        return False
-    return _process_exists(process_id)
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _integer_value(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _process_exists(process_id: int) -> bool:

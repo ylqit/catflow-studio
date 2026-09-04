@@ -18,6 +18,7 @@ class TypedGatewayStub:
     def __init__(self) -> None:
         self.video_calls: list[dict[str, object]] = []
         self.segment_video_calls: list[SegmentVideoGenerationRequest] = []
+        self.image_calls: list[dict[str, object]] = []
 
     def plan_story(
         self, *, prompt: str, output_schema: dict[str, object]
@@ -42,8 +43,21 @@ class TypedGatewayStub:
         )
 
     def generate_image(
-        self, *, prompt: str, reference_paths: tuple[Path, ...]
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        reference_paths: tuple[Path, ...],
+        reference_roles: tuple[str, ...],
     ) -> ImageProviderResult:
+        self.image_calls.append(
+            {
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "reference_paths": reference_paths,
+                "reference_roles": reference_roles,
+            }
+        )
         return ImageProviderResult(
             url="https://ark.example/environment.png",
             response_id="image-response",
@@ -187,21 +201,37 @@ def test_ark_job_gateway_uses_the_professional_director_planning_boundary() -> N
 
 
 def test_ark_job_gateway_preserves_image_usage_and_request_id() -> None:
+    typed = TypedGatewayStub()
+    reference_ids = tuple(uuid.uuid4() for _ in range(3))
+    reference_paths = tuple(Path(f"reference-{index}.png") for index in range(3))
     gateway = ArkProviderJobGateway(
-        TypedGatewayStub(),
-        resolve_asset_paths=lambda _ids: (),
+        typed,
+        resolve_asset_paths=lambda ids: reference_paths if ids == reference_ids else (),
         extract_video_frames=lambda _asset_id, _seconds: (),
     )
 
     submission = gateway.submit(
         job_id=uuid.uuid4(),
         kind="generate_image",
-        frozen_input={"prompt": "共享环境", "referenceAssetIds": []},
+        frozen_input={
+            "prompt": "生成雨天玄关空场景",
+            "negativePrompt": "不得出现儿童、猫咪或其他动物",
+            "referenceAssetIds": [str(item) for item in reference_ids],
+            "referenceRoles": ["style_board", "episode_child", "episode_cat"],
+        },
     )
 
     assert submission.usage == {"generatedImages": 1, "totalTokens": 320}
     assert submission.result is not None
     assert submission.result["responseId"] == "image-response"
+    assert typed.image_calls == [
+        {
+            "prompt": "生成雨天玄关空场景",
+            "negative_prompt": "不得出现儿童、猫咪或其他动物",
+            "reference_paths": reference_paths,
+            "reference_roles": ("style_board", "episode_child", "episode_cat"),
+        }
+    ]
 
 
 def test_ark_job_gateway_poll_returns_downloadable_provider_result() -> None:

@@ -84,6 +84,58 @@ def test_ark_planning_gateway_uses_supported_json_object_mode_and_typed_metadata
     assert "json_schema" not in json.dumps(request, ensure_ascii=False)
 
 
+def test_director_planner_gets_a_larger_output_budget_without_changing_story_budget() -> None:
+    responses = Recorder(_response({"targetDurationSeconds": 12, "shots": []}))
+    gateway = ArkTypedGateway(_settings(), client=SimpleNamespace(responses=responses))
+
+    gateway.plan_story(prompt="生活故事", output_schema={"type": "object"})
+    gateway.plan_shots(prompt="专业分镜", output_schema={"type": "object"})
+
+    assert responses.calls[0]["max_output_tokens"] == 4000
+    assert responses.calls[1]["max_output_tokens"] == 8000
+
+
+def test_incomplete_structured_response_preserves_reason_usage_and_response_id() -> None:
+    response = SimpleNamespace(
+        id="response-incomplete-1",
+        model="planning-model",
+        status="incomplete",
+        incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+        usage=SimpleNamespace(input_tokens=321, output_tokens=8000, total_tokens=8321),
+    )
+    gateway = ArkTypedGateway(
+        _settings(), client=SimpleNamespace(responses=Recorder(response))
+    )
+
+    with pytest.raises(ProviderGatewayError) as captured:
+        gateway.plan_shots(prompt="专业分镜", output_schema={"type": "object"})
+
+    assert captured.value.incomplete_reason == "max_output_tokens"
+    assert captured.value.provider_status == "incomplete"
+    assert captured.value.max_output_tokens == 8000
+    assert captured.value.usage == {
+        "inputTokens": 321,
+        "outputTokens": 8000,
+        "totalTokens": 8321,
+    }
+    assert captured.value.request_id == "response-incomplete-1"
+    assert captured.value.as_error_document()["incompleteReason"] == "max_output_tokens"
+
+
+def test_structured_response_rejects_unsafe_nesting_before_business_validation() -> None:
+    nested: dict[str, object] = {"value": "leaf"}
+    for _ in range(45):
+        nested = {"next": nested}
+    gateway = ArkTypedGateway(
+        _settings(), client=SimpleNamespace(responses=Recorder(_response(nested)))
+    )
+
+    with pytest.raises(ProviderGatewayError) as captured:
+        gateway.plan_shots(prompt="专业分镜", output_schema={"type": "object"})
+
+    assert captured.value.code == "structured_output_too_deep"
+
+
 def test_ark_image_and_video_gateways_preserve_five_reference_order(
     tmp_path: Path,
 ) -> None:
@@ -110,7 +162,12 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
         for index, color in enumerate(("red", "green", "blue", "white", "gray"), 1)
     )
 
-    image_result = gateway.generate_image(prompt="共享环境", reference_paths=references[:1])
+    image_result = gateway.generate_image(
+        prompt="生成雨天玄关空场景",
+        negative_prompt="不得出现儿童、猫咪或其他动物",
+        reference_paths=references[:3],
+        reference_roles=("style_board", "episode_child", "episode_cat"),
+    )
     video_result = gateway.submit_video(
         prompt="12秒一人一猫生活短片",
         reference_paths=references,
@@ -135,6 +192,12 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
     image_request = image_recorder.calls[0]
     assert image_request["watermark"] is False
     assert image_request["response_format"] == "url"
+    assert image_request["optimize_prompt"] is False
+    assert image_request["prompt"] == (
+        "【生成目标】\n生成雨天玄关空场景\n\n"
+        "【必须避免】\n不得出现儿童、猫咪或其他动物"
+    )
+    assert len(image_request["image"]) == 3
     video_request = video_tasks.calls[0]
     assert video_request["duration"] == 12
     assert video_request["resolution"] == "480p"

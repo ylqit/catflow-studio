@@ -30,7 +30,6 @@ from catflow.application.service import (
     EditDecisionListDto,
     EditDecisionListV2,
     EditVersionDto,
-    EnvironmentPresetDto,
     FixedCanonRole,
     JobDto,
     JobEventDto,
@@ -50,6 +49,7 @@ from catflow.application.service import (
     StoryCreateCommand,
     StoryVersionDto,
     StudioConflictError,
+    StudioIdempotencyInputConflictError,
     StudioNotFoundError,
     ValidationRunDto,
     VideoRepairDto,
@@ -133,7 +133,6 @@ class MemoryStudioRepository:
         self._video_repairs: dict[uuid.UUID, VideoRepairDto] = {}
         self._repair_approvals_by_idempotency: dict[str, uuid.UUID] = {}
         self._validation_runs: dict[uuid.UUID, ValidationRunDto] = {}
-        self._environment_presets: list[EnvironmentPresetDto] = []
 
     def publish_rate_card(self, command: RateCardRevisionCreateCommand) -> RateCardRevisionDto:
         existing = next(
@@ -809,10 +808,34 @@ class MemoryStudioRepository:
             story.active = story.id == story_id
         return selected
 
-    def create_shot_plan(self, project_id: uuid.UUID, draft: ShotPlanDraft) -> ShotPlanVersionDto:
+    def create_shot_plan(
+        self,
+        project_id: uuid.UUID,
+        draft: ShotPlanDraft,
+        *,
+        active: bool = True,
+        review_status: str = "accepted",
+        producing_job_id: uuid.UUID | None = None,
+        base_shot_plan_version_id: uuid.UUID | None = None,
+    ) -> ShotPlanVersionDto:
         plans = self._shot_plans.setdefault(project_id, [])
-        for plan in plans:
-            plan.active = False
+        now = datetime.now(UTC)
+        if active:
+            for plan in plans:
+                plan.active = False
+        if review_status == "candidate":
+            for plan in plans:
+                if plan.review_status == "candidate":
+                    plan.review_status = "superseded"
+                    plan.decided_at = now
+        if active and base_shot_plan_version_id is not None:
+            for plan in plans:
+                if (
+                    plan.id == base_shot_plan_version_id
+                    and plan.review_status == "candidate"
+                ):
+                    plan.review_status = "superseded"
+                    plan.decided_at = now
         plan = ShotPlanVersionDto(
             id=uuid.uuid4(),
             projectId=project_id,
@@ -826,9 +849,13 @@ class MemoryStudioRepository:
             directorPromptRevision=draft.director_prompt_revision,
             directorModel=draft.director_model,
             directorInputHash=draft.director_input_hash,
-            active=True,
+            reviewStatus=review_status,
+            producingJobId=producing_job_id,
+            baseShotPlanVersionId=base_shot_plan_version_id,
+            decidedAt=now if review_status != "candidate" else None,
+            active=active,
             outdated=False,
-            createdAt=datetime.now(UTC),
+            createdAt=now,
         )
         plans.append(plan)
         return plan
@@ -842,14 +869,45 @@ class MemoryStudioRepository:
         return list(reversed(self._shot_plans.get(project_id, [])))
 
     def activate_shot_plan(
+        self,
+        project_id: uuid.UUID,
+        shot_plan_id: uuid.UUID,
+        *,
+        expected_active_shot_plan_version_id: uuid.UUID | None,
+    ) -> ShotPlanVersionDto:
+        plans = self._shot_plans.get(project_id, [])
+        selected = next((plan for plan in plans if plan.id == shot_plan_id), None)
+        if selected is None:
+            raise StudioNotFoundError("shot plan version not found")
+        if selected.active and selected.review_status == "accepted":
+            return selected
+        if selected.review_status in {"rejected", "superseded"}:
+            raise StudioConflictError("shot plan version cannot be activated")
+        current = next((plan for plan in plans if plan.active), None)
+        if (
+            expected_active_shot_plan_version_id is not None
+            and (current is None or current.id != expected_active_shot_plan_version_id)
+        ):
+            raise StudioConflictError("active shot plan version changed")
+        for plan in plans:
+            plan.active = plan.id == shot_plan_id
+        selected.review_status = "accepted"
+        selected.decided_at = datetime.now(UTC)
+        return selected
+
+    def reject_shot_plan(
         self, project_id: uuid.UUID, shot_plan_id: uuid.UUID
     ) -> ShotPlanVersionDto:
         plans = self._shot_plans.get(project_id, [])
         selected = next((plan for plan in plans if plan.id == shot_plan_id), None)
         if selected is None:
             raise StudioNotFoundError("shot plan version not found")
-        for plan in plans:
-            plan.active = plan.id == shot_plan_id
+        if selected.review_status == "rejected":
+            return selected
+        if selected.review_status != "candidate" or selected.active:
+            raise StudioConflictError("only a pending shot plan candidate can be rejected")
+        selected.review_status = "rejected"
+        selected.decided_at = datetime.now(UTC)
         return selected
 
     def register_asset(
@@ -903,7 +961,7 @@ class MemoryStudioRepository:
         if asset is None or asset.project_id != project_id:
             raise StudioNotFoundError("asset not found")
         if slot == "environment" and (asset.role != "environment" or asset.media_type != "image"):
-            raise StudioConflictError("shared environment must be an environment image")
+            raise StudioConflictError("project environment must be an environment image")
         selection = ProjectSelectionDto(
             id=uuid.uuid4(),
             projectId=project_id,
@@ -914,20 +972,6 @@ class MemoryStudioRepository:
             createdAt=datetime.now(UTC),
         )
         self._selections.setdefault(project_id, []).append(selection)
-        if slot == "environment":
-            self._environment_presets = [
-                preset.model_copy(update={"active": False}) for preset in self._environment_presets
-            ]
-            self._environment_presets.insert(
-                0,
-                EnvironmentPresetDto(
-                    id=uuid.uuid4(),
-                    sourceProjectId=project_id,
-                    asset=asset,
-                    active=True,
-                    createdAt=datetime.now(UTC),
-                ),
-            )
         return selection
 
     def current_selections(self, project_id: uuid.UUID) -> dict[str, AssetDto]:
@@ -939,16 +983,7 @@ class MemoryStudioRepository:
         for selection in self._selections.get(project_id, []):
             if selection.decision in {"selected", "approved"}:
                 current[selection.slot] = self._assets[selection.asset_id]
-        active_environment = next(
-            (preset.asset for preset in self._environment_presets if preset.active),
-            None,
-        )
-        if active_environment is not None:
-            current["environment"] = active_environment
         return current
-
-    def environment_presets(self) -> list[EnvironmentPresetDto]:
-        return list(self._environment_presets)
 
     def list_assets(self, project_id: uuid.UUID) -> list[AssetDto]:
         return sorted(
@@ -971,6 +1006,18 @@ class MemoryStudioRepository:
 
     def get_job(self, job_id: uuid.UUID) -> JobDto | None:
         return self._jobs.get(job_id)
+
+    def record_director_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto:
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise StudioNotFoundError("job not found")
+        provider_result = dict(job.provider_result or {})
+        provider_result["validation"] = validation
+        updated = job.model_copy(update={"provider_result": provider_result})
+        self._jobs[job_id] = updated
+        return updated
 
     def list_project_jobs(self, project_id: uuid.UUID) -> list[JobDto]:
         return sorted(
@@ -1199,7 +1246,9 @@ class MemoryStudioRepository:
             return None
         existing = self._jobs[existing_id]
         if existing.input_hash != input_hash:
-            raise StudioConflictError("idempotency key already belongs to different input")
+            raise StudioIdempotencyInputConflictError(
+                "idempotency key already belongs to different input"
+            )
         return existing
 
     def _record_event(

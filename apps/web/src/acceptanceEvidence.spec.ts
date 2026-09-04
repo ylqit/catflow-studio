@@ -13,6 +13,8 @@ function job(id: string, kind: JobDto["kind"], providerTaskId: string): JobDto {
     providerTaskId,
     frozenInput: {},
     resultAssetIds: [],
+    createdAt: "2026-09-01T00:00:00Z",
+    updatedAt: "2026-09-01T00:00:00Z",
   };
 }
 

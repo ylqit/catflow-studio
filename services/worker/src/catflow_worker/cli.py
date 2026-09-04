@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
+import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
 import typer
 from dotenv import load_dotenv
+from sqlalchemy.exc import SQLAlchemyError
 
 from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import StudioService
@@ -24,6 +29,7 @@ from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from .ark_gateway import ArkGatewaySettings, ArkTypedGateway
 from .ark_job_gateway import ArkProviderJobGateway
 from .ark_results import ArkResultLandingService
+from .lifecycle import WorkerHeartbeat, WorkerSupervisor
 from .media_jobs import LocalMediaJobExecutor
 from .project_posters import ProjectPosterGenerator
 from .provider_media import ProviderMediaDownloader
@@ -32,6 +38,7 @@ from .runtime_support import AssetMediaResolver, JobResultDispatcher
 from .segment_publisher import SegmentReferencePublisher
 
 app = typer.Typer(no_args_is_help=True)
+LOGGER = logging.getLogger(__name__)
 
 
 @app.command("run")
@@ -40,6 +47,10 @@ def run_worker(
     poll_interval: float = typer.Option(1.0, min=0.1, max=30),
 ) -> None:
     """Run the durable Ark and FFmpeg worker."""
+    _run_worker(once=once, poll_interval=poll_interval)
+
+
+def _run_worker(*, once: bool, poll_interval: float) -> None:
     project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
     load_dotenv(project_root / ".env", override=False)
     paths = RuntimePaths.from_env(project_root)
@@ -91,10 +102,11 @@ def run_worker(
         ffprobe_path=ffprobe_path,
         poster_generator=poster_generator,
     )
+    worker_id = f"{socket.gethostname()}-{os.getpid()}"
     worker = DurableJobWorker(
         sessions,
         provider,
-        worker_id=f"{socket.gethostname()}-{os.getpid()}",
+        worker_id=worker_id,
         result_handler=JobResultDispatcher(
             sessions,
             local=local_results,
@@ -102,29 +114,77 @@ def run_worker(
         ),
     )
     ready_file = paths.work_root / "worker-ready.json"
-    ready_file.parent.mkdir(parents=True, exist_ok=True)
-    temporary_ready_file = ready_file.with_suffix(".partial")
-    temporary_ready_file.write_text(
-        json.dumps({"pid": os.getpid(), "provider": provider_runtime.provider}),
-        encoding="utf-8",
-    )
-    temporary_ready_file.replace(ready_file)
     try:
-        next_publication_cleanup = time.monotonic()
-        while True:
-            if segment_publisher is not None and time.monotonic() >= next_publication_cleanup:
-                segment_publisher.delete_due()
-                next_publication_cleanup = time.monotonic() + 60
-            handled = worker.run_once()
-            if once:
-                return
-            if not handled:
-                time.sleep(poll_interval)
+        with WorkerHeartbeat(ready_file, worker_id=worker_id):
+            next_publication_cleanup = time.monotonic()
+            database_failures = 0
+            while True:
+                if segment_publisher is not None and time.monotonic() >= next_publication_cleanup:
+                    segment_publisher.delete_due()
+                    next_publication_cleanup = time.monotonic() + 60
+                try:
+                    handled = worker.run_once()
+                    database_failures = 0
+                except SQLAlchemyError:
+                    database_failures += 1
+                    retry_in = min(30.0, float(2 ** min(database_failures - 1, 5)))
+                    LOGGER.exception(
+                        "worker_database_connection_lost retry_in_seconds=%s",
+                        retry_in,
+                    )
+                    engine.dispose()
+                    if once:
+                        raise
+                    time.sleep(retry_in)
+                    continue
+                if once:
+                    return
+                if not handled:
+                    time.sleep(poll_interval)
     except KeyboardInterrupt:
         return
     finally:
-        ready_file.unlink(missing_ok=True)
         engine.dispose()
+
+
+@app.command("supervise")
+def supervise_worker(
+    poll_interval: float = typer.Option(1.0, min=0.1, max=30),
+) -> None:
+    """Keep the local durable worker running without changing queued jobs."""
+    project_root = Path(os.environ.get("CATFLOW_ROOT", Path.cwd())).resolve()
+    load_dotenv(project_root / ".env", override=False)
+    paths = RuntimePaths.from_env(project_root)
+
+    def start_child() -> subprocess.Popen[bytes]:
+        child_environment = None
+        executable = sys.executable
+        if os.name == "nt":
+            child_environment = os.environ.copy()
+            child_environment["__PYVENV_LAUNCHER__"] = sys.executable
+            executable = getattr(sys, "_base_executable", sys.executable)
+        return subprocess.Popen(
+            [
+                executable,
+                "-m",
+                "catflow_worker.cli",
+                "run",
+                "--poll-interval",
+                str(poll_interval),
+            ],
+            cwd=project_root,
+            env=child_environment,
+        )
+
+    stop = threading.Event()
+    supervisor = WorkerSupervisor(
+        paths.work_root / "worker-supervisor.json",
+        process_factory=start_child,
+    )
+    try:
+        supervisor.run(stop)
+    except KeyboardInterrupt:
+        stop.set()
 
 
 def _required_tool(name: str) -> Path:
@@ -157,3 +217,7 @@ def backfill_posters(
         typer.echo(json.dumps({"processed": processed, "failed": failed}))
     finally:
         engine.dispose()
+
+
+if __name__ == "__main__":
+    app()

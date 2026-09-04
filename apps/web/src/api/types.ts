@@ -20,6 +20,7 @@ export interface RuntimeBootstrapDto {
   localOnly: true;
   databaseReady: boolean;
   workerReady: boolean;
+  worker: WorkerRuntimeDto;
   ffmpegReady: boolean;
   ffprobeReady: boolean;
   objectPublisher: ObjectPublisherRuntimeDto;
@@ -39,6 +40,15 @@ export interface RuntimeBootstrapDto {
       maximumVideoReferences: number;
     };
   };
+}
+
+export interface WorkerRuntimeDto {
+  ready: boolean;
+  state: "ready" | "offline" | "stale" | "restarting" | "degraded";
+  lastHeartbeatAt?: string;
+  lastExitAt?: string;
+  restartCount: number;
+  retryingAutomatically: boolean;
 }
 
 export type FixedCanonRole = "episode_child" | "episode_cat" | "pair_scale" | "style_board";
@@ -134,6 +144,7 @@ export type ProjectLibraryBatchAction =
   | { action: "pin" | "unpin" | "archive" | "restore"; projectIds: string[] };
 
 export type GenerationInputSnapshotDto = components["schemas"]["GenerationInputSnapshotDto"];
+export type ImageGenerationInputSnapshotDto = components["schemas"]["ImageGenerationInputSnapshotDto"];
 
 export interface JobDto {
   id: string;
@@ -154,6 +165,7 @@ export interface JobDto {
   provider?: string;
   model?: string;
   providerTaskId?: string;
+  providerSubmissionStartedAt?: string | null;
   validationRunId?: string;
   videoRepairId?: string;
   expectedCostMicros?: number | null;
@@ -172,9 +184,12 @@ export interface JobDto {
   rateCardRevision?: string | null;
   providerRequestId?: string | null;
   inputSnapshot?: GenerationInputSnapshotDto | null;
+  imageInputSnapshot?: ImageGenerationInputSnapshotDto | null;
   frozenInput: Record<string, unknown>;
   resultAssetIds: string[];
-  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; timedOut?: boolean };
+  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; timedOut?: boolean; incompleteReason?: string; providerStatus?: string; maxOutputTokens?: number };
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface JobUsageDto {
@@ -313,14 +328,6 @@ export interface AssetDto {
   createdAt: string;
 }
 
-export interface EnvironmentPresetDto {
-  id: string;
-  sourceProjectId: string;
-  asset: AssetDto;
-  active: boolean;
-  createdAt: string;
-}
-
 export interface CanonProfileDto {
   id: string;
   version: number;
@@ -375,9 +382,54 @@ export interface ShotPlanVersionDto {
   directorPromptRevision?: string | null;
   directorModel?: string | null;
   directorInputHash?: string | null;
+  reviewStatus: "accepted" | "candidate" | "rejected" | "superseded";
+  producingJobId?: string | null;
+  baseShotPlanVersionId?: string | null;
+  decidedAt?: string | null;
   active: boolean;
   outdated: boolean;
   createdAt: string;
+}
+
+export interface ShotPlanGenerationAttemptDto {
+  jobId: string;
+  status: JobDto["status"];
+  storyVersionId: string;
+  baseShotPlanVersionId?: string | null;
+  resultShotPlanVersionId?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  actualUsage?: Record<string, unknown> | null;
+  actualCostMicros?: number | null;
+  billingStatus: NonNullable<JobDto["billingStatus"]>;
+  error?: {
+    code: string;
+    message: string;
+    incompleteReason?: string | null;
+    requestId?: string | null;
+    retryable: boolean;
+    submissionUnknown: boolean;
+  } | null;
+  result?: {
+    disposition: "candidate_ready" | "needs_input" | "invalid";
+    resultShotPlanVersionId?: string | null;
+    recoverable: boolean;
+    draft?: {
+      targetDurationSeconds?: number | null;
+      directorTreatment?: Record<string, unknown> | null;
+      shots: Array<Record<string, unknown>>;
+    } | null;
+    issues: Array<{
+      code: string;
+      severity: "fatal" | "blocking" | "warning";
+      path: string;
+      message: string;
+      suggestedAction?: string | null;
+      providerValue?: unknown;
+    }>;
+  } | null;
 }
 
 export interface GenerationPreviewDto {
@@ -416,6 +468,7 @@ export interface AssetGenerationPreviewDto {
   references: GenerationPreviewDto["references"];
   expectedCostMicros: number | null;
   costEstimateStatus: "priced" | "unmetered_paid";
+  imageInputSnapshot?: ImageGenerationInputSnapshotDto | null;
   warnings: Array<{ code: string; message: string }>;
 }
 

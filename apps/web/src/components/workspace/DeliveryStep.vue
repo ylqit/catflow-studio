@@ -5,11 +5,11 @@ import { api } from "../../api/client";
 import type { AssetDto, EditDecisionListDto, EditVersionDto, JobDto, WorkspaceDto } from "../../api/types";
 import { validateEditDecisionList } from "../../editing";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { errorPresentation, jobPresentation } from "../../presentation";
+import { backgroundTaskBlockedReason, errorPresentation, jobPresentation, type PaidModelRuntime } from "../../presentation";
 import { mountWebAvPreview, type WebAvPreviewController } from "../../webavPreview";
 import VideoRepairWorkspace from "./VideoRepairWorkspace.vue";
 
-const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
+const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const edits = ref<EditVersionDto[]>([]);
 const finalAssets = ref<AssetDto[]>([]);
@@ -24,6 +24,9 @@ const webavReady = ref(false);
 const durationMs = computed(() => props.workspace.project.targetDurationSeconds * 1000);
 const controls = reactive({ startMs: 0, endMs: durationMs.value, audioPolicy: "native_fades" as const, transition: "fade" as const, transitionMs: 250 });
 const exportJobPresentation = computed(() => exportJob.value ? jobPresentation(exportJob.value.status) : null);
+const exportBlockedReason = computed(() => (
+  props.runtime === undefined ? "" : backgroundTaskBlockedReason(props.runtime)
+));
 
 function edl(): EditDecisionListDto | null {
   const video = props.workspace.selections.video;
@@ -80,7 +83,7 @@ async function saveEdit() {
 }
 
 async function exportVideo() {
-  if (!savedEdit.value) return;
+  if (!savedEdit.value || exportBlockedReason.value) return;
   const scope = `export:${props.projectId}`;
   exportJob.value = await api.createExport(props.projectId, {
     editVersionId: savedEdit.value.id,
@@ -135,7 +138,7 @@ onBeforeUnmount(() => webavController.value?.destroy());
         <details class="editor-technical"><summary>技术详情</summary><p>源视频校验值</p><code>{{ workspace.selections.video.sha256 }}</code><p>预览由浏览器完成，正式视频在后台渲染并保存。</p></details>
       </div>
       <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
-      <footer><span>保存后会保留当前版本，导出不会覆盖原视频。</span><button class="secondary" :disabled="saving" @click="saveEdit">{{ saving ? "保存中" : "保存剪辑版本" }}</button><button class="primary" :disabled="!savedEdit" @click="exportVideo">导出视频</button></footer>
+      <footer><span>{{ exportBlockedReason || "保存后会保留当前版本，导出不会覆盖原视频。" }}</span><button class="secondary" :disabled="saving" @click="saveEdit">{{ saving ? "保存中" : "保存剪辑版本" }}</button><button class="primary" :disabled="!savedEdit || Boolean(exportBlockedReason)" @click="exportVideo">导出视频</button></footer>
     </div>
     <aside class="delivery-side">
       <div class="card version-card"><p class="eyebrow">视频版本</p><h2>剪辑记录</h2><div v-if="!edits.length" class="empty">保存后会产生第一个版本。</div><article v-for="edit in edits" :key="edit.id"><b>版本 {{ edit.revision }}</b><span class="pill" :class="{ good: edit.status === 'approved' }">{{ edit.status === "approved" ? "已采用" : edit.status === "rendered" ? "已导出" : "草稿" }}</span><small>{{ new Date(edit.createdAt).toLocaleString("zh-CN") }}</small></article></div>

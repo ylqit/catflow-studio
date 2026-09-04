@@ -33,7 +33,6 @@ TABLE_ORDER = (
     "shot_plan_versions",
     "jobs",
     "assets",
-    "environment_presets",
     "project_selections",
     "job_events",
     "edit_versions",

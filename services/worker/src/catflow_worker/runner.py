@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import case, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from catflow.application.gateways import ProviderGatewayError
 from catflow.domain.billing import RateCardItem, calculate_usage_cost
 from catflow.infrastructure.models import JobEventRecord, JobRecord, VideoRepairRecord
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ProviderPoll(BaseModel):
@@ -49,6 +53,24 @@ class JobResultHandler(Protocol):
     def store_result(self, job_id: uuid.UUID) -> None: ...
 
 
+class JobResultError(RuntimeError):
+    """A classified result-validation failure safe to persist on the owning Job."""
+
+    def __init__(self, *, code: str, message: str, detail: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.detail = detail
+
+    def as_error_document(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "retryable": False,
+            "detail": self.detail,
+        }
+
+
 class DurableJobWorker:
     def __init__(
         self,
@@ -80,26 +102,43 @@ class DurableJobWorker:
             frozen_input,
         ) = claimed
 
-        if status == "cancel_requested":
-            self._cancel(job_id, provider_task_id)
-        elif status == "storing" or (kind == "render_export" and status == "submitting"):
-            self._store_local_result(job_id)
-        elif status == "submitting" and provider_task_id is not None:
-            self._mark_submitted(job_id)
-        elif status == "submitting" and submission_started_at is not None:
-            self._mark_submission_unknown(
+        try:
+            if status == "cancel_requested":
+                self._cancel(job_id, provider_task_id)
+            elif status == "storing" or (kind == "render_export" and status == "submitting"):
+                self._store_local_result(job_id)
+            elif status == "submitting" and provider_task_id is not None:
+                self._mark_submitted(job_id)
+            elif status == "submitting" and submission_started_at is not None:
+                self._mark_submission_unknown(
+                    job_id,
+                    ProviderGatewayError(
+                        code="provider_submission_interrupted",
+                        message="provider submission started before the worker restarted",
+                        retryable=False,
+                        submission_unknown=True,
+                    ),
+                )
+            elif status == "submitting":
+                self._submit(job_id, kind, frozen_input)
+            elif status in {"submitted", "polling"}:
+                self._poll(job_id, provider_task_id)
+        except SQLAlchemyError:
+            LOGGER.exception(
+                "worker_database_error job_id=%s kind=%s worker_id=%s",
                 job_id,
-                ProviderGatewayError(
-                    code="provider_submission_interrupted",
-                    message="provider submission started before the worker restarted",
-                    retryable=False,
-                    submission_unknown=True,
-                ),
+                kind,
+                self._worker_id,
             )
-        elif status == "submitting":
-            self._submit(job_id, frozen_input)
-        elif status in {"submitted", "polling"}:
-            self._poll(job_id, provider_task_id)
+            raise
+        except Exception:
+            LOGGER.exception(
+                "worker_job_iteration_failed job_id=%s kind=%s worker_id=%s",
+                job_id,
+                kind,
+                self._worker_id,
+            )
+            self._reconcile_unexpected_failure(job_id, kind)
         return True
 
     def _claim(
@@ -160,8 +199,12 @@ class DurableJobWorker:
                 dict(job.frozen_input_json),
             )
 
-    def _submit(self, job_id: uuid.UUID, frozen_input: dict[str, object]) -> None:
-        kind = self._job_kind(job_id)
+    def _submit(
+        self,
+        job_id: uuid.UUID,
+        kind: str,
+        frozen_input: dict[str, object],
+    ) -> None:
         prepare = getattr(self._provider, "prepare_submission", None)
         if callable(prepare):
             try:
@@ -177,7 +220,7 @@ class DurableJobWorker:
                     retryable=False,
                 )
                 return
-        if not self._begin_submission(job_id):
+        if not self._begin_submission(job_id, kind=kind):
             return
         try:
             submission = self._provider.submit(
@@ -235,13 +278,6 @@ class DurableJobWorker:
             self._release(job)
             self._add_event(session, job, "job.submitted")
 
-    def _job_kind(self, job_id: uuid.UUID) -> str:
-        with self._sessions() as session:
-            job = session.get(JobRecord, job_id)
-            if job is None:
-                raise ValueError("job not found")
-            return job.kind
-
     def _persist_immediate_result(self, job_id: uuid.UUID, submission: ProviderSubmission) -> None:
         with self._sessions.begin() as session:
             job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
@@ -260,10 +296,18 @@ class DurableJobWorker:
         if self._result_handler is not None:
             self._store_local_result(job_id)
 
-    def _begin_submission(self, job_id: uuid.UUID) -> bool:
+    def _begin_submission(self, job_id: uuid.UUID, *, kind: str | None = None) -> bool:
         with self._sessions.begin() as session:
             job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
-            if job is None or job.status != "submitting" or job.provider_task_id is not None:
+            if job is None:
+                LOGGER.warning(
+                    "claimed_job_disappeared job_id=%s kind=%s worker_id=%s stage=begin_submission",
+                    job_id,
+                    kind or "unknown",
+                    self._worker_id,
+                )
+                return False
+            if job.status != "submitting" or job.provider_task_id is not None:
                 return False
             if job.provider_submission_started_at is not None:
                 return False
@@ -271,6 +315,66 @@ class DurableJobWorker:
             job.updated_at = job.provider_submission_started_at
             session.flush()
             return True
+
+    def _reconcile_unexpected_failure(self, job_id: uuid.UUID, kind: str) -> None:
+        with self._sessions.begin() as session:
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
+            if job is None:
+                LOGGER.warning(
+                    "claimed_job_disappeared job_id=%s kind=%s worker_id=%s stage=reconcile",
+                    job_id,
+                    kind,
+                    self._worker_id,
+                )
+                return
+
+            now = datetime.now(UTC)
+            if job.provider == "local_ffmpeg":
+                job.status = "failed"
+                job.error_json = {
+                    "code": "local_worker_internal_error",
+                    "message": "Local media processing stopped unexpectedly.",
+                    "retryable": True,
+                }
+                self._release(job)
+                job.updated_at = now
+                self._add_event(session, job, "job.failed")
+                return
+
+            if job.provider_task_id is not None:
+                if job.status == "submitting":
+                    job.status = "submitted"
+                    self._add_event(session, job, "job.submitted")
+                self._release(job)
+                job.updated_at = now
+                return
+
+            if job.provider_submission_started_at is not None:
+                job.status = "submission_unknown"
+                job.error_json = {
+                    "code": "worker_internal_error_after_submission",
+                    "message": "The provider submission state could not be confirmed.",
+                    "retryable": False,
+                    "submissionUnknown": True,
+                }
+                self._release(job)
+                job.updated_at = now
+                self._add_event(session, job, "job.submission_unknown")
+                return
+
+            job.status = "failed"
+            job.error_json = {
+                "code": "worker_internal_error_before_submission",
+                "message": "The background task stopped before provider submission.",
+                "retryable": True,
+            }
+            if job.video_repair_id is not None:
+                repair = session.get(VideoRepairRecord, job.video_repair_id)
+                if repair is not None and repair.status == "generating":
+                    repair.status = "failed"
+            self._release(job)
+            job.updated_at = now
+            self._add_event(session, job, "job.failed")
 
     def _mark_submission_unknown(self, job_id: uuid.UUID, error: ProviderGatewayError) -> None:
         with self._sessions.begin() as session:
@@ -344,6 +448,9 @@ class DurableJobWorker:
             return
         try:
             self._result_handler.store_result(job_id)
+        except JobResultError as exc:
+            self._fail_with_document(job_id, exc.as_error_document())
+            return
         except Exception as exc:
             self._fail_with_message(
                 job_id,
@@ -407,6 +514,12 @@ class DurableJobWorker:
                 return
             job.status = "failed"
             job.error_json = error
+            usage = error.get("providerUsage")
+            if isinstance(usage, dict):
+                _record_provider_usage(job, usage=usage, provider_result=None)
+            request_id = error.get("requestId")
+            if isinstance(request_id, str) and request_id:
+                job.provider_request_id = request_id
             if job.video_repair_id is not None:
                 repair = session.get(VideoRepairRecord, job.video_repair_id)
                 if repair is not None and repair.status == "generating":

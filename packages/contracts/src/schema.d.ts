@@ -477,10 +477,45 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Shot Plan Generation Attempts */
+        get: operations["shot_plan_generation_attempts_api_v1_projects__project_id__shot_plans_generations_get"];
         put?: never;
         /** Generate Shot Plan */
         post: operations["generate_shot_plan_api_v1_projects__project_id__shot_plans_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-plans/generations/{job_id}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover Shot Plan Generation Result */
+        post: operations["recover_shot_plan_generation_result_api_v1_projects__project_id__shot_plans_generations__job_id__recover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-plans/generations/{job_id}/materialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Materialize Shot Plan Generation Result */
+        post: operations["materialize_shot_plan_generation_result_api_v1_projects__project_id__shot_plans_generations__job_id__materialize_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -504,6 +539,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Shot Plan */
+        post: operations["reject_shot_plan_api_v1_projects__project_id__shot_plans__shot_plan_version_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/assets": {
         parameters: {
             query?: never;
@@ -513,23 +565,6 @@ export interface paths {
         };
         /** Assets */
         get: operations["assets_api_v1_projects__project_id__assets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/environment-presets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Environment Presets */
-        get: operations["environment_presets_api_v1_environment_presets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1036,6 +1071,7 @@ export interface components {
              * @enum {string}
              */
             costEstimateStatus: "priced" | "unmetered_paid";
+            imageInputSnapshot?: components["schemas"]["ImageGenerationInputSnapshotDto"] | null;
             /** Warnings */
             warnings?: {
                 [key: string]: string;
@@ -1164,6 +1200,27 @@ export interface components {
             /** Warmending */
             warmEnding: string;
         };
+        /** DirectorPlanDraftDto */
+        DirectorPlanDraftDto: {
+            /** Targetdurationseconds */
+            targetDurationSeconds?: number | null;
+            /** Directortreatment */
+            directorTreatment?: {
+                [key: string]: unknown;
+            } | null;
+            /** Shots */
+            shots?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** DirectorPlanPayload */
+        DirectorPlanPayload: {
+            /** Targetdurationseconds */
+            targetDurationSeconds: number;
+            directorTreatment: components["schemas"]["DirectorStoryTreatment"];
+            /** Shots */
+            shots: components["schemas"]["ShotSpec"][];
+        };
         /** DirectorStoryTreatment */
         DirectorStoryTreatment: {
             /** Logline */
@@ -1185,6 +1242,24 @@ export interface components {
             endingImage: string;
             /** Feasibilitywarnings */
             feasibilityWarnings?: components["schemas"]["GenerationRisk"][];
+        };
+        /** DirectorValidationIssueDto */
+        DirectorValidationIssueDto: {
+            /** Code */
+            code: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "fatal" | "blocking" | "warning";
+            /** Path */
+            path: string;
+            /** Message */
+            message: string;
+            /** Suggestedaction */
+            suggestedAction?: string | null;
+            /** Providervalue */
+            providerValue?: unknown | null;
         };
         /** EditAudioV2 */
         EditAudioV2: {
@@ -1408,27 +1483,6 @@ export interface components {
             /** Resolution */
             resolution: string;
         };
-        /** EnvironmentPresetDto */
-        EnvironmentPresetDto: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Sourceprojectid
-             * Format: uuid
-             */
-            sourceProjectId: string;
-            asset: components["schemas"]["AssetDto"];
-            /** Active */
-            active: boolean;
-            /**
-             * Createdat
-             * Format: date-time
-             */
-            createdAt: string;
-        };
         /** ExportCommand */
         ExportCommand: {
             /**
@@ -1630,6 +1684,57 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
+        /** ImageGenerationInputSnapshotDto */
+        ImageGenerationInputSnapshotDto: {
+            /**
+             * Schemaversion
+             * @constant
+             */
+            schemaVersion: 1;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "preview" | "submitted";
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "environment";
+            /**
+             * Subjectpolicy
+             * @constant
+             */
+            subjectPolicy: "empty_scene";
+            /**
+             * Sourcestoryversionid
+             * Format: uuid
+             */
+            sourceStoryVersionId: string;
+            /** Environmentintent */
+            environmentIntent: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /** Prompt */
+            prompt: string;
+            /** Negativeprompt */
+            negativePrompt: string;
+            /** References */
+            references: components["schemas"]["GenerationInputReferenceDto"][];
+            /** Inputhash */
+            inputHash: string;
+            /** Promptcompilerrevision */
+            promptCompilerRevision: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
         /** JobDto */
         JobDto: {
             /**
@@ -1704,6 +1809,7 @@ export interface components {
             /** Providerrequestid */
             providerRequestId?: string | null;
             inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
+            imageInputSnapshot?: components["schemas"]["ImageGenerationInputSnapshotDto"] | null;
             /** Frozeninput */
             frozenInput: {
                 [key: string]: unknown;
@@ -2528,6 +2634,13 @@ export interface components {
              */
             assetId: string;
         };
+        /** ShotPlanActivationCommand */
+        ShotPlanActivationCommand: {
+            /** Expectedactiveshotplanversionid */
+            expectedActiveShotPlanVersionId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
         /** ShotPlanDraft */
         ShotPlanDraft: {
             /**
@@ -2537,6 +2650,10 @@ export interface components {
             sourceStoryVersionId: string;
             /** Sourceselectionhash */
             sourceSelectionHash: string;
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId?: string | null;
+            /** Expectedactiveshotplanversionid */
+            expectedActiveShotPlanVersionId?: string | null;
             clip: components["schemas"]["LifeClipSpec"];
             /** Shots */
             shots: components["schemas"]["ShotSpec"][];
@@ -2548,10 +2665,106 @@ export interface components {
             /** Directorinputhash */
             directorInputHash?: string | null;
         };
+        /** ShotPlanGenerationAttemptDto */
+        ShotPlanGenerationAttemptDto: {
+            /**
+             * Jobid
+             * Format: uuid
+             */
+            jobId: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "submitting" | "submitted" | "polling" | "storing" | "succeeded" | "failed" | "cancel_requested" | "cancelled" | "submission_unknown";
+            /**
+             * Storyversionid
+             * Format: uuid
+             */
+            storyVersionId: string;
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId?: string | null;
+            /** Resultshotplanversionid */
+            resultShotPlanVersionId?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Actualusage */
+            actualUsage?: {
+                [key: string]: unknown;
+            } | null;
+            /** Actualcostmicros */
+            actualCostMicros?: number | null;
+            /**
+             * Billingstatus
+             * @enum {string}
+             */
+            billingStatus: "pending" | "usage_reported" | "calculated" | "unpriced" | "provider_adjusted";
+            error?: components["schemas"]["ShotPlanGenerationAttemptErrorDto"] | null;
+            result?: components["schemas"]["ShotPlanGenerationResultDto"] | null;
+        };
+        /** ShotPlanGenerationAttemptErrorDto */
+        ShotPlanGenerationAttemptErrorDto: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Incompletereason */
+            incompleteReason?: string | null;
+            /** Requestid */
+            requestId?: string | null;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /**
+             * Submissionunknown
+             * @default false
+             */
+            submissionUnknown: boolean;
+        };
         /** ShotPlanGenerationCommand */
         ShotPlanGenerationCommand: {
             /** Idempotencykey */
             idempotencyKey: string;
+        };
+        /** ShotPlanGenerationMaterializeCommand */
+        ShotPlanGenerationMaterializeCommand: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+            payload: components["schemas"]["DirectorPlanPayload"];
+        };
+        /** ShotPlanGenerationRecoveryCommand */
+        ShotPlanGenerationRecoveryCommand: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** ShotPlanGenerationResultDto */
+        ShotPlanGenerationResultDto: {
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "candidate_ready" | "needs_input" | "invalid";
+            /** Resultshotplanversionid */
+            resultShotPlanVersionId?: string | null;
+            /** Recoverable */
+            recoverable: boolean;
+            draft?: components["schemas"]["DirectorPlanDraftDto"] | null;
+            /** Issues */
+            issues?: components["schemas"]["DirectorValidationIssueDto"][];
         };
         /** ShotPlanVersionDto */
         ShotPlanVersionDto: {
@@ -2589,6 +2802,18 @@ export interface components {
             directorModel?: string | null;
             /** Directorinputhash */
             directorInputHash?: string | null;
+            /**
+             * Reviewstatus
+             * @default accepted
+             * @enum {string}
+             */
+            reviewStatus: "accepted" | "candidate" | "rejected" | "superseded";
+            /** Producingjobid */
+            producingJobId?: string | null;
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId?: string | null;
+            /** Decidedat */
+            decidedAt?: string | null;
             /** Active */
             active: boolean;
             /**
@@ -3970,6 +4195,39 @@ export interface operations {
             };
         };
     };
+    shot_plan_generation_attempts_api_v1_projects__project_id__shot_plans_generations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlanGenerationAttemptDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     generate_shot_plan_api_v1_projects__project_id__shot_plans_generations_post: {
         parameters: {
             query?: never;
@@ -4005,7 +4263,115 @@ export interface operations {
             };
         };
     };
+    recover_shot_plan_generation_result_api_v1_projects__project_id__shot_plans_generations__job_id__recover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotPlanGenerationRecoveryCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    materialize_shot_plan_generation_result_api_v1_projects__project_id__shot_plans_generations__job_id__materialize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotPlanGenerationMaterializeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     activate_shot_plan_api_v1_projects__project_id__shot_plans__shot_plan_version_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                shot_plan_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotPlanActivationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_shot_plan_api_v1_projects__project_id__shot_plans__shot_plan_version_id__reject_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4070,26 +4436,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    environment_presets_api_v1_environment_presets_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvironmentPresetDto"][];
                 };
             };
         };

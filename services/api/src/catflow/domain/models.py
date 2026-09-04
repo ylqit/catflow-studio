@@ -78,7 +78,9 @@ class BlockingDesign(ContractModel):
     initial_state: str = Field(alias="initialState", min_length=1, max_length=300)
     movement_path: str = Field(alias="movementPath", min_length=1, max_length=500)
     end_state: str = Field(alias="endState", min_length=1, max_length=300)
-    micro_motions: list[str] = Field(alias="microMotions", default_factory=list, max_length=3)
+    # Three micro-motions are the recommended execution density, not a data boundary.
+    # Provider results keep every returned item and surface dense lists as production advice.
+    micro_motions: list[str] = Field(alias="microMotions", default_factory=list)
 
 
 class PhysicalChangeDesign(ContractModel):
@@ -101,9 +103,9 @@ class LightingDesign(ContractModel):
 
 
 class ShotSoundDesign(ContractModel):
-    ambience: list[str] = Field(default_factory=list, max_length=3)
-    object_effects: list[str] = Field(alias="objectEffects", default_factory=list, max_length=3)
-    movement_effects: list[str] = Field(alias="movementEffects", default_factory=list, max_length=3)
+    ambience: list[str] = Field(default_factory=list)
+    object_effects: list[str] = Field(alias="objectEffects", default_factory=list)
+    movement_effects: list[str] = Field(alias="movementEffects", default_factory=list)
     music_intent: str = Field(alias="musicIntent", min_length=1, max_length=240)
     dialogue: str | None = Field(default=None, max_length=240)
 
@@ -134,7 +136,7 @@ class ShotSpec(ContractModel):
     sound: ShotSoundDesign | None = None
     director_intent: str | None = Field(alias="directorIntent", default=None, max_length=500)
     generation_risks: list[GenerationRisk] = Field(
-        alias="generationRisks", default_factory=list, max_length=8
+        alias="generationRisks", default_factory=list
     )
 
     @model_validator(mode="after")
@@ -208,6 +210,12 @@ def _validate_professional_semantics(shots: list[ShotSpec]) -> None:
 class ShotPlanDraft(ContractModel):
     source_story_version_id: uuid.UUID = Field(alias="sourceStoryVersionId")
     source_selection_hash: str = Field(alias="sourceSelectionHash", pattern=r"^[a-f0-9]{64}$")
+    base_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="baseShotPlanVersionId", default=None
+    )
+    expected_active_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="expectedActiveShotPlanVersionId", default=None
+    )
     clip: LifeClipSpec
     shots: list[ShotSpec] = Field(min_length=1, max_length=4)
     director_treatment: DirectorStoryTreatment | None = Field(
@@ -269,7 +277,7 @@ class DirectorStoryTreatment(ContractModel):
     sound_intent: str = Field(alias="soundIntent", min_length=1, max_length=300)
     ending_image: str = Field(alias="endingImage", min_length=1, max_length=400)
     feasibility_warnings: list[GenerationRisk] = Field(
-        alias="feasibilityWarnings", default_factory=list, max_length=8
+        alias="feasibilityWarnings", default_factory=list
     )
 
 
@@ -339,7 +347,14 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
         if sum(shot.duration_frames or 0 for shot in self.shots) != self.clip.duration_seconds * 24:
             raise ValueError("professional shot frames must equal the target duration at 24 fps")
         _validate_professional_semantics(self.shots)
-        serialized = self.model_dump_json(by_alias=True, ensure_ascii=False)
+        safety_content = self.model_dump(mode="json", by_alias=True)
+        treatment = safety_content.get("directorTreatment")
+        if isinstance(treatment, dict):
+            treatment.pop("feasibilityWarnings", None)
+        for shot in safety_content.get("shots", []):
+            if isinstance(shot, dict):
+                shot.pop("generationRisks", None)
+        serialized = str(safety_content)
         prohibited = ("8–9岁", "8-9岁", "青少年脸型", "成人化身体", "成人化表情")
         if any(term in serialized for term in prohibited):
             raise ValueError("professional shot plan contains an adult or older-child description")

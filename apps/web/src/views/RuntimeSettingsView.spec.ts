@@ -28,6 +28,13 @@ vi.mock("../api/client", () => ({
       localOnly: true,
       databaseReady: true,
       workerReady: true,
+      worker: {
+        ready: true,
+        state: "ready",
+        lastHeartbeatAt: "2026-09-03T00:00:00Z",
+        restartCount: 1,
+        retryingAutomatically: true,
+      },
       ffmpegReady: true,
       ffprobeReady: true,
       objectPublisher: {

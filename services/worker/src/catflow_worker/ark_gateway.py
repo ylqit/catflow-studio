@@ -17,6 +17,7 @@ from catflow.application.gateways import (
     VideoPollResult,
     VideoSubmissionResult,
 )
+from catflow.application.image_generation import compile_provider_image_prompt
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,7 @@ class ArkTypedGateway:
             prompt=prompt,
             image_paths=(),
             output_schema=output_schema,
+            max_output_tokens=4000,
         )
 
     def plan_shots(
@@ -93,6 +95,7 @@ class ArkTypedGateway:
             prompt=prompt,
             image_paths=(),
             output_schema=output_schema,
+            max_output_tokens=8000,
         )
 
     def diagnose(
@@ -109,18 +112,30 @@ class ArkTypedGateway:
             prompt=prompt,
             image_paths=image_paths,
             output_schema=output_schema,
+            max_output_tokens=4000,
         )
 
     def generate_image(
-        self, *, prompt: str, reference_paths: tuple[Path, ...]
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        reference_paths: tuple[Path, ...],
+        reference_roles: tuple[str, ...],
     ) -> ImageProviderResult:
+        if len(reference_paths) != len(reference_roles):
+            raise ValueError("image reference paths and roles must have the same length")
         request: dict[str, object] = {
             "model": self._settings.image_model,
-            "prompt": prompt,
+            "prompt": compile_provider_image_prompt(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+            ),
             "response_format": "url",
             "size": "2K",
             "watermark": False,
             "output_format": "png",
+            "optimize_prompt": False,
             "timeout": self._settings.request_timeout_seconds,
         }
         if reference_paths:
@@ -336,6 +351,7 @@ class ArkTypedGateway:
         prompt: str,
         image_paths: tuple[Path, ...],
         output_schema: dict[str, object],
+        max_output_tokens: int,
     ) -> StructuredProviderResult:
         input_content: object = "只返回符合 Schema 的 JSON 对象。"
         if image_paths:
@@ -368,23 +384,40 @@ class ArkTypedGateway:
                 input=input_content,
                 text={"format": text_format},
                 temperature=0.2,
-                max_output_tokens=4000,
+                max_output_tokens=max_output_tokens,
                 thinking={"type": "disabled"},
                 store=False,
                 timeout=self._settings.request_timeout_seconds,
             )
         except Exception as exc:
             raise _provider_error(exc, submission=True) from exc
-        if getattr(response, "status", None) != "completed":
+        provider_status = _optional_string(getattr(response, "status", None))
+        if provider_status != "completed":
+            incomplete_details = getattr(response, "incomplete_details", None)
             raise ProviderGatewayError(
                 code="response_not_completed",
-                message=f"Ark response status is {getattr(response, 'status', None)!r}",
+                message=f"Ark response status is {provider_status!r}",
+                retryable=False,
+                submission_unknown=False,
+                request_id=_optional_string(getattr(response, "id", None)),
+                provider_status=provider_status,
+                incomplete_reason=_optional_string(
+                    getattr(incomplete_details, "reason", None)
+                ),
+                max_output_tokens=max_output_tokens,
+                usage=_usage_document(getattr(response, "usage", None)),
+            )
+        response_text = _response_text(response)
+        if len(response_text.encode("utf-8")) > 2 * 1024 * 1024:
+            raise ProviderGatewayError(
+                code="structured_output_too_large",
+                message="Ark structured output exceeded the 2 MiB safety limit",
                 retryable=False,
                 submission_unknown=False,
                 request_id=_optional_string(getattr(response, "id", None)),
             )
         try:
-            payload = json.loads(_response_text(response))
+            payload = json.loads(response_text)
         except (TypeError, json.JSONDecodeError) as exc:
             raise ProviderGatewayError(
                 code="invalid_structured_output",
@@ -397,6 +430,14 @@ class ArkTypedGateway:
             raise ProviderGatewayError(
                 code="invalid_structured_output",
                 message="Ark structured output must be a JSON object",
+                retryable=False,
+                submission_unknown=False,
+                request_id=_optional_string(getattr(response, "id", None)),
+            )
+        if _json_depth(payload) > 40:
+            raise ProviderGatewayError(
+                code="structured_output_too_deep",
+                message="Ark structured output exceeded the nesting safety limit",
                 retryable=False,
                 submission_unknown=False,
                 request_id=_optional_string(getattr(response, "id", None)),
@@ -415,6 +456,14 @@ class ArkTypedGateway:
                 ).encode()
             ).hexdigest(),
         )
+
+
+def _json_depth(value: object) -> int:
+    if isinstance(value, dict):
+        return 1 + max((_json_depth(item) for item in value.values()), default=0)
+    if isinstance(value, list):
+        return 1 + max((_json_depth(item) for item in value), default=0)
+    return 0
 
 
 def _provider_error(exc: Exception, *, submission: bool) -> ProviderGatewayError:

@@ -1562,12 +1562,246 @@
             }
           }
         }
+      },
+      "get": {
+        "summary": "Shot Plan Generation Attempts",
+        "operationId": "shot_plan_generation_attempts_api_v1_projects__project_id__shot_plans_generations_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ShotPlanGenerationAttemptDto"
+                  },
+                  "title": "Response Shot Plan Generation Attempts Api V1 Projects  Project Id  Shot Plans Generations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-plans/generations/{job_id}/recover": {
+      "post": {
+        "summary": "Recover Shot Plan Generation Result",
+        "operationId": "recover_shot_plan_generation_result_api_v1_projects__project_id__shot_plans_generations__job_id__recover_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotPlanGenerationRecoveryCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShotPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-plans/generations/{job_id}/materialize": {
+      "post": {
+        "summary": "Materialize Shot Plan Generation Result",
+        "operationId": "materialize_shot_plan_generation_result_api_v1_projects__project_id__shot_plans_generations__job_id__materialize_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotPlanGenerationMaterializeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShotPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/activate": {
       "post": {
         "summary": "Activate Shot Plan",
         "operationId": "activate_shot_plan_api_v1_projects__project_id__shot_plans__shot_plan_version_id__activate_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "shot_plan_version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Shot Plan Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotPlanActivationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShotPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-plans/{shot_plan_version_id}/reject": {
+      "post": {
+        "summary": "Reject Shot Plan",
+        "operationId": "reject_shot_plan_api_v1_projects__project_id__shot_plans__shot_plan_version_id__reject_post",
         "parameters": [
           {
             "name": "project_id",
@@ -1663,28 +1897,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/environment-presets": {
-      "get": {
-        "summary": "Environment Presets",
-        "operationId": "environment_presets_api_v1_environment_presets_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/EnvironmentPresetDto"
-                  },
-                  "type": "array",
-                  "title": "Response Environment Presets Api V1 Environment Presets Get"
                 }
               }
             }
@@ -3178,6 +3390,16 @@
             ],
             "title": "Costestimatestatus"
           },
+          "imageInputSnapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageGenerationInputSnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "warnings": {
             "items": {
               "additionalProperties": {
@@ -3229,7 +3451,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 3,
             "title": "Micromotions"
           }
         },
@@ -3554,6 +3775,74 @@
         ],
         "title": "DirectorMicroEvent"
       },
+      "DirectorPlanDraftDto": {
+        "properties": {
+          "targetDurationSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetdurationseconds"
+          },
+          "directorTreatment": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directortreatment"
+          },
+          "shots": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Shots"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DirectorPlanDraftDto"
+      },
+      "DirectorPlanPayload": {
+        "properties": {
+          "targetDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 8.0,
+            "title": "Targetdurationseconds"
+          },
+          "directorTreatment": {
+            "$ref": "#/components/schemas/DirectorStoryTreatment"
+          },
+          "shots": {
+            "items": {
+              "$ref": "#/components/schemas/ShotSpec"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Shots"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "targetDurationSeconds",
+          "directorTreatment",
+          "shots"
+        ],
+        "title": "DirectorPlanPayload"
+      },
       "DirectorStoryTreatment": {
         "properties": {
           "logline": {
@@ -3622,7 +3911,6 @@
               "$ref": "#/components/schemas/GenerationRisk"
             },
             "type": "array",
-            "maxItems": 8,
             "title": "Feasibilitywarnings"
           }
         },
@@ -3640,6 +3928,60 @@
           "endingImage"
         ],
         "title": "DirectorStoryTreatment"
+      },
+      "DirectorValidationIssueDto": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "fatal",
+              "blocking",
+              "warning"
+            ],
+            "title": "Severity"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "suggestedAction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedaction"
+          },
+          "providerValue": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providervalue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "path",
+          "message"
+        ],
+        "title": "DirectorValidationIssueDto"
       },
       "EditAudioV2": {
         "properties": {
@@ -4139,42 +4481,6 @@
           "resolution"
         ],
         "title": "EmotionalArc"
-      },
-      "EnvironmentPresetDto": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "sourceProjectId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Sourceprojectid"
-          },
-          "asset": {
-            "$ref": "#/components/schemas/AssetDto"
-          },
-          "active": {
-            "type": "boolean",
-            "title": "Active"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Createdat"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "sourceProjectId",
-          "asset",
-          "active",
-          "createdAt"
-        ],
-        "title": "EnvironmentPresetDto"
       },
       "ExportCommand": {
         "properties": {
@@ -4696,6 +5002,103 @@
         ],
         "title": "ImageDiagnosisCommand"
       },
+      "ImageGenerationInputSnapshotDto": {
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schemaversion"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "preview",
+              "submitted"
+            ],
+            "title": "State"
+          },
+          "kind": {
+            "type": "string",
+            "const": "environment",
+            "title": "Kind"
+          },
+          "subjectPolicy": {
+            "type": "string",
+            "const": "empty_scene",
+            "title": "Subjectpolicy"
+          },
+          "sourceStoryVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sourcestoryversionid"
+          },
+          "environmentIntent": {
+            "type": "string",
+            "title": "Environmentintent"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "capabilityRevision": {
+            "type": "string",
+            "title": "Capabilityrevision"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "type": "string",
+            "title": "Negativeprompt"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationInputReferenceDto"
+            },
+            "type": "array",
+            "title": "References"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "promptCompilerRevision": {
+            "type": "string",
+            "title": "Promptcompilerrevision"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "state",
+          "kind",
+          "subjectPolicy",
+          "sourceStoryVersionId",
+          "environmentIntent",
+          "provider",
+          "model",
+          "capabilityRevision",
+          "prompt",
+          "negativePrompt",
+          "references",
+          "inputHash",
+          "promptCompilerRevision",
+          "createdAt"
+        ],
+        "title": "ImageGenerationInputSnapshotDto"
+      },
       "JobDto": {
         "properties": {
           "id": {
@@ -4939,6 +5342,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/GenerationInputSnapshotDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imageInputSnapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageGenerationInputSnapshotDto"
               },
               {
                 "type": "null"
@@ -7159,6 +7572,34 @@
         ],
         "title": "SelectionCommand"
       },
+      "ShotPlanActivationCommand": {
+        "properties": {
+          "expectedActiveShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedactiveshotplanversionid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotencyKey"
+        ],
+        "title": "ShotPlanActivationCommand"
+      },
       "ShotPlanDraft": {
         "properties": {
           "sourceStoryVersionId": {
@@ -7170,6 +7611,30 @@
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
             "title": "Sourceselectionhash"
+          },
+          "baseShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseshotplanversionid"
+          },
+          "expectedActiveShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedactiveshotplanversionid"
           },
           "clip": {
             "$ref": "#/components/schemas/LifeClipSpec"
@@ -7240,6 +7705,208 @@
         ],
         "title": "ShotPlanDraft"
       },
+      "ShotPlanGenerationAttemptDto": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Jobid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "submitting",
+              "submitted",
+              "polling",
+              "storing",
+              "succeeded",
+              "failed",
+              "cancel_requested",
+              "cancelled",
+              "submission_unknown"
+            ],
+            "title": "Status"
+          },
+          "storyVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Storyversionid"
+          },
+          "baseShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseshotplanversionid"
+          },
+          "resultShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resultshotplanversionid"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "actualUsage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualusage"
+          },
+          "actualCostMicros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualcostmicros"
+          },
+          "billingStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "usage_reported",
+              "calculated",
+              "unpriced",
+              "provider_adjusted"
+            ],
+            "title": "Billingstatus"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShotPlanGenerationAttemptErrorDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShotPlanGenerationResultDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "jobId",
+          "status",
+          "storyVersionId",
+          "createdAt",
+          "updatedAt",
+          "billingStatus"
+        ],
+        "title": "ShotPlanGenerationAttemptDto"
+      },
+      "ShotPlanGenerationAttemptErrorDto": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "incompleteReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incompletereason"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestid"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable",
+            "default": false
+          },
+          "submissionUnknown": {
+            "type": "boolean",
+            "title": "Submissionunknown",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ShotPlanGenerationAttemptErrorDto"
+      },
       "ShotPlanGenerationCommand": {
         "properties": {
           "idempotencyKey": {
@@ -7255,6 +7922,95 @@
           "idempotencyKey"
         ],
         "title": "ShotPlanGenerationCommand"
+      },
+      "ShotPlanGenerationMaterializeCommand": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/DirectorPlanPayload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotencyKey",
+          "payload"
+        ],
+        "title": "ShotPlanGenerationMaterializeCommand"
+      },
+      "ShotPlanGenerationRecoveryCommand": {
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotencyKey"
+        ],
+        "title": "ShotPlanGenerationRecoveryCommand"
+      },
+      "ShotPlanGenerationResultDto": {
+        "properties": {
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "candidate_ready",
+              "needs_input",
+              "invalid"
+            ],
+            "title": "Disposition"
+          },
+          "resultShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resultshotplanversionid"
+          },
+          "recoverable": {
+            "type": "boolean",
+            "title": "Recoverable"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectorPlanDraftDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DirectorValidationIssueDto"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "disposition",
+          "recoverable"
+        ],
+        "title": "ShotPlanGenerationResultDto"
       },
       "ShotPlanVersionDto": {
         "properties": {
@@ -7340,6 +8096,53 @@
             ],
             "title": "Directorinputhash"
           },
+          "reviewStatus": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "candidate",
+              "rejected",
+              "superseded"
+            ],
+            "title": "Reviewstatus",
+            "default": "accepted"
+          },
+          "producingJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producingjobid"
+          },
+          "baseShotPlanVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseshotplanversionid"
+          },
+          "decidedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidedat"
+          },
           "active": {
             "type": "boolean",
             "title": "Active"
@@ -7378,7 +8181,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 3,
             "title": "Ambience"
           },
           "objectEffects": {
@@ -7386,7 +8188,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 3,
             "title": "Objecteffects"
           },
           "movementEffects": {
@@ -7394,7 +8195,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 3,
             "title": "Movementeffects"
           },
           "musicIntent": {
@@ -7592,7 +8392,6 @@
               "$ref": "#/components/schemas/GenerationRisk"
             },
             "type": "array",
-            "maxItems": 8,
             "title": "Generationrisks"
           }
         },

@@ -1,6 +1,10 @@
 import type { JobDto } from "./api/types";
 
 export interface PaidModelRuntime {
+  worker?: {
+    ready: boolean;
+    state: "ready" | "offline" | "stale" | "restarting" | "degraded";
+  };
   provider: {
     apiKeyConfigured: boolean;
     paidCallsEnabled: boolean;
@@ -87,9 +91,21 @@ export function paidModelBlockedReason(
   runtime: PaidModelRuntime | null | undefined,
 ): string {
   if (!runtime) return "正在检查模型服务，请稍候。";
+  const workerReason = backgroundTaskBlockedReason(runtime);
+  if (workerReason) return workerReason;
   if (!runtime.provider.apiKeyConfigured) return "尚未配置模型服务密钥，请先前往运行设置。";
   if (!runtime.provider.paidCallsEnabled) return "新的模型调用当前已关闭，请先在运行设置中启用。";
   return "";
+}
+
+export function backgroundTaskBlockedReason(
+  runtime: Pick<PaidModelRuntime, "worker"> | null | undefined,
+): string {
+  if (!runtime) return "正在检查后台任务，请稍候。";
+  if (!runtime.worker || runtime.worker.ready) return "";
+  return runtime.worker.state === "degraded"
+    ? "后台任务需要检查，恢复前不能开始新的任务。"
+    : "后台任务暂时不可用，系统正在自动恢复。";
 }
 
 export type BillingStatus = NonNullable<JobDto["billingStatus"]>;
@@ -105,6 +121,14 @@ export interface ErrorPresentation {
 }
 
 const ERROR_MESSAGES: Array<{ matches: string; message: string }> = [
+  {
+    matches: "director_output_validation_failed",
+    message: "模型返回的分镜结构不完整，本次没有生成新版本；当前版本保持不变。",
+  },
+  {
+    matches: "worker_unavailable",
+    message: "后台任务暂时不可用，系统正在自动恢复，请稍后再试。",
+  },
   {
     matches: "shot plan asset selection is outdated",
     message: "角色或环境已经更新，请重新生成分镜后再生成视频。",

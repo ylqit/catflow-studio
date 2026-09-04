@@ -7,12 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from catflow.application.service import StudioService
-from catflow.domain.models import DirectorPlanPayload, LifeStoryProposalDraft
+from catflow.domain.director_results import normalize_director_result
+from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import AssetRecord, JobRecord
 
 from .project_posters import ProjectPosterGenerator
 from .provider_media import LandedProviderMedia, ProviderMediaDownloader
+from .runner import JobResultError
 
 
 class ArkResultLandingService:
@@ -71,11 +73,27 @@ class ArkResultLandingService:
     def _store_shot_plan(self, job_id: uuid.UUID) -> None:
         result = self._provider_result(job_id)
         payload = result.get("payload")
-        if not isinstance(payload, dict):
-            raise ValueError("director result payload is missing")
+        normalized = normalize_director_result(payload)
+        self._studio_service.record_shot_plan_generation_validation(job_id, normalized)
+
+        if normalized.disposition == "invalid":
+            raise JobResultError(
+                code="director_output_validation_failed",
+                message="模型没有返回可读取的分镜内容，本次没有创建新版。",
+                detail="; ".join(
+                    f"{issue.path or '<root>'}: {issue.message}"
+                    for issue in normalized.issues
+                ),
+            )
+        if normalized.disposition == "needs_input":
+            # The paid response remains a successful, recoverable result. A candidate
+            # is materialized only after the blocking fields are completed.
+            return
+        if normalized.plan is None:
+            raise RuntimeError("candidate-ready director result has no validated plan")
         self._studio_service.complete_shot_plan_job(
             job_id,
-            DirectorPlanPayload.model_validate(payload),
+            normalized.plan,
         )
 
     def _store_image(self, job_id: uuid.UUID) -> None:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 
+from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     AssetGenerationCommand,
     AssetGenerationPreviewCommand,
@@ -14,7 +16,11 @@ from catflow.application.service import (
     PlannerMessageCommand,
     ProjectCreate,
     ProjectPatch,
+    ShotPlanActivationCommand,
     ShotPlanGenerationCommand,
+    ShotPlanGenerationMaterializeCommand,
+    ShotPlanGenerationRecoveryCommand,
+    StoryCreateCommand,
     StudioConflictError,
     StudioService,
 )
@@ -55,8 +61,115 @@ def _proposal() -> LifeStoryProposalDraft:
     )
 
 
+def _director_payload() -> DirectorPlanPayload:
+    return DirectorPlanPayload.model_validate(
+        {
+            "targetDurationSeconds": 12,
+            "directorTreatment": {
+                "logline": "雨天门边的一次擦爪",
+                "theme": "照顾",
+                "emotionalTone": ["安静", "温暖"],
+                "visualMotif": "湿脚印逐渐消失",
+                "spatialSetting": "雨天玄关",
+                "emotionalArc": {
+                    "opening": "发现湿爪",
+                    "development": "逐只擦干",
+                    "resolution": "走进室内",
+                },
+                "microEvent": {
+                    "trigger": "猫咪留下湿爪印",
+                    "childIntent": "照顾刚回家的猫咪",
+                    "childAction": "用毛巾逐只擦干猫爪",
+                    "catResponse": "抬爪配合后向前迈步",
+                    "visibleCauseAndEffect": "猫爪变干且水印减少",
+                    "warmEnding": "孩子折好毛巾，猫咪继续走进室内",
+                },
+                "propStateChange": {
+                    "initialState": "毛巾展开",
+                    "changedState": "毛巾折好并带有湿痕",
+                },
+                "soundIntent": "轻雨声与毛巾摩擦声",
+                "endingImage": "孩子折好毛巾，猫咪向室内迈步",
+                "feasibilityWarnings": [],
+            },
+            "shots": [
+                {
+                    "id": "shot-1",
+                    "order": 1,
+                    "durationSeconds": 12,
+                    "durationFrames": 288,
+                    "framing": "中景",
+                    "cameraMovement": "轻微跟随",
+                    "childAction": "孩子用毛巾逐只擦干猫爪",
+                    "catAction": "猫咪抬爪配合后向室内迈步",
+                    "environmentChange": "湿爪印逐渐减少",
+                    "transition": "continuous",
+                    "lens": {
+                        "focalLengthEquivalent": "35mm",
+                        "cameraHeight": "儿童腰部",
+                        "cameraAngle": "轻微俯拍",
+                        "perspectiveIntent": "看清手、猫爪和脚垫",
+                    },
+                    "composition": {
+                        "subjectPlacement": "儿童左、猫咪右",
+                        "foreground": "毛巾",
+                        "middleGround": "儿童与猫咪",
+                        "background": "玄关",
+                        "screenDirection": "从左向右",
+                        "eyeLine": "儿童看向猫爪",
+                    },
+                    "childBlocking": {
+                        "initialState": "儿童蹲在脚垫边",
+                        "movementPath": "双手沿猫爪方向移动",
+                        "endState": "儿童开始折好毛巾",
+                        "microMotions": ["重新握紧毛巾"],
+                    },
+                    "catBlocking": {
+                        "initialState": "猫咪四足站稳",
+                        "movementPath": "逐只抬爪并向右移重心",
+                        "endState": "猫咪向右迈步",
+                        "microMotions": ["尾巴轻摆"],
+                    },
+                    "physicalChange": {
+                        "subject": "猫爪和地面水印",
+                        "before": "猫爪潮湿且水印连续",
+                        "after": "猫爪擦干且水印减少",
+                    },
+                    "continuity": {
+                        "incoming": "承接进门动作",
+                        "outgoing": "保持向右运动",
+                        "sharedVisualElement": "同一毛巾和脚垫",
+                        "finalFrame": "孩子折好毛巾，猫咪继续向右迈步",
+                    },
+                    "lighting": {
+                        "direction": "室内右上方",
+                        "softness": "柔和漫射",
+                        "colorIntent": "冷暖平衡",
+                    },
+                    "sound": {
+                        "ambience": ["轻雨声"],
+                        "objectEffects": ["毛巾摩擦"],
+                        "movementEffects": ["猫爪轻落"],
+                        "musicIntent": "轻柔木琴",
+                    },
+                    "directorIntent": "通过动作闭合呈现照顾感",
+                    "generationRisks": [
+                        {"code": "paw_contact", "message": "避免手爪融合"}
+                    ],
+                }
+            ],
+        }
+    )
+
+
 def _service() -> StudioService:
-    return StudioService(MemoryStudioRepository())
+    return StudioService(
+        MemoryStudioRepository(),
+        provider_runtime=replace(
+            ProviderRuntime.from_env(segment_reference_publishing_ready=False),
+            paid_calls_enabled=True,
+        ),
+    )
 
 
 def _project(service: StudioService):  # type: ignore[no-untyped-def]
@@ -89,6 +202,8 @@ def test_planner_message_is_idempotent_and_adoption_activates_one_story() -> Non
     assert "摘要不超过60个汉字" in prompt
     assert "不得复述用户原文" in prompt
     assert "围绕……展开" in prompt
+    assert "environmentIntent只描述空间、天气、家具、道具、构图和光线" in prompt
+    assert "不得包含儿童、猫咪或其他角色的动作" in prompt
     pending_planner = service.get_planner(project.id)
     assert len(pending_planner.messages) == 1
     assert pending_planner.latest_job is not None
@@ -319,7 +434,8 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert job.kind == "plan_shots"
     assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
     assert job.frozen_input["storyVersionId"] == str(story.id)
-    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v2"
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v3"
+    assert "不得输出空占位镜头、备用镜头或修订镜头" in job.frozen_input["prompt"]
     assert job.frozen_input["referenceRoles"] == [
         "episode_child",
         "episode_cat",
@@ -334,6 +450,290 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert isinstance(schema, dict)
     assert "directorTreatment" in str(schema)
     assert "childBlocking" in str(schema)
+
+
+def test_repository_idempotency_input_conflict_has_a_stable_error_code() -> None:
+    repository = MemoryStudioRepository()
+    now = datetime.now(UTC)
+    first = JobDto(
+        id=uuid.uuid4(),
+        projectId=uuid.uuid4(),
+        kind="plan_shots",
+        status="failed",
+        inputHash="a" * 64,
+        idempotencyKey="stable-conflict-key",
+        frozenInput={},
+        resultAssetIds=[],
+        createdAt=now,
+        updatedAt=now,
+    )
+    repository.create_job(first)
+
+    with pytest.raises(StudioConflictError) as caught:
+        repository.create_job(
+            first.model_copy(update={"id": uuid.uuid4(), "input_hash": "b" * 64})
+        )
+
+    assert getattr(caught.value, "code", None) == "idempotency_input_conflict"
+
+
+def test_director_completion_creates_a_candidate_without_replacing_the_current_plan() -> None:
+    service = _service()
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="candidate-source-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    story = service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(project.id, role="environment", sha256="8" * 64)
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    base = service.create_shot_plan(
+        project.id,
+        ShotPlanDraft(
+            sourceStoryVersionId=story.id,
+            sourceSelectionHash=service.current_selection_hash(project.id),
+            clip=LifeClipSpec(
+                durationSeconds=12,
+                aspectRatio="9:16",
+                microEvent="雨天擦爪",
+                childAction="孩子擦猫爪",
+                catActionOrObservation="猫咪抬爪配合",
+                visibleCauseAndEffect="湿脚印减少",
+                warmEnding="猫咪继续走进室内",
+                dialoguePolicy="none",
+                environmentIntent="雨天玄关",
+            ),
+            shots=[
+                ShotSpec(
+                    id="manual-shot-1",
+                    order=1,
+                    durationSeconds=12,
+                    framing="中景",
+                    cameraMovement="固定",
+                    childAction="孩子擦猫爪",
+                    catAction="猫咪抬爪配合",
+                    environmentChange="湿脚印减少",
+                    transition="continuous",
+                )
+            ],
+        ),
+    )
+    job = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="candidate-director-plan"),
+    )
+
+    candidate = service.complete_shot_plan_job(job.id, _director_payload())
+
+    active = next(plan for plan in service.list_shot_plans(project.id) if plan.active)
+    assert active.id == base.id
+    assert candidate.active is False
+    assert candidate.review_status == "candidate"
+    assert candidate.producing_job_id == job.id
+    assert candidate.base_shot_plan_version_id == base.id
+    assert candidate.revision == 2
+
+    adopted = service.activate_shot_plan(
+        project.id,
+        candidate.id,
+        ShotPlanActivationCommand(
+            expectedActiveShotPlanVersionId=base.id,
+            idempotencyKey="adopt-director-candidate",
+        ),
+    )
+    assert adopted.active is True
+    assert adopted.review_status == "accepted"
+    historical = next(
+        plan for plan in service.list_shot_plans(project.id) if plan.id == base.id
+    )
+    assert historical.active is False
+
+
+def test_paid_director_result_can_be_recovered_without_another_provider_job() -> None:
+    repository = MemoryStudioRepository()
+    service = StudioService(
+        repository,
+        provider_runtime=replace(
+            ProviderRuntime.from_env(segment_reference_publishing_ready=False),
+            paid_calls_enabled=True,
+        ),
+    )
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="recover-source-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    story = service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(project.id, role="environment", sha256="1" * 64)
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    base = service.create_shot_plan(
+        project.id,
+        ShotPlanDraft(
+            sourceStoryVersionId=story.id,
+            sourceSelectionHash=service.current_selection_hash(project.id),
+            clip=LifeClipSpec(
+                durationSeconds=12,
+                aspectRatio="9:16",
+                microEvent="雨天擦爪",
+                childAction="孩子擦猫爪",
+                catActionOrObservation="猫咪抬爪配合",
+                visibleCauseAndEffect="湿脚印减少",
+                warmEnding="猫咪继续走进室内",
+                dialoguePolicy="none",
+                environmentIntent="雨天玄关",
+            ),
+            shots=[
+                ShotSpec(
+                    id="manual-shot-1",
+                    order=1,
+                    durationSeconds=12,
+                    framing="中景",
+                    cameraMovement="固定",
+                    childAction="孩子擦猫爪",
+                    catAction="猫咪抬爪配合",
+                    environmentChange="湿脚印减少",
+                    transition="continuous",
+                )
+            ],
+        ),
+    )
+    job = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="recover-director-plan"),
+    )
+    payload = _director_payload().model_dump(mode="json", by_alias=True)
+    payload["shots"][0]["sound"]["objectEffects"] = ["一", "二", "三", "四"]
+    payload["shots"][0]["blocking_note"] = "内嵌角色调度符合要求"
+    repository._jobs[job.id] = job.model_copy(  # noqa: SLF001 - fixture controls persistence.
+        update={
+            "status": "failed",
+            "provider_result": {"payload": payload, "responseId": "response-paid-once"},
+            "error": {
+                "code": "director_output_validation_failed",
+                "message": "legacy strict validation failure",
+            },
+        }
+    )
+
+    attempt = service.list_shot_plan_generation_attempts(project.id)[0]
+    assert attempt.result is not None
+    assert attempt.result.disposition == "candidate_ready"
+    assert {issue.code for issue in attempt.result.issues} == {
+        "sound_detail_dense",
+        "unknown_provider_field",
+    }
+
+    command = ShotPlanGenerationRecoveryCommand(idempotencyKey="recover-existing-result")
+    candidate = service.recover_shot_plan_generation_result(project.id, job.id, command)
+    repeated = service.recover_shot_plan_generation_result(project.id, job.id, command)
+
+    assert repeated.id == candidate.id
+    assert candidate.review_status == "candidate"
+    assert candidate.active is False
+    assert candidate.producing_job_id == job.id
+    assert candidate.shots[0].sound is not None
+    assert candidate.shots[0].sound.object_effects == ["一", "二", "三", "四"]
+    assert next(plan for plan in service.list_shot_plans(project.id) if plan.active).id == base.id
+    assert len(repository.list_project_jobs(project.id)) == 2
+
+
+def test_incomplete_director_draft_can_be_corrected_without_another_provider_job() -> None:
+    repository = MemoryStudioRepository()
+    service = StudioService(
+        repository,
+        provider_runtime=replace(
+            ProviderRuntime.from_env(segment_reference_publishing_ready=False),
+            paid_calls_enabled=True,
+        ),
+    )
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="materialize-source-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(project.id, role="environment", sha256="2" * 64)
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    job = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="materialize-director-plan"),
+    )
+    incomplete_payload = _director_payload().model_dump(mode="json", by_alias=True)
+    del incomplete_payload["shots"][0]["catBlocking"]["endState"]
+    repository._jobs[job.id] = job.model_copy(  # noqa: SLF001 - fixture controls persistence.
+        update={
+            "status": "succeeded",
+            "provider_result": {"payload": incomplete_payload, "responseId": "response-paid-once"},
+        }
+    )
+
+    attempt = service.list_shot_plan_generation_attempts(project.id)[0]
+    assert attempt.result is not None
+    assert attempt.result.disposition == "needs_input"
+    assert any(issue.severity == "blocking" for issue in attempt.result.issues)
+    original_job_count = len(repository.list_project_jobs(project.id))
+
+    candidate = service.materialize_shot_plan_generation_result(
+        project.id,
+        job.id,
+        ShotPlanGenerationMaterializeCommand(
+            idempotencyKey="materialize-existing-result",
+            payload=_director_payload(),
+        ),
+    )
+
+    assert candidate.review_status == "candidate"
+    assert candidate.active is False
+    assert candidate.producing_job_id == job.id
+    assert len(repository.list_project_jobs(project.id)) == original_job_count
+
+
+def test_running_director_job_blocks_a_second_paid_submission() -> None:
+    service = _service()
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="running-source-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(project.id, role="environment", sha256="9" * 64)
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    first = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="running-director-one"),
+    )
+
+    with pytest.raises(StudioConflictError, match="already running"):
+        service.create_shot_plan_generation_job(
+            project.id,
+            ShotPlanGenerationCommand(idempotencyKey="running-director-two"),
+        )
+
+    repeated = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="running-director-one"),
+    )
+    assert repeated.id == first.id
 
 
 def test_video_prompt_compiles_professional_director_fields_in_execution_order() -> None:
@@ -447,7 +847,15 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         ),
         shots=[shot],
     )
-    service.complete_shot_plan_job(job.id, payload)
+    candidate = service.complete_shot_plan_job(job.id, payload)
+    service.activate_shot_plan(
+        project.id,
+        candidate.id,
+        ShotPlanActivationCommand(
+            expectedActiveShotPlanVersionId=None,
+            idempotencyKey="activate-professional-plan",
+        ),
+    )
 
     prompt = service.preview_video_generation(project.id).prompt
 
@@ -463,7 +871,7 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         assert expected in prompt
 
 
-def test_selected_environment_preset_is_shared_by_every_project() -> None:
+def test_selected_environment_is_scoped_to_its_project() -> None:
     service = _service()
     first = _project(service)
     second = service.create_project(
@@ -482,9 +890,7 @@ def test_selected_environment_preset_is_shared_by_every_project() -> None:
     service.select_asset(first.id, slot="environment", asset_id=environment.id)
 
     assert service.current_selections(first.id)["environment"].id == environment.id
-    assert service.current_selections(second.id)["environment"].id == environment.id
-    assert service.environment_presets()[0].asset.id == environment.id
-    assert service.environment_presets()[0].active is True
+    assert "environment" not in service.current_selections(second.id)
 
 
 def test_result_storage_failure_can_resume_without_creating_or_resubmitting_a_job() -> None:
@@ -549,6 +955,74 @@ def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> 
     assert all(reference["role"] != "style_source" for reference in job.frozen_input["references"])
 
 
+def test_environment_generation_uses_story_intent_and_only_the_three_rendering_references() -> None:
+    service = _service()
+    project = _project(service)
+    story = service.create_story(
+        project.id,
+        StoryCreateCommand(
+            title="雨天擦爪",
+            body="猫咪从雨里回家，孩子在玄关替它擦爪。",
+            microEvent=_proposal().micro_event,
+            targetDurationSeconds=12,
+            dialoguePolicy="none",
+            environmentIntent="雨天玄关，柔和暖光。",
+        ),
+    )
+    previous_environment = service.register_asset(
+        project.id,
+        role="environment",
+        sha256="8" * 64,
+    )
+    service.select_asset(project.id, slot="environment", asset_id=previous_environment.id)
+
+    preview = service.preview_asset_generation(
+        project.id, AssetGenerationPreviewCommand(kind="environment")
+    )
+    roles = [reference.role for reference in preview.references if reference.included]
+
+    assert preview.image_input_snapshot is not None
+    assert preview.image_input_snapshot.source_story_version_id == story.id
+    assert preview.image_input_snapshot.environment_intent == "雨天玄关，柔和暖光。"
+    assert preview.image_input_snapshot.subject_policy == "empty_scene"
+    assert roles == ["style_board", "episode_child", "episode_cat"]
+    assert "空场景" in preview.prompt
+    assert "雨天玄关，柔和暖光" in preview.prompt
+    assert "柔和暖光。。" not in preview.prompt
+    assert "儿童" in preview.negative_prompt
+    assert "猫咪" in preview.negative_prompt
+    assert all(reference.asset_id != previous_environment.id for reference in preview.references)
+
+    job = service.create_asset_generation_job(
+        project.id,
+        AssetGenerationCommand(
+            kind="environment",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="environment-generation-rainy-paws",
+        ),
+    )
+    assert job.image_input_snapshot is not None
+    assert job.image_input_snapshot.state == "submitted"
+    assert job.frozen_input["referenceRoles"] == [
+        "style_board",
+        "episode_child",
+        "episode_cat",
+    ]
+    assert job.frozen_input["compiledProviderPrompt"] == (
+        f"【生成目标】\n{preview.prompt}\n\n【必须避免】\n{preview.negative_prompt}"
+    )
+
+
+def test_environment_preview_requires_an_active_story() -> None:
+    service = _service()
+    project = _project(service)
+
+    with pytest.raises(ValueError, match="active story"):
+        service.preview_asset_generation(
+            project.id, AssetGenerationPreviewCommand(kind="environment")
+        )
+
+
 def test_image_diagnosis_freezes_candidate_and_labeled_identity_style_references() -> None:
     service = _service()
     project = _project(service)
@@ -571,3 +1045,51 @@ def test_image_diagnosis_freezes_candidate_and_labeled_identity_style_references
         "Canon v4 净化画风板",
     ]
     assert all(reference["role"] != "style_source" for reference in job.frozen_input["references"])
+
+
+def test_environment_diagnosis_checks_an_empty_scene_against_story_and_rendering_language() -> None:
+    service = _service()
+    project = _project(service)
+    story = service.create_story(
+        project.id,
+        StoryCreateCommand(
+            title="雨天擦爪",
+            body="猫咪从雨里回家，孩子在玄关替它擦爪。",
+            microEvent=_proposal().micro_event,
+            targetDurationSeconds=12,
+            dialoguePolicy="none",
+            environmentIntent="雨天玄关，柔和暖光和吸水脚垫",
+        ),
+    )
+    candidate = service.register_asset(
+        project.id,
+        role="environment",
+        sha256="7" * 64,
+    )
+
+    job = service.create_image_diagnosis_job(
+        project.id,
+        ImageDiagnosisCommand(
+            assetId=candidate.id,
+            idempotencyKey="diagnose-empty-environment-1",
+        ),
+    )
+
+    assert job.frozen_input["diagnosticSchema"] == "environment-quality-report-v2"
+    assert job.frozen_input["subjectPolicy"] == "empty_scene"
+    assert job.frozen_input["sourceStoryVersionId"] == str(story.id)
+    assert job.frozen_input["environmentIntent"] == "雨天玄关，柔和暖光和吸水脚垫"
+    assert [reference["role"] for reference in job.frozen_input["references"]] == [
+        "style_board",
+        "episode_child",
+        "episode_cat",
+    ]
+    assert set(job.frozen_input["outputSchema"]["properties"]) == {
+        "intentMatch",
+        "characterFree",
+        "styleMatch",
+        "stagingSpace",
+        "technical",
+        "warnings",
+    }
+    assert "不应出现" in job.frozen_input["prompt"]

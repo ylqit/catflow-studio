@@ -12,9 +12,11 @@ from catflow.application.service import (
     PlannerMessageCommand,
     ProjectCreate,
     RateCardRevisionCreateCommand,
+    StoryCreateCommand,
     StudioConflictError,
     StudioService,
 )
+from catflow.domain.models import MicroEvent
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
 
 
@@ -64,6 +66,23 @@ def test_ark_planner_submits_without_a_validation_run_and_remains_idempotent() -
 def test_normal_ark_image_jobs_have_no_application_quota() -> None:
     service = _ark_service()
     project = _project(service)
+    service.create_story(
+        project.id,
+        StoryCreateCommand(
+            title="雨天擦爪",
+            body="猫咪从雨里回家，孩子在玄关替它擦爪。",
+            microEvent=MicroEvent(
+                trigger="猫咪留下湿爪印",
+                childAction="孩子用毛巾擦爪",
+                catResponse="猫咪抬爪配合",
+                visibleChange="湿爪印减少",
+                warmEnding="猫咪走向室内",
+            ),
+            targetDurationSeconds=12,
+            dialoguePolicy="none",
+            environmentIntent="雨天玄关，柔和暖光和吸水脚垫",
+        ),
+    )
     preview = service.preview_asset_generation(
         project.id, AssetGenerationPreviewCommand(kind="environment")
     )

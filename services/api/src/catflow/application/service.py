@@ -10,6 +10,11 @@ from pydantic import Field, model_validator
 
 from catflow.domain.billing import RateCardItem
 from catflow.domain.contract import ContractModel
+from catflow.domain.director_results import (
+    DirectorNormalizationResult,
+    director_provider_output_schema,
+    normalize_director_result,
+)
 from catflow.domain.models import (
     DirectorPlanPayload,
     DirectorStoryTreatment,
@@ -34,6 +39,7 @@ from catflow.domain.video_repairs import (
     validate_issue_range,
 )
 
+from .image_generation import compile_provider_image_prompt
 from .project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -51,6 +57,12 @@ from .provider_config import ProviderRuntime
 
 class StudioConflictError(ValueError):
     pass
+
+
+class StudioIdempotencyInputConflictError(StudioConflictError):
+    code = "idempotency_input_conflict"
+    retryable = False
+    user_message = "当前生成输入已经变化，旧请求标识不能继续使用。"
 
 
 class StudioInputChangedError(StudioConflictError):
@@ -190,6 +202,15 @@ class CandidateQualityReportDto(ContractModel):
     warnings: list[dict[str, str]] = Field(default_factory=list)
 
 
+class EnvironmentQualityReportDto(ContractModel):
+    intent_match: Literal["pass", "warning", "fail"] = Field(alias="intentMatch")
+    character_free: Literal["pass", "warning", "fail"] = Field(alias="characterFree")
+    style_match: Literal["pass", "warning", "fail"] = Field(alias="styleMatch")
+    staging_space: Literal["pass", "warning", "fail"] = Field(alias="stagingSpace")
+    technical: Literal["pass", "warning", "fail"]
+    warnings: list[dict[str, str]] = Field(default_factory=list)
+
+
 class PlannerMessageDto(ContractModel):
     id: uuid.UUID
     role: Literal["user", "assistant"]
@@ -300,14 +321,6 @@ class StoredAssetDto(AssetDto):
     storage_key: str = Field(alias="storageKey")
 
 
-class EnvironmentPresetDto(ContractModel):
-    id: uuid.UUID
-    source_project_id: uuid.UUID = Field(alias="sourceProjectId")
-    asset: AssetDto
-    active: bool
-    created_at: datetime = Field(alias="createdAt")
-
-
 FixedCanonRole = Literal["episode_child", "episode_cat", "pair_scale", "style_board"]
 FIXED_CANON_ROLES: tuple[FixedCanonRole, ...] = (
     "episode_child",
@@ -363,6 +376,14 @@ class ShotPlanVersionDto(ContractModel):
     director_prompt_revision: str | None = Field(alias="directorPromptRevision", default=None)
     director_model: str | None = Field(alias="directorModel", default=None)
     director_input_hash: str | None = Field(alias="directorInputHash", default=None)
+    review_status: Literal["accepted", "candidate", "rejected", "superseded"] = Field(
+        alias="reviewStatus", default="accepted"
+    )
+    producing_job_id: uuid.UUID | None = Field(alias="producingJobId", default=None)
+    base_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="baseShotPlanVersionId", default=None
+    )
+    decided_at: datetime | None = Field(alias="decidedAt", default=None)
     active: bool
     outdated: bool = False
     created_at: datetime = Field(alias="createdAt")
@@ -370,6 +391,77 @@ class ShotPlanVersionDto(ContractModel):
 
 class ShotPlanGenerationCommand(ContractModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class ShotPlanGenerationRecoveryCommand(ContractModel):
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class ShotPlanGenerationMaterializeCommand(ContractModel):
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+    payload: DirectorPlanPayload
+
+
+class ShotPlanActivationCommand(ContractModel):
+    expected_active_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="expectedActiveShotPlanVersionId", default=None
+    )
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class ShotPlanGenerationAttemptErrorDto(ContractModel):
+    code: str
+    message: str
+    incomplete_reason: str | None = Field(alias="incompleteReason", default=None)
+    request_id: str | None = Field(alias="requestId", default=None)
+    retryable: bool = False
+    submission_unknown: bool = Field(alias="submissionUnknown", default=False)
+
+
+class DirectorValidationIssueDto(ContractModel):
+    code: str
+    severity: Literal["fatal", "blocking", "warning"]
+    path: str
+    message: str
+    suggested_action: str | None = Field(alias="suggestedAction", default=None)
+    provider_value: Any | None = Field(alias="providerValue", default=None)
+
+
+class DirectorPlanDraftDto(ContractModel):
+    target_duration_seconds: int | None = Field(alias="targetDurationSeconds", default=None)
+    director_treatment: dict[str, Any] | None = Field(alias="directorTreatment", default=None)
+    shots: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ShotPlanGenerationResultDto(ContractModel):
+    disposition: Literal["candidate_ready", "needs_input", "invalid"]
+    result_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="resultShotPlanVersionId", default=None
+    )
+    recoverable: bool
+    draft: DirectorPlanDraftDto | None = None
+    issues: list[DirectorValidationIssueDto] = Field(default_factory=list)
+
+
+class ShotPlanGenerationAttemptDto(ContractModel):
+    job_id: uuid.UUID = Field(alias="jobId")
+    status: JobStatus
+    story_version_id: uuid.UUID = Field(alias="storyVersionId")
+    base_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="baseShotPlanVersionId", default=None
+    )
+    result_shot_plan_version_id: uuid.UUID | None = Field(
+        alias="resultShotPlanVersionId", default=None
+    )
+    provider: str | None = None
+    model: str | None = None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+    actual_usage: dict[str, Any] | None = Field(alias="actualUsage", default=None)
+    actual_cost_micros: int | None = Field(alias="actualCostMicros", default=None)
+    billing_status: BillingStatus = Field(alias="billingStatus")
+    error: ShotPlanGenerationAttemptErrorDto | None = None
+    result: ShotPlanGenerationResultDto | None = None
 
 
 class JobPublicationDto(ContractModel):
@@ -430,6 +522,24 @@ class GenerationInputSnapshotDto(ContractModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+class ImageGenerationInputSnapshotDto(ContractModel):
+    schema_version: Literal[1] = Field(alias="schemaVersion")
+    state: Literal["preview", "submitted"]
+    kind: Literal["environment"]
+    subject_policy: Literal["empty_scene"] = Field(alias="subjectPolicy")
+    source_story_version_id: uuid.UUID = Field(alias="sourceStoryVersionId")
+    environment_intent: str = Field(alias="environmentIntent")
+    provider: str
+    model: str
+    capability_revision: str = Field(alias="capabilityRevision")
+    prompt: str
+    negative_prompt: str = Field(alias="negativePrompt")
+    references: list[GenerationInputReferenceDto]
+    input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
+    prompt_compiler_revision: str = Field(alias="promptCompilerRevision")
+    created_at: datetime = Field(alias="createdAt")
+
+
 class JobDto(ContractModel):
     id: uuid.UUID
     project_id: uuid.UUID = Field(alias="projectId")
@@ -466,6 +576,9 @@ class JobDto(ContractModel):
     pricing_snapshot: dict[str, Any] | None = Field(alias="pricingSnapshot", default=None)
     provider_request_id: str | None = Field(alias="providerRequestId", default=None)
     input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
+    image_input_snapshot: ImageGenerationInputSnapshotDto | None = Field(
+        alias="imageInputSnapshot", default=None
+    )
     frozen_input: dict[str, Any] = Field(alias="frozenInput")
     result_asset_ids: list[uuid.UUID] = Field(alias="resultAssetIds", default_factory=list)
     supersedes_job_id: uuid.UUID | None = Field(alias="supersedesJobId", default=None)
@@ -561,6 +674,9 @@ class AssetGenerationPreviewDto(ContractModel):
     references: list[CompiledReference]
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
     cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
+    image_input_snapshot: ImageGenerationInputSnapshotDto | None = Field(
+        alias="imageInputSnapshot", default=None
+    )
     warnings: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -841,7 +957,14 @@ class StudioRepository(Protocol):
     def activate_story(self, project_id: uuid.UUID, story_id: uuid.UUID) -> StoryVersionDto: ...
 
     def create_shot_plan(
-        self, project_id: uuid.UUID, draft: ShotPlanDraft
+        self,
+        project_id: uuid.UUID,
+        draft: ShotPlanDraft,
+        *,
+        active: bool = True,
+        review_status: Literal["accepted", "candidate", "rejected", "superseded"] = "accepted",
+        producing_job_id: uuid.UUID | None = None,
+        base_shot_plan_version_id: uuid.UUID | None = None,
     ) -> ShotPlanVersionDto: ...
 
     def active_shot_plan(self, project_id: uuid.UUID) -> ShotPlanVersionDto | None: ...
@@ -849,6 +972,14 @@ class StudioRepository(Protocol):
     def list_shot_plans(self, project_id: uuid.UUID) -> list[ShotPlanVersionDto]: ...
 
     def activate_shot_plan(
+        self,
+        project_id: uuid.UUID,
+        shot_plan_id: uuid.UUID,
+        *,
+        expected_active_shot_plan_version_id: uuid.UUID | None,
+    ) -> ShotPlanVersionDto: ...
+
+    def reject_shot_plan(
         self, project_id: uuid.UUID, shot_plan_id: uuid.UUID
     ) -> ShotPlanVersionDto: ...
 
@@ -876,8 +1007,6 @@ class StudioRepository(Protocol):
 
     def current_selections(self, project_id: uuid.UUID) -> dict[str, AssetDto]: ...
 
-    def environment_presets(self) -> list[EnvironmentPresetDto]: ...
-
     def list_assets(self, project_id: uuid.UUID) -> list[AssetDto]: ...
 
     def get_asset(self, asset_id: uuid.UUID) -> StoredAssetDto | None: ...
@@ -885,6 +1014,10 @@ class StudioRepository(Protocol):
     def create_job(self, job: JobDto) -> JobDto: ...
 
     def get_job(self, job_id: uuid.UUID) -> JobDto | None: ...
+
+    def record_director_validation(
+        self, job_id: uuid.UUID, validation: dict[str, object]
+    ) -> JobDto: ...
 
     def list_project_jobs(self, project_id: uuid.UUID) -> list[JobDto]: ...
 
@@ -1158,6 +1291,18 @@ class StudioService:
         clip = LifeClipSpec.model_validate(job.frozen_input.get("clip"))
         if payload.target_duration_seconds != clip.duration_seconds:
             raise StudioConflictError("director output duration changed")
+        existing = next(
+            (
+                plan
+                for plan in self._repository.list_shot_plans(project_id)
+                if plan.producing_job_id == job_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        base_value = job.frozen_input.get("baseShotPlanVersionId")
+        base_shot_plan_version_id = uuid.UUID(str(base_value)) if base_value else None
         draft = ProfessionalShotPlanDraft(
             sourceStoryVersionId=story_id,
             sourceSelectionHash=selection_hash,
@@ -1168,7 +1313,33 @@ class StudioService:
             directorModel=job.model or "unknown",
             directorInputHash=job.input_hash,
         )
-        return self.create_shot_plan(project_id, draft)
+        current_story = self._repository.active_story(project_id)
+        current_plan = self._repository.active_shot_plan(project_id)
+        current_plan_id = current_plan.id if current_plan is not None else None
+        current_inputs_match = (
+            current_story is not None
+            and current_story.id == story_id
+            and self.current_selection_hash(project_id) == selection_hash
+            and current_plan_id == base_shot_plan_version_id
+        )
+        return self._repository.create_shot_plan(
+            project_id,
+            draft,
+            active=False,
+            review_status="candidate" if current_inputs_match else "superseded",
+            producing_job_id=job_id,
+            base_shot_plan_version_id=base_shot_plan_version_id,
+        )
+
+    def record_shot_plan_generation_validation(
+        self, job_id: uuid.UUID, result: DirectorNormalizationResult
+    ) -> JobDto:
+        job = self.get_job(job_id)
+        if job.kind != "plan_shots":
+            raise StudioConflictError("job is not a director planning job")
+        return self._repository.record_director_validation(
+            job_id, result.validation_document()
+        )
 
     def adopt_proposal(self, project_id: uuid.UUID, proposal_id: uuid.UUID) -> StoryVersionDto:
         self._require_project(project_id)
@@ -1193,7 +1364,25 @@ class StudioService:
             raise StudioConflictError("active story version changed")
         if self.current_selection_hash(project_id) != draft.source_selection_hash:
             raise StudioConflictError("asset selection changed")
-        return self._repository.create_shot_plan(project_id, draft)
+        active_plan = self._repository.active_shot_plan(project_id)
+        active_plan_id = active_plan.id if active_plan is not None else None
+        if (
+            draft.expected_active_shot_plan_version_id is not None
+            and draft.expected_active_shot_plan_version_id != active_plan_id
+        ):
+            raise StudioConflictError("active shot plan version changed")
+        if draft.base_shot_plan_version_id is not None and not any(
+            plan.id == draft.base_shot_plan_version_id
+            for plan in self._repository.list_shot_plans(project_id)
+        ):
+            raise StudioNotFoundError("base shot plan version not found")
+        return self._repository.create_shot_plan(
+            project_id,
+            draft,
+            active=True,
+            review_status="accepted",
+            base_shot_plan_version_id=draft.base_shot_plan_version_id,
+        )
 
     def create_shot_plan_generation_job(
         self, project_id: uuid.UUID, command: ShotPlanGenerationCommand
@@ -1226,12 +1415,16 @@ class StudioService:
             environmentIntent=story.environment_intent,
         )
         prompt = _director_prompt(project, story)
-        output_schema = DirectorPlanPayload.model_json_schema(by_alias=True)
+        output_schema = director_provider_output_schema()
         selection_hash = self.current_selection_hash(project_id)
+        base_shot_plan = self._repository.active_shot_plan(project_id)
         document = {
             "projectId": str(project_id),
             "storyVersionId": str(story.id),
             "selectionHash": selection_hash,
+            "baseShotPlanVersionId": (
+                str(base_shot_plan.id) if base_shot_plan is not None else None
+            ),
             "canonProfileId": str(project.canon_profile_id),
             "referenceAssetIds": [str(selections[role].id) for role in reference_roles],
             "referenceRoles": list(reference_roles),
@@ -1239,7 +1432,7 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v2",
+            "directorPromptRevision": "catflow-director-v3",
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.planning_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
@@ -1247,6 +1440,32 @@ class StudioService:
             "outputSchema": output_schema,
         }
         input_hash = _hash_document(document)
+        running = next(
+            (
+                item
+                for item in self._repository.list_project_jobs(project_id)
+                if item.kind == "plan_shots"
+                and item.status
+                in {
+                    "queued",
+                    "submitting",
+                    "submitted",
+                    "polling",
+                    "storing",
+                    "cancel_requested",
+                    "submission_unknown",
+                }
+            ),
+            None,
+        )
+        if running is not None:
+            if running.idempotency_key == command.idempotency_key:
+                if running.input_hash != input_hash:
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return running
+            raise StudioConflictError("a shot plan generation job is already running")
         now = datetime.now(UTC)
         return self._create_job(
             JobDto(
@@ -1273,22 +1492,238 @@ class StudioService:
         self._require_project(project_id)
         selection_hash = self.current_selection_hash(project_id)
         story = self._repository.active_story(project_id)
+        active_plan = self._repository.active_shot_plan(project_id)
+        active_plan_id = active_plan.id if active_plan is not None else None
         return [
             plan.model_copy(
                 update={
                     "outdated": story is None
                     or plan.source_story_version_id != story.id
                     or plan.source_selection_hash != selection_hash
+                    or (
+                        plan.review_status in {"candidate", "superseded"}
+                        and plan.base_shot_plan_version_id != active_plan_id
+                        and not plan.active
+                    )
                 }
             )
             for plan in self._repository.list_shot_plans(project_id)
         ]
 
     def activate_shot_plan(
+        self,
+        project_id: uuid.UUID,
+        shot_plan_id: uuid.UUID,
+        command: ShotPlanActivationCommand,
+    ) -> ShotPlanVersionDto:
+        self._require_project(project_id)
+        plan = next(
+            (item for item in self.list_shot_plans(project_id) if item.id == shot_plan_id),
+            None,
+        )
+        if plan is None:
+            raise StudioNotFoundError("shot plan version not found")
+        if plan.outdated:
+            raise StudioConflictError("shot plan inputs have changed")
+        return self._repository.activate_shot_plan(
+            project_id,
+            shot_plan_id,
+            expected_active_shot_plan_version_id=(
+                command.expected_active_shot_plan_version_id
+            ),
+        )
+
+    def reject_shot_plan(
         self, project_id: uuid.UUID, shot_plan_id: uuid.UUID
     ) -> ShotPlanVersionDto:
         self._require_project(project_id)
-        return self._repository.activate_shot_plan(project_id, shot_plan_id)
+        return self._repository.reject_shot_plan(project_id, shot_plan_id)
+
+    def list_shot_plan_generation_attempts(
+        self, project_id: uuid.UUID, *, limit: int = 20
+    ) -> list[ShotPlanGenerationAttemptDto]:
+        self._require_project(project_id)
+        plans_by_job = {
+            plan.producing_job_id: plan.id
+            for plan in self._repository.list_shot_plans(project_id)
+            if plan.producing_job_id is not None
+        }
+        attempts: list[ShotPlanGenerationAttemptDto] = []
+        for job in self._repository.list_project_jobs(project_id):
+            if job.kind != "plan_shots":
+                continue
+            story_value = job.frozen_input.get("storyVersionId")
+            if story_value is None:
+                continue
+            base_value = job.frozen_input.get("baseShotPlanVersionId")
+            error = job.error or {}
+            provider_payload = (
+                job.provider_result.get("payload")
+                if isinstance(job.provider_result, dict)
+                else None
+            )
+            normalization = (
+                normalize_director_result(provider_payload)
+                if provider_payload is not None
+                else None
+            )
+            result_plan_id = plans_by_job.get(job.id)
+            generation_result = None
+            if normalization is not None:
+                normalized_payload = normalization.normalized_payload or {}
+                treatment_value = normalized_payload.get("directorTreatment")
+                shots_value = normalized_payload.get("shots")
+                generation_result = ShotPlanGenerationResultDto(
+                    disposition=normalization.disposition,
+                    resultShotPlanVersionId=result_plan_id,
+                    recoverable=normalization.recoverable,
+                    draft=(
+                        DirectorPlanDraftDto(
+                            targetDurationSeconds=(
+                                int(normalized_payload["targetDurationSeconds"])
+                                if isinstance(
+                                    normalized_payload.get("targetDurationSeconds"), int
+                                )
+                                else None
+                            ),
+                            directorTreatment=(
+                                treatment_value
+                                if isinstance(treatment_value, dict)
+                                else None
+                            ),
+                            shots=(
+                                [item for item in shots_value if isinstance(item, dict)]
+                                if isinstance(shots_value, list)
+                                else []
+                            ),
+                        )
+                        if normalization.normalized_payload is not None
+                        else None
+                    ),
+                    issues=[
+                        DirectorValidationIssueDto(
+                            code=issue.code,
+                            severity=issue.severity,
+                            path=issue.path,
+                            message=issue.message,
+                            suggestedAction=issue.suggested_action,
+                            providerValue=issue.provider_value,
+                        )
+                        for issue in normalization.issues
+                    ],
+                )
+            attempts.append(
+                ShotPlanGenerationAttemptDto(
+                    jobId=job.id,
+                    status=job.status,
+                    storyVersionId=uuid.UUID(str(story_value)),
+                    baseShotPlanVersionId=(uuid.UUID(str(base_value)) if base_value else None),
+                    resultShotPlanVersionId=result_plan_id,
+                    provider=job.provider,
+                    model=job.model,
+                    createdAt=job.created_at,
+                    updatedAt=job.updated_at,
+                    actualUsage=job.actual_usage,
+                    actualCostMicros=job.actual_cost_micros,
+                    billingStatus=job.billing_status,
+                    error=(
+                        ShotPlanGenerationAttemptErrorDto(
+                            code=str(error.get("code", "provider_error")),
+                            message=str(error.get("message", "分镜生成失败")),
+                            incompleteReason=(
+                                str(error["incompleteReason"])
+                                if error.get("incompleteReason")
+                                else None
+                            ),
+                            requestId=(
+                                str(error["requestId"]) if error.get("requestId") else None
+                            ),
+                            retryable=bool(error.get("retryable", False)),
+                            submissionUnknown=bool(error.get("submissionUnknown", False)),
+                        )
+                        if error
+                        else None
+                    ),
+                    result=generation_result,
+                )
+            )
+            if len(attempts) >= max(1, min(limit, 100)):
+                break
+        return attempts
+
+    def recover_shot_plan_generation_result(
+        self,
+        project_id: uuid.UUID,
+        job_id: uuid.UUID,
+        _command: ShotPlanGenerationRecoveryCommand,
+    ) -> ShotPlanVersionDto:
+        self._require_project(project_id)
+        job = self.get_job(job_id)
+        if job.project_id != project_id or job.kind != "plan_shots":
+            raise StudioNotFoundError("shot plan generation result not found")
+        provider_payload = (
+            job.provider_result.get("payload")
+            if isinstance(job.provider_result, dict)
+            else None
+        )
+        normalized = normalize_director_result(provider_payload)
+        self.record_shot_plan_generation_validation(job_id, normalized)
+        existing = next(
+            (
+                plan
+                for plan in self._repository.list_shot_plans(project_id)
+                if plan.producing_job_id == job_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        pending_candidate = next(
+            (
+                plan
+                for plan in self._repository.list_shot_plans(project_id)
+                if plan.review_status == "candidate"
+            ),
+            None,
+        )
+        if pending_candidate is not None:
+            raise StudioConflictError("another shot plan candidate is waiting for review")
+        if normalized.disposition == "invalid":
+            raise StudioValidationError("director result cannot be read")
+        if normalized.disposition == "needs_input" or normalized.plan is None:
+            raise StudioConflictError("director result requires input before materialization")
+        return self.complete_shot_plan_job(job_id, normalized.plan)
+
+    def materialize_shot_plan_generation_result(
+        self,
+        project_id: uuid.UUID,
+        job_id: uuid.UUID,
+        command: ShotPlanGenerationMaterializeCommand,
+    ) -> ShotPlanVersionDto:
+        self._require_project(project_id)
+        job = self.get_job(job_id)
+        if job.project_id != project_id or job.kind != "plan_shots":
+            raise StudioNotFoundError("shot plan generation result not found")
+        if not isinstance(job.provider_result, dict) or not isinstance(
+            job.provider_result.get("payload"), dict
+        ):
+            raise StudioValidationError("director result payload is missing")
+        existing = next(
+            (
+                plan
+                for plan in self._repository.list_shot_plans(project_id)
+                if plan.producing_job_id == job_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        if any(
+            plan.review_status == "candidate"
+            for plan in self._repository.list_shot_plans(project_id)
+        ):
+            raise StudioConflictError("another shot plan candidate is waiting for review")
+        return self.complete_shot_plan_job(job_id, command.payload)
 
     def register_asset(
         self,
@@ -1402,9 +1837,6 @@ class StudioService:
     def current_selections(self, project_id: uuid.UUID) -> dict[str, AssetDto]:
         self._require_project(project_id)
         return self._repository.current_selections(project_id)
-
-    def environment_presets(self) -> list[EnvironmentPresetDto]:
-        return self._repository.environment_presets()
 
     def current_selection_hash(self, project_id: uuid.UUID) -> str:
         selections = self._repository.current_selections(project_id)
@@ -1530,11 +1962,12 @@ class StudioService:
     ) -> AssetGenerationPreviewDto:
         project = self._require_project(project_id)
         selections = self._repository.current_selections(project_id)
+        story = self._repository.active_story(project_id)
         reference_roles: dict[str, tuple[str, ...]] = {
             "episode_child": ("episode_child", "style_board"),
             "episode_cat": ("episode_cat", "style_board"),
             "pair_scale": ("episode_child", "episode_cat", "pair_scale", "style_board"),
-            "environment": ("environment", "style_board"),
+            "environment": ("style_board", "episode_child", "episode_cat"),
             "style_board": ("style_board",),
         }
         references = [
@@ -1546,12 +1979,35 @@ class StudioService:
             for role in reference_roles[command.kind]
             if role in selections
         ]
-        compiled = compile_references(references, maximum_references=4)
-        prompt = _asset_prompt(project, command.kind)
+        if command.kind == "environment":
+            if story is None:
+                raise StudioValidationError("active story is required for environment generation")
+            missing = [
+                role
+                for role in ("style_board", "episode_child", "episode_cat")
+                if role not in selections
+            ]
+            if missing:
+                raise StudioValidationError(
+                    "fixed character and style references are incomplete: " + ", ".join(missing)
+                )
+            compiled = compile_references(
+                references,
+                maximum_references=3,
+                role_order=("style_board", "episode_child", "episode_cat"),
+            )
+            prompt = _environment_asset_prompt(project, story)
+            negative_prompt = _environment_negative_prompt()
+        else:
+            compiled = compile_references(references, maximum_references=4)
+            prompt = _asset_prompt(project, command.kind)
+            negative_prompt = _default_asset_negative_prompt()
         document = {
             "projectId": str(project_id),
+            "canonProfileId": str(project.canon_profile_id),
             "kind": command.kind,
             "prompt": prompt,
+            "negativePrompt": negative_prompt,
             "references": [
                 item.model_dump(mode="json", by_alias=True) for item in compiled.references
             ],
@@ -1559,22 +2015,39 @@ class StudioService:
             "model": self._provider_runtime.image_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
         }
-        return AssetGenerationPreviewDto(
-            inputHash=_hash_document(document),
+        if command.kind == "environment" and story is not None:
+            document.update(
+                {
+                    "sourceStoryVersionId": str(story.id),
+                    "environmentIntent": story.environment_intent,
+                    "subjectPolicy": "empty_scene",
+                    "promptCompilerRevision": "catflow-environment-v2",
+                }
+            )
+        input_hash = _hash_document(document)
+        preview = AssetGenerationPreviewDto(
+            inputHash=input_hash,
             kind=command.kind,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.image_model,
             capabilityRevision=self._provider_runtime.capability_revision,
             prompt=prompt,
-            negativePrompt=(
-                "摄影写实，3D塑料质感，额外肢体，融脸，文字，Logo，水印，"
-                "叶片、枝条、露珠、绿色微距摄影，禁止8岁以上的修长儿童比例，"
-                "禁止青少年或成人脸型，禁止过长四肢，禁止身体比例超过约5头身，"
-                "禁止儿童身高与猫咪比例失真"
-            ),
+            negativePrompt=negative_prompt,
             references=compiled.references,
             expectedCostMicros=None,
             costEstimateStatus="unmetered_paid",
+        )
+        if command.kind != "environment" or story is None:
+            return preview
+        return preview.model_copy(
+            update={
+                "image_input_snapshot": _image_generation_input_snapshot(
+                    preview,
+                    story=story,
+                    state="preview",
+                    created_at=datetime.now(UTC),
+                )
+            }
         )
 
     def create_asset_generation_job(
@@ -1587,6 +2060,17 @@ class StudioService:
             raise StudioConflictError("generation input hash changed")
         self._require_paid_calls_enabled()
         now = datetime.now(UTC)
+        story = self._repository.active_story(project_id)
+        image_input_snapshot = (
+            _image_generation_input_snapshot(
+                preview,
+                story=story,
+                state="submitted",
+                created_at=now,
+            )
+            if preview.kind == "environment" and story is not None
+            else None
+        )
         return self._create_job(
             JobDto(
                 id=uuid.uuid4(),
@@ -1598,10 +2082,15 @@ class StudioService:
                 provider=preview.provider,
                 model=preview.model,
                 expectedCostMicros=preview.expected_cost_micros,
+                imageInputSnapshot=image_input_snapshot,
                 frozenInput={
                     "role": preview.kind,
                     "prompt": preview.prompt,
                     "negativePrompt": preview.negative_prompt,
+                    "compiledProviderPrompt": compile_provider_image_prompt(
+                        prompt=preview.prompt,
+                        negative_prompt=preview.negative_prompt,
+                    ),
                     "references": [
                         item.model_dump(mode="json", by_alias=True) for item in preview.references
                     ],
@@ -1609,6 +2098,14 @@ class StudioService:
                     "referenceAssetIds": [
                         str(item.asset_id) for item in preview.references if item.included
                     ],
+                    "referenceRoles": [
+                        item.role for item in preview.references if item.included
+                    ],
+                    "imageInputSnapshot": (
+                        image_input_snapshot.model_dump(mode="json", by_alias=True)
+                        if image_input_snapshot is not None
+                        else None
+                    ),
                 },
                 resultAssetIds=[],
                 createdAt=now,
@@ -1634,7 +2131,7 @@ class StudioService:
             "episode_child": ("episode_child", "style_board"),
             "episode_cat": ("episode_cat", "style_board"),
             "pair_scale": ("episode_child", "episode_cat", "pair_scale", "style_board"),
-            "environment": ("environment", "style_board"),
+            "environment": ("style_board", "episode_child", "episode_cat"),
             "style_board": ("style_board",),
         }
         labels = {
@@ -1655,20 +2152,47 @@ class StudioService:
             for role in roles
             if role in selections
         ]
-        frozen_input = {
+        frozen_input: dict[str, Any] = {
             "candidateAssetId": str(candidate.id),
             "candidateSha256": candidate.sha256,
             "candidateRole": candidate.role,
             "references": references,
             "canonProfileId": str(self.current_canon_profile_id()),
-            "diagnosticSchema": "candidate-quality-report-v1",
             "referenceAssetIds": [reference["assetId"] for reference in references],
-            "prompt": (
-                "依据带标签的 Canon 身份、同框比例与净化画风板对照候选图片，"
-                "返回身份、画风、结构和技术质量建议；AI 建议不得自动批准或拒绝。"
-            ),
-            "outputSchema": _diagnostic_output_schema(),
         }
+        if candidate.role == "environment":
+            story = self._repository.active_story(project_id)
+            if story is None:
+                raise StudioValidationError("active story is required for environment diagnosis")
+            frozen_input.update(
+                {
+                    "diagnosticSchema": "environment-quality-report-v2",
+                    "subjectPolicy": "empty_scene",
+                    "sourceStoryVersionId": str(story.id),
+                    "environmentIntent": story.environment_intent,
+                    "prompt": (
+                        f"检查环境候选是否符合环境意图“{story.environment_intent}”。"
+                        "候选应是空场景，不应出现儿童、成年人、猫咪、其他动物、身体局部或倒影。"
+                        "图一画风板用于比较线条、材质、色彩和光线；图二儿童与图三猫咪只用于"
+                        "比较整套插画渲染语言，并帮助识别候选中不应出现的角色。"
+                        "同时判断空间和道具尺度是否能容纳约1.2米儿童与固定比例猫咪活动。"
+                        "返回环境吻合、无角色、画风一致、活动空间和技术质量建议；"
+                        "建议不得自动批准或拒绝。"
+                    ),
+                    "outputSchema": _environment_diagnostic_output_schema(),
+                }
+            )
+        else:
+            frozen_input.update(
+                {
+                    "diagnosticSchema": "candidate-quality-report-v1",
+                    "prompt": (
+                        "依据带标签的 Canon 身份、同框比例与净化画风板对照候选图片，"
+                        "返回身份、画风、结构和技术质量建议；AI 建议不得自动批准或拒绝。"
+                    ),
+                    "outputSchema": _diagnostic_output_schema(),
+                }
+            )
         now = datetime.now(UTC)
         return self._create_job(
             JobDto(
@@ -2421,7 +2945,8 @@ def _planner_prompt(project: ProjectDto, user_text: str) -> str:
         "标题使用4至12个汉字，摘要不超过60个汉字；标题、摘要与触发字段不得整句重复，"
         "不得复述用户原文。禁止使用‘围绕……展开’、‘通过……呈现’、‘营造……氛围’、"
         "‘体现治愈感’等空泛套话；每个字段优先描述儿童、猫咪、道具或环境具体、可观察的"
-        "动作与状态变化。"
+        "动作与状态变化。environmentIntent只描述空间、天气、家具、道具、构图和光线，"
+        "不得包含儿童、猫咪或其他角色的动作；角色行为必须写入对应的动作字段。"
     )
 
 
@@ -2431,6 +2956,8 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
         f"你是CatFlow专业短片导演。把已采用故事《{story.title}》设计为"
         f"{project.target_duration_seconds}秒、24fps、9:16的一人一猫生活短片。"
         "只允许1至4个镜头，单镜头至少2秒，总帧数必须精确等于目标秒数乘24。"
+        "shots数组只能包含最终采用且内容完整的镜头；不得输出空占位镜头、备用镜头或修订镜头，"
+        "不得在数组末尾追加用于解释、自我纠正或替换前文的条目。"
         f"唯一因果链：触发“{event.trigger}”；孩子动作“{event.child_action}”；"
         f"猫咪回应“{event.cat_response}”；可见变化“{event.visible_change}”；"
         f"主动结尾“{event.warm_ending}”。"
@@ -2471,6 +2998,40 @@ def _diagnostic_output_schema() -> dict[str, Any]:
                     },
                 },
             },
+        },
+    }
+
+
+def _environment_diagnostic_output_schema() -> dict[str, Any]:
+    verdict = {"type": "string", "enum": ["pass", "warning", "fail"]}
+    required = [
+        "intentMatch",
+        "characterFree",
+        "styleMatch",
+        "stagingSpace",
+        "technical",
+        "warnings",
+    ]
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required,
+        "properties": {
+            name: verdict for name in required if name != "warnings"
+        }
+        | {
+            "warnings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["code", "message"],
+                    "properties": {
+                        "code": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                },
+            }
         },
     }
 
@@ -2779,4 +3340,70 @@ def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind) -> str:
     return (
         f"{responsibilities[kind]}。9:16，原创猫咪IP，主题：{project.theme}。"
         "不得出现摄影写实、文字、水印、叶片微距摄影或角色身份漂移。"
+    )
+
+
+def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
+    environment_intent = story.environment_intent.rstrip("。！？!?；; \t\r\n")
+    return (
+        f"为《{project.title}》生成一张9:16、2K PNG的空场景环境设计图。"
+        f"环境意图：{environment_intent}。"
+        "只提取环境意图中的空间、天气、家具、道具、构图和光线；"
+        "即使原文提到儿童、猫咪或动作，也不得在画面中绘制人物、动物、身体局部或倒影。"
+        "为后续一位约1.2米高的6至7岁儿童和一只灰白虎斑猫预留清楚的前景、中景、"
+        "落脚位置与动作空间，但不要把角色画入环境板。"
+        "图一是固定画风板，只负责色彩、柔和漫射光、哑光材质、轻微纸感颗粒和暖灰细轮廓线；"
+        "图二是固定儿童设计，只用于匹配整套插画的轮廓精细度、柔和程度和渲染语言，不得复制儿童主体；"
+        "图三是固定猫咪设计，只用于匹配毛发、轮廓和整体插画语言，不得复制猫咪主体。"
+        "自然暖色但不过度橙黄，空间与道具比例可信，保持原创二维柔和数字插画。"
+    )
+
+
+def _environment_negative_prompt() -> str:
+    return (
+        "儿童、成年人、任何人物、人物局部、猫咪、其他动物、人物或动物倒影，"
+        "真实摄影、照片质感、3D塑料质感、叶片微距摄影、枝条露珠素材污染，"
+        "文字、Logo、水印、过度橙黄、错误透视、无法容纳角色活动的拥挤空间"
+    )
+
+
+def _default_asset_negative_prompt() -> str:
+    return (
+        "摄影写实，3D塑料质感，额外肢体，融脸，文字，Logo，水印，"
+        "叶片、枝条、露珠、绿色微距摄影，禁止8岁以上的修长儿童比例，"
+        "禁止青少年或成人脸型，禁止过长四肢，禁止身体比例超过约5头身，"
+        "禁止儿童身高与猫咪比例失真"
+    )
+
+
+def _image_generation_input_snapshot(
+    preview: AssetGenerationPreviewDto,
+    *,
+    story: StoryVersionDto,
+    state: Literal["preview", "submitted"],
+    created_at: datetime,
+) -> ImageGenerationInputSnapshotDto:
+    if preview.kind != "environment":
+        raise ValueError("only environment generation has an image input snapshot")
+    return ImageGenerationInputSnapshotDto(
+        schemaVersion=1,
+        state=state,
+        kind="environment",
+        subjectPolicy="empty_scene",
+        sourceStoryVersionId=story.id,
+        environmentIntent=story.environment_intent,
+        provider=preview.provider,
+        model=preview.model,
+        capabilityRevision=preview.capability_revision,
+        prompt=preview.prompt,
+        negativePrompt=preview.negative_prompt,
+        references=[
+            GenerationInputReferenceDto.model_validate(
+                reference.model_dump(mode="json", by_alias=True)
+            )
+            for reference in preview.references
+        ],
+        inputHash=preview.input_hash,
+        promptCompilerRevision="catflow-environment-v2",
+        createdAt=created_at,
     )

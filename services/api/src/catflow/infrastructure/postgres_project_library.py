@@ -32,7 +32,6 @@ from .models import (
     AssetRecord,
     CanonProfileRecord,
     EditVersionRecord,
-    EnvironmentPresetRecord,
     JobRecord,
     ProjectCollectionRecord,
     ProjectRecord,
@@ -164,14 +163,6 @@ tag_state AS (
     FROM catflow.project_tags
     GROUP BY project_id
 ),
-active_environment AS (
-    SELECT preset.asset_id, asset.sha256
-    FROM catflow.environment_presets AS preset
-    JOIN catflow.assets AS asset ON asset.id = preset.asset_id
-    WHERE preset.active = true
-    ORDER BY preset.created_at DESC, preset.id DESC
-    LIMIT 1
-),
 asset_candidates AS (
     SELECT
         project.id AS project_id,
@@ -193,15 +184,6 @@ asset_candidates AS (
         selection.sha256,
         2
     FROM current_selections AS selection
-    UNION ALL
-    SELECT
-        project.id,
-        'environment',
-        environment.asset_id::text,
-        environment.sha256,
-        3
-    FROM catflow.projects AS project
-    CROSS JOIN active_environment AS environment
 ),
 current_assets AS (
     SELECT DISTINCT ON (project_id, slot)
@@ -282,7 +264,7 @@ project_facts AS (
         coalesce(job_state.has_running, false) AS has_running_job,
         coalesce(repair_state.has_candidate, false) AS has_repair_candidate,
         coalesce(video_asset_state.has_video_candidate, false) AS has_video_candidate,
-        active_environment.asset_id AS environment_asset_id,
+        (current_asset_state.assets -> 'environment' ->> 'assetId')::uuid AS environment_asset_id,
         poster.id AS poster_asset_id,
         greatest(
             project.created_at,
@@ -308,7 +290,6 @@ project_facts AS (
     LEFT JOIN repair_state ON repair_state.project_id = project.id
     LEFT JOIN video_asset_state ON video_asset_state.project_id = project.id
     LEFT JOIN tag_state ON tag_state.project_id = project.id
-    LEFT JOIN active_environment ON true
     LEFT JOIN LATERAL (
         SELECT candidate.id
         FROM catflow.assets AS candidate
@@ -838,14 +819,6 @@ class PostgresProjectLibraryRepository:
             for project_selections in selections.values()
             for selection in project_selections
         }
-        active_environment = session.scalar(
-            select(EnvironmentPresetRecord)
-            .where(EnvironmentPresetRecord.active.is_(True))
-            .order_by(EnvironmentPresetRecord.created_at.desc())
-            .limit(1)
-        )
-        if active_environment is not None:
-            asset_ids.add(active_environment.asset_id)
         assets = (
             {
                 record.id: record
@@ -900,13 +873,6 @@ class PostgresProjectLibraryRepository:
                     asset = assets.get(selection.asset_id)
                     if asset is not None:
                         current_assets[selection.slot] = (asset.id, asset.sha256)
-            if active_environment is not None:
-                environment_asset = assets.get(active_environment.asset_id)
-                if environment_asset is not None:
-                    current_assets["environment"] = (
-                        environment_asset.id,
-                        environment_asset.sha256,
-                    )
             selection_hash = _selection_hash(current_assets)
             plan_outdated = active_plan is not None and (
                 active_story is None
