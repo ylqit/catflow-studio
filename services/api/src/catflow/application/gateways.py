@@ -51,12 +51,13 @@ class SegmentVideoGenerationRequest:
     issue_start_seconds: float
     issue_end_seconds: float
     anchor_in_path: Path
-    anchor_out_path: Path
+    anchor_out_path: Path | None
     canon_reference_paths: tuple[Path, ...]
     canon_reference_roles: tuple[str, ...]
     duration_seconds: int
     resolution: Literal["480p"]
     ratio: Literal["9:16"]
+    prompt_compiler_revision: str = "segment-edit-v2"
 
     def __post_init__(self) -> None:
         if not self.instruction.strip():

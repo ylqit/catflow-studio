@@ -49,7 +49,7 @@ class ArkResultLandingService:
             self._store_planner(job_id)
         elif kind == "plan_shots":
             self._store_shot_plan(job_id)
-        elif kind == "plan_series":
+        elif kind in {"plan_series", "plan_series_segment"}:
             self._store_series_plan(job_id)
         elif kind == "analyze_story_source":
             self._store_story_source_analysis(job_id)
@@ -114,10 +114,22 @@ class ArkResultLandingService:
         if job.series_id is None:
             raise ValueError("series planning job has no series")
         series = self._studio_service.get_story_series(job.series_id)
+        is_segment = job.kind == "plan_series_segment"
+        frozen_episode_count = job.frozen_input.get("plannedEpisodeCount")
+        if not isinstance(frozen_episode_count, int) or frozen_episode_count < 1:
+            raise ValueError("series planning job has no valid frozen episode count")
         normalized = normalize_series_plan_result(
             payload,
-            expected_episode_count=series.planned_episode_count,
+            expected_episode_count=frozen_episode_count,
             narrative_mode=series.narrative_mode,
+            source_unit_ordinals={
+                beat.binding_order
+                for beat in self._studio_service.list_series_source_beats(job.series_id)
+            },
+            start_episode_order=(
+                int(job.frozen_input["startEpisodeOrder"]) if is_segment else 1
+            ),
+            require_complete_source_coverage=not is_segment,
         )
         self._studio_service.record_series_plan_validation(
             job_id, normalized.validation_document()
@@ -131,11 +143,18 @@ class ArkResultLandingService:
                     for issue in normalized.issues
                 ),
             )
-        self._studio_service.complete_series_plan_job(
-            job_id,
-            normalized.plan,
-            validation_issues=list(normalized.issues),
-        )
+        if is_segment:
+            self._studio_service.complete_series_plan_segment_job(
+                job_id,
+                normalized.plan,
+                validation_issues=list(normalized.issues),
+            )
+        else:
+            self._studio_service.complete_series_plan_job(
+                job_id,
+                normalized.plan,
+                validation_issues=list(normalized.issues),
+            )
 
     def _store_story_source_analysis(self, job_id: uuid.UUID) -> None:
         result = self._provider_result(job_id)

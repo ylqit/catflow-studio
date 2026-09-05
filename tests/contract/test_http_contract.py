@@ -201,7 +201,7 @@ def test_video_repair_http_preview_and_create_only_enqueue_one_candidate() -> No
     assert stale.json()["latestPreview"]["instruction"] == "改成猫咪主动收回前爪。"
 
 
-def test_video_edit_http_rejects_a_sub_four_second_issue_range() -> None:
+def test_video_edit_http_accepts_short_issue_but_rejects_out_of_bounds() -> None:
     service, client = _app_client()
     project_id = uuid.UUID(
         client.post(
@@ -223,13 +223,15 @@ def test_video_edit_http_rejects_a_sub_four_second_issue_range() -> None:
         f"/api/v1/projects/{project_id}/video-edits/preview",
         json={
             "baseVideoAssetId": str(base.id),
-            "issueRange": {"startFrame": 0, "endFrame": 95},
+            "issueRange": {"startFrame": 0, "endFrame": 1},
             "instruction": "修正动作。",
         },
         headers=WRITE_HEADERS,
     )
 
-    assert response.status_code == 422
+    # The request passes structural validation and reaches the missing-reference gate.
+    assert response.status_code == 409
+    assert "missing segment repair references" in str(response.json())
 
     out_of_bounds = client.post(
         f"/api/v1/projects/{project_id}/video-edits/preview",
@@ -243,6 +245,59 @@ def test_video_edit_http_rejects_a_sub_four_second_issue_range() -> None:
 
     assert out_of_bounds.status_code == 422
     assert service.list_video_repairs(project_id) == []
+
+
+def test_problem_video_can_enter_draft_but_generic_selection_cannot_bypass_review():
+    service, client = _app_client()
+    project_id = uuid.UUID(
+        client.post(
+            "/api/v1/projects",
+            json={"title": "有问题的视频", "theme": "野餐", "targetDurationSeconds": 12},
+            headers=WRITE_HEADERS,
+        ).json()["id"]
+    )
+    asset = service.register_asset(
+        project_id,
+        role="video",
+        media_type="video",
+        sha256="c" * 64,
+        metadata={"durationFrames": 289},
+    )
+    choose = f"/api/v1/projects/{project_id}/selections"
+    assert (
+        client.post(
+            choose, json={"slot": "video", "assetId": str(asset.id)}, headers=WRITE_HEADERS
+        ).status_code
+        == 409
+    )
+    result = client.post(
+        f"/api/v1/projects/{project_id}/video-edit-drafts",
+        json={"sourceVideoAssetId": str(asset.id), "idempotencyKey": "unaccepted-video-draft"},
+        headers=WRITE_HEADERS,
+    )
+    assert result.status_code == 201
+    assert result.json()["sourceVideoAssetId"] == str(asset.id)
+    review = client.post(
+        f"/api/v1/projects/{project_id}/video-reviews",
+        json={
+            "assetId": str(asset.id),
+            "checks": {"causalChainAndActiveEnding": "fail"},
+            "notes": "饼干状态错误",
+            "issues": [{"range": {"startFrame": 144, "endFrame": 289}, "note": "保持饼干在篮内"}],
+            "idempotencyKey": "persist-real-failure",
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert review.status_code == 201
+    assert (
+        client.post(
+            choose,
+            json={"slot": "video", "assetId": str(asset.id), "reviewId": review.json()["id"]},
+            headers=WRITE_HEADERS,
+        ).status_code
+        == 409
+    )
+    assert "video" not in service.workspace(project_id)["selections"]
 
 
 def test_planner_http_flow_returns_durable_job_and_adopts_directly_to_story() -> None:
@@ -377,9 +432,7 @@ def test_shot_plan_idempotency_input_conflict_is_structured_and_creates_no_job()
     replacement_environment = service.register_asset(
         project.id, role="environment", media_type="image", sha256="f" * 64
     )
-    service.select_asset(
-        project.id, slot="environment", asset_id=replacement_environment.id
-    )
+    service.select_asset(project.id, slot="environment", asset_id=replacement_environment.id)
 
     conflict = client.post(
         f"/api/v1/projects/{project.id}/shot-plans/generations",

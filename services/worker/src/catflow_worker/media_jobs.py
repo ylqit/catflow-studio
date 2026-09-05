@@ -9,6 +9,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from catflow.application.service import EditDecisionListDto
+from catflow.domain.video_repairs import EditDecisionListV2
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import (
     AssetRecord,
@@ -50,9 +52,9 @@ class LocalMediaJobExecutor:
             if job.kind == "extract_continuity_frames":
                 self._extract_continuity_frames(job_id)
                 return
-            if job.kind != "render_export":
+            if job.kind not in {"render_export", "render_edit_preview"}:
                 raise ValueError(f"job kind is not a local media job: {job.kind}")
-            expected_role = "final"
+            expected_role = "edit_preview" if job.kind == "render_edit_preview" else "final"
             existing = (
                 session.scalar(
                     select(AssetRecord).where(
@@ -63,16 +65,19 @@ class LocalMediaJobExecutor:
                 if expected_role
                 else None
             )
-            if existing is not None:
+            if existing is not None and expected_role != "edit_preview":
                 if existing.role in {"video", "final"}:
                     self._poster_generator.ensure_for_asset(existing.id)
                 return
-        self._render_edit(job_id)
+        if expected_role == "edit_preview":
+            self._render_draft_preview(job_id)
+        else:
+            self._render_edit(job_id)
         with self._sessions() as session:
             primary = session.scalar(
                 select(AssetRecord).where(
                     AssetRecord.producing_job_id == job_id,
-                    AssetRecord.role == "final",
+                    AssetRecord.role == expected_role,
                 )
             )
             if primary is not None:
@@ -116,9 +121,7 @@ class LocalMediaJobExecutor:
         )
         for role, candidate_index, timestamp in frame_specs:
             suffix = (
-                "last-frame"
-                if role == "episode_last_frame"
-                else f"keyframe-{candidate_index + 1}"
+                "last-frame" if role == "episode_last_frame" else f"keyframe-{candidate_index + 1}"
             )
             storage_key = f"{destination_root}/{suffix}.png"
             destination = self._media_store.resolve(storage_key)
@@ -188,7 +191,33 @@ class LocalMediaJobExecutor:
             edit = session.get(EditVersionRecord, edit_id)
             if job is None or edit is None or edit.project_id != job.project_id:
                 raise ValueError("edit version not found")
-            sources = list(edit.edl_json["sourceVideoSelections"])
+            edl = job.frozen_input_json.get("edl", edit.edl_json)
+            storage_key = f"generated/{job.project_id}/final/{job_id}.mp4"
+        destination = self._media_store.resolve(storage_key)
+        metadata = self.render_timeline(job_id, edl, destination)
+        asset_id = self._persist_asset(
+            job_id,
+            role="final",
+            storage_key=storage_key,
+            path=destination,
+            media_type="video",
+            metadata=metadata,
+        )
+        with self._sessions.begin() as session:
+            edit = session.get(EditVersionRecord, edit_id)
+            if edit is not None:
+                edit.rendered_asset_id = asset_id
+                edit.status = "rendered"
+
+    def _render_legacy_timeline(
+        self, job_id: uuid.UUID, edl: dict[str, object], destination: Path
+    ) -> dict[str, object]:
+        edl = EditDecisionListDto.model_validate(edl).model_dump(mode="json", by_alias=True)
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if job is None:
+                raise ValueError("legacy timeline job not found")
+            sources = list(edl["sourceVideoSelections"])
             if len(sources) != 1:
                 raise ValueError("the first CatFlow renderer accepts one selected video")
             source = sources[0]
@@ -200,8 +229,6 @@ class LocalMediaJobExecutor:
             source_path = self._media_store.resolve(source_asset.storage_key)
             if not source_path.is_file():
                 raise ValueError("edit source content not found")
-            project_id = job.project_id
-            edl = edit.edl_json
 
         start_seconds = int(source["startMs"]) / 1000
         duration_seconds = (int(source["endMs"]) - int(source["startMs"])) / 1000
@@ -212,6 +239,7 @@ class LocalMediaJobExecutor:
             else 0
         )
         filters = [
+            "fps=24",
             "scale=720:1280:force_original_aspect_ratio=decrease",
             "pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=0x1F1C1A",
             "setsar=1",
@@ -225,8 +253,6 @@ class LocalMediaJobExecutor:
                     f"fade=t=out:st={fade_out_start:.3f}:d={fade_seconds:.3f}",
                 ]
             )
-        storage_key = f"generated/{project_id}/final/{job_id}.mp4"
-        destination = self._media_store.resolve(storage_key)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f"{destination.stem}.partial.mp4")
         command = [
@@ -256,10 +282,137 @@ class LocalMediaJobExecutor:
             command.append("-an")
         else:
             command.extend(["-map", "0:a?", "-c:a", "aac", "-b:a", "128k"])
+            if (
+                edl["audioPolicy"] == "native_fades"
+                and fade_seconds > 0
+                and self._audio_codec(source_path)
+            ):
+                command.extend(
+                    [
+                        "-af",
+                        f"afade=t=in:st=0:d={fade_seconds:.3f},afade=t=out:st={fade_out_start:.3f}:d={fade_seconds:.3f}",
+                    ]
+                )
         command.append(str(temporary))
         self._run(command)
         temporary.replace(destination)
-        metadata = self._probe(destination)
+        metadata = self._probe(
+            destination,
+            expected_duration_seconds=duration_seconds,
+            expected_frame_count=round(duration_seconds * 24),
+        )
+        metadata.update(
+            {
+                "durationFrames": metadata["frameCount"],
+                "frameRateNumerator": 24,
+                "frameRateDenominator": 1,
+                "audioPolicy": edl["audioPolicy"],
+            }
+        )
+        return metadata
+
+    def _render_draft_preview(self, job_id: uuid.UUID) -> None:
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if job is None:
+                raise ValueError("preview job not found")
+            frozen = dict(job.frozen_input_json)
+            project_id = job.project_id
+            existing = session.scalar(
+                select(AssetRecord).where(
+                    AssetRecord.producing_job_id == job_id, AssetRecord.role == "edit_preview"
+                )
+            )
+            if existing is not None:
+                storage_key, asset_id, metadata = (
+                    existing.storage_key,
+                    existing.id,
+                    dict(existing.metadata_json),
+                )
+            completed_thumbnails = set(
+                session.scalars(
+                    select(AssetRecord.candidate_index).where(
+                        AssetRecord.producing_job_id == job_id, AssetRecord.role == "edit_thumbnail"
+                    )
+                )
+            )
+        if existing is None:
+            storage_key = f"generated/{project_id}/edit-previews/{job_id}.mp4"
+            destination = self._media_store.resolve(storage_key)
+            metadata = self.render_timeline(job_id, frozen["edl"], destination, allow_draft=True)
+            metadata.update(
+                {
+                    "editDraftId": frozen.get("editDraftId"),
+                    "editVersionId": frozen["editVersionId"],
+                    "repairId": frozen.get("repairId"),
+                    "timelineHash": frozen["timelineHash"],
+                    "previewOnly": True,
+                }
+            )
+            asset_id = self._persist_asset(
+                job_id,
+                role="edit_preview",
+                storage_key=storage_key,
+                path=destination,
+                media_type="video",
+                metadata=metadata,
+            )
+        destination = self._media_store.resolve(storage_key)
+        if frozen.get("editDraftId") and not frozen.get("repairId"):
+            with self._sessions.begin() as session:
+                edit = session.get(EditVersionRecord, uuid.UUID(frozen["editVersionId"]))
+                if edit is not None:
+                    edit.rendered_asset_id = asset_id
+        total = int(metadata["durationFrames"])
+        for index, frame in enumerate(sorted({round(i * (total - 1) / 11) for i in range(12)})):
+            if index in completed_thumbnails:
+                continue
+            key = f"generated/{project_id}/edit-previews/{job_id}-{frame}.jpg"
+            path = self._media_store.resolve(key)
+            self._run(
+                [
+                    str(self._ffmpeg_path),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(destination),
+                    "-vf",
+                    f"select=eq(n\\,{frame}),scale=160:-2",
+                    "-frames:v",
+                    "1",
+                    str(path),
+                ]
+            )
+            self._persist_asset(
+                job_id,
+                role="edit_thumbnail",
+                candidate_index=index,
+                storage_key=key,
+                path=path,
+                media_type="image",
+                metadata={
+                    **self._probe_still(path),
+                    "sourceFrame": frame,
+                    "previewAssetId": str(asset_id),
+                    **{
+                        k: metadata[k]
+                        for k in ("editDraftId", "editVersionId", "repairId", "timelineHash")
+                    },
+                },
+            )
+
+    def _render_edit_v2(self, job_id: uuid.UUID, edit_id: uuid.UUID) -> None:
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            edit = session.get(EditVersionRecord, edit_id)
+            if job is None or edit is None or edit.project_id != job.project_id:
+                raise ValueError("edit version not found")
+            edl = job.frozen_input_json.get("edl", edit.edl_json)
+            storage_key = f"generated/{job.project_id}/final/{job_id}.mp4"
+        destination = self._media_store.resolve(storage_key)
+        metadata = self.render_timeline(job_id, edl, destination)
         asset_id = self._persist_asset(
             job_id,
             role="final",
@@ -274,13 +427,22 @@ class LocalMediaJobExecutor:
                 edit.rendered_asset_id = asset_id
                 edit.status = "rendered"
 
-    def _render_edit_v2(self, job_id: uuid.UUID, edit_id: uuid.UUID) -> None:
+    def render_timeline(
+        self,
+        job_id: uuid.UUID,
+        edl: dict[str, object],
+        destination: Path,
+        *,
+        allow_draft: bool = False,
+    ) -> dict[str, object]:
+        """Materialize one frozen EDL for export, draft preview, or repair input extraction."""
+        if "sourceVideoSelections" in edl:
+            return self._render_legacy_timeline(job_id, edl, destination)
+        edl = EditDecisionListV2.model_validate(edl).model_dump(mode="json", by_alias=True)
         with self._sessions() as session:
             job = session.get(JobRecord, job_id)
-            edit = session.get(EditVersionRecord, edit_id)
-            if job is None or edit is None or edit.project_id != job.project_id:
-                raise ValueError("edit version not found")
-            edl = edit.edl_json
+            if job is None:
+                raise ValueError("timeline render job not found")
             if edl.get("format") != "catflow-edl-v2":
                 raise ValueError("edit format version does not match its EDL")
             frame_rate = edl["frameRate"]
@@ -312,8 +474,18 @@ class LocalMediaJobExecutor:
                     if (
                         repair is None
                         or repair.project_id != job.project_id
-                        or repair.status != "approved"
-                        or repair.approved_candidate_asset_id != asset.id
+                        or not (
+                            (
+                                allow_draft
+                                and repair.status
+                                in {"candidate_ready", "applied_to_draft", "approved"}
+                                and repair.candidate_asset_id == asset.id
+                            )
+                            or (
+                                repair.status == "approved"
+                                and repair.approved_candidate_asset_id == asset.id
+                            )
+                        )
                     ):
                         raise ValueError("repair candidate is not approved for this timeline")
                 elif segment["origin"] != "base_video":
@@ -340,8 +512,6 @@ class LocalMediaJobExecutor:
             root_path = self._media_store.resolve(root.storage_key)
             if not root_path.is_file():
                 raise ValueError("EDL v2 root audio content not found")
-            project_id = job.project_id
-
         boundary_frames: list[int] = []
         for index in range(len(segments) - 1):
             transition = transitions_by_boundary.get(index)
@@ -371,8 +541,6 @@ class LocalMediaJobExecutor:
             adjusted_ranges.append((adjusted_start, adjusted_end))
 
         total_frames = sum(int(segment["durationFrames"]) for segment in segments)
-        storage_key = f"generated/{project_id}/final/{job_id}.mp4"
-        destination = self._media_store.resolve(storage_key)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f"{destination.stem}.partial.mp4")
 
@@ -388,8 +556,8 @@ class LocalMediaJobExecutor:
             adjusted_duration = adjusted_end - adjusted_start
             adjusted_durations.append(adjusted_duration)
             filters.append(
-                f"[{index}:v:0]trim=start_frame={adjusted_start}:end_frame={adjusted_end},"
-                "setpts=PTS-STARTPTS,fps=24,"
+                f"[{index}:v:0]fps=24,trim=start_frame={adjusted_start}:end_frame={adjusted_end},"
+                "setpts=PTS-STARTPTS,"
                 "scale=720:1280:force_original_aspect_ratio=decrease,"
                 "pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=0x1F1C1A,"
                 f"setsar=1,format=yuv420p[s{index}]"
@@ -452,7 +620,7 @@ class LocalMediaJobExecutor:
         temporary.replace(destination)
         metadata = self._probe(
             destination,
-            expected_duration_seconds=round(total_frames / 24),
+            expected_duration_seconds=total_frames / 24,
             expected_frame_count=total_frames,
         )
         metadata.update(
@@ -468,19 +636,7 @@ class LocalMediaJobExecutor:
                 "audioTranscoded": audio_transcoded,
             }
         )
-        asset_id = self._persist_asset(
-            job_id,
-            role="final",
-            storage_key=storage_key,
-            path=destination,
-            media_type="video",
-            metadata=metadata,
-        )
-        with self._sessions.begin() as session:
-            edit = session.get(EditVersionRecord, edit_id)
-            if edit is not None:
-                edit.rendered_asset_id = asset_id
-                edit.status = "rendered"
+        return metadata
 
     def _persist_asset(
         self,
@@ -496,10 +652,10 @@ class LocalMediaJobExecutor:
         digest = _sha256(path)
         with self._sessions.begin() as session:
             existing = session.scalar(
-                    select(AssetRecord).where(
-                        AssetRecord.producing_job_id == job_id,
-                        AssetRecord.role == role,
-                        AssetRecord.candidate_index == candidate_index,
+                select(AssetRecord).where(
+                    AssetRecord.producing_job_id == job_id,
+                    AssetRecord.role == role,
+                    AssetRecord.candidate_index == candidate_index,
                 )
             )
             if existing is not None:
@@ -553,7 +709,7 @@ class LocalMediaJobExecutor:
         path: Path,
         *,
         expected_size: tuple[int, int] = (720, 1280),
-        expected_duration_seconds: int | None = None,
+        expected_duration_seconds: float | None = None,
         expected_frame_count: int | None = None,
     ) -> dict[str, object]:
         completed = self._run(

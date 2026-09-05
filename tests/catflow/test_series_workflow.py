@@ -21,6 +21,9 @@ from catflow.application.series import (
     SeriesPlanDraft,
     SeriesPlanGenerationCommand,
     SeriesPlanMaterializeCommand,
+    SeriesPlanSegmentActivationCommand,
+    SeriesPlanSegmentCommand,
+    SeriesPlanSegmentGenerationCommand,
     normalize_series_plan_result,
 )
 from catflow.application.service import (
@@ -62,6 +65,191 @@ def _series_command(*, episode_count: int = 3) -> SeriesCreateCommand:
         recurringElements=["野餐篮", "毛线球"],
         mustKeep=["同一位孩子", "同一只猫咪"],
         mustAvoid=["危险动作"],
+    )
+
+
+def test_series_length_is_a_product_choice_not_the_provider_batch_limit() -> None:
+    fixed = SeriesCreateCommand.model_validate(
+        {
+            "title": "百集生活",
+            "premise": "持续记录孩子与猫咪的生活。",
+            "narrativeMode": "lightly_serialized",
+            "lengthMode": "fixed",
+            "plannedEpisodeCount": 100,
+            "defaultEpisodeDurationSeconds": 12,
+            "worldSetting": "家与社区",
+            "emotionalDirection": "温暖成长",
+        }
+    )
+    ongoing = SeriesCreateCommand.model_validate(
+        {
+            "title": "持续日常",
+            "premise": "没有预设终点的生活记录。",
+            "narrativeMode": "anthology",
+            "lengthMode": "ongoing",
+            "plannedEpisodeCount": None,
+            "defaultEpisodeDurationSeconds": 12,
+            "worldSetting": "日常空间",
+            "emotionalDirection": "轻松",
+        }
+    )
+
+    assert fixed.planned_episode_count == 100
+    assert ongoing.planned_episode_count is None
+
+
+def test_fixed_long_series_previews_only_the_first_provider_sized_segment() -> None:
+    service = _service()
+    series = service.create_story_series(
+        SeriesCreateCommand.model_validate(
+            {
+                "title": "百集生活",
+                "premise": "持续记录孩子与猫咪的生活。",
+                "narrativeMode": "lightly_serialized",
+                "lengthMode": "fixed",
+                "plannedEpisodeCount": 100,
+                "defaultEpisodeDurationSeconds": 12,
+                "worldSetting": "家与社区",
+                "emotionalDirection": "温暖成长",
+            }
+        )
+    )
+
+    preview = service.preview_series_plan(series.id)
+
+    assert preview.planned_episode_count == 30
+    assert preview.total_planned_episode_count == 100
+    assert preview.remaining_episode_count == 70
+    assert "单次最多规划 30 集" in preview.prompt
+
+
+def test_next_long_series_segment_has_an_explicit_provider_sized_preview_and_job() -> None:
+    service = _service()
+    series = service.create_story_series(_series_command(episode_count=100))
+
+    initial = service.preview_series_plan(series.id)
+    initial_job = service.create_series_plan_job(
+        series.id,
+        SeriesPlanGenerationCommand(
+            expectedInputHash=initial.input_hash,
+            idempotencyKey="initial-long-series-plan",
+        ),
+    )
+    initial_candidate = service.complete_series_plan_job(
+        initial_job.id,
+        _series_plan(episode_count=30),
+    )
+    service.activate_series_plan(
+        series.id,
+        initial_candidate.id,
+        SeriesPlanActivationCommand(
+            expectedActivePlanVersionId=None,
+            idempotencyKey="activate-initial-long-series-plan",
+        ),
+    )
+
+    preview = service.preview_series_plan_segment(
+        series.id,
+        SeriesPlanSegmentCommand(
+            startEpisodeOrder=31,
+            requestedEpisodeCount=30,
+            expectedSeriesPlanVersionId=initial_candidate.id,
+            expectedPreviousSegmentVersionId=None,
+        ),
+    )
+
+    assert preview.start_episode_order == 31
+    assert preview.requested_episode_count == 30
+    assert preview.remaining_episode_count == 40
+    assert "第 31–60 集" in preview.prompt
+
+    job = service.create_series_plan_segment_job(
+        series.id,
+        SeriesPlanSegmentGenerationCommand(
+            startEpisodeOrder=31,
+            requestedEpisodeCount=30,
+            expectedSeriesPlanVersionId=initial_candidate.id,
+            expectedPreviousSegmentVersionId=None,
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="long-series-segment-31-60",
+        ),
+    )
+    assert job.kind == "plan_series_segment"
+    assert job.frozen_input["startEpisodeOrder"] == 31
+
+
+def test_one_segment_request_cannot_exceed_provider_batch_limit() -> None:
+    with pytest.raises(ValidationError):
+        SeriesPlanSegmentCommand(
+            startEpisodeOrder=1,
+            requestedEpisodeCount=31,
+            expectedSeriesPlanVersionId="00000000-0000-0000-0000-000000000001",
+        )
+
+
+def test_segment_result_is_a_candidate_until_adopted_and_then_appends_episodes() -> None:
+    service = _service()
+    series = service.create_story_series(_series_command(episode_count=60))
+    initial_preview = service.preview_series_plan(series.id)
+    initial_job = service.create_series_plan_job(
+        series.id,
+        SeriesPlanGenerationCommand(
+            expectedInputHash=initial_preview.input_hash,
+            idempotencyKey="segment-adoption-initial-job",
+        ),
+    )
+    initial = service.complete_series_plan_job(
+        initial_job.id, _series_plan(episode_count=30)
+    )
+    service.activate_series_plan(
+        series.id,
+        initial.id,
+        SeriesPlanActivationCommand(
+            expectedActivePlanVersionId=None,
+            idempotencyKey="segment-adoption-initial-activate",
+        ),
+    )
+    preview = service.preview_series_plan_segment(
+        series.id,
+        SeriesPlanSegmentCommand(
+            startEpisodeOrder=31,
+            requestedEpisodeCount=30,
+            expectedSeriesPlanVersionId=initial.id,
+        ),
+    )
+    job = service.create_series_plan_segment_job(
+        series.id,
+        SeriesPlanSegmentGenerationCommand(
+            startEpisodeOrder=31,
+            requestedEpisodeCount=30,
+            expectedSeriesPlanVersionId=initial.id,
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="segment-adoption-job-31-60",
+        ),
+    )
+    candidate = service.complete_series_plan_segment_job(
+        job.id,
+        _series_plan(episode_count=30, start_order=31),
+        validation_issues=[],
+    )
+
+    assert candidate.status == "candidate"
+    assert len(service.list_series_episodes(series.id)) == 30
+
+    accepted = service.activate_series_plan_segment(
+        series.id,
+        candidate.id,
+        SeriesPlanSegmentActivationCommand(
+            expectedSeriesPlanVersionId=initial.id,
+            expectedPreviousSegmentVersionId=None,
+            idempotencyKey="segment-adoption-activate-31-60",
+        ),
+    )
+
+    assert accepted.status == "accepted"
+    assert accepted.active is True
+    assert [item.order for item in service.list_series_episodes(series.id)] == list(
+        range(1, 61)
     )
 
 
@@ -150,8 +338,28 @@ def _plan() -> SeriesPlanDraft:
     )
 
 
-@pytest.mark.parametrize("episode_count", [1, 31])
-def test_series_creation_rejects_episode_counts_outside_two_to_thirty(
+def _series_plan(*, episode_count: int, start_order: int = 1) -> SeriesPlanDraft:
+    base = _plan()
+    template = base.episodes[0]
+    return base.model_copy(
+        update={
+            "episodes": [
+                template.model_copy(
+                    update={
+                        "order": order,
+                        "title": f"第 {order} 集",
+                        "opening_state": f"第 {order} 集开场",
+                        "ending_state": f"第 {order} 集结尾",
+                    }
+                )
+                for order in range(start_order, start_order + episode_count)
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize("episode_count", [0, 1])
+def test_fixed_series_creation_rejects_counts_below_two(
     episode_count: int,
 ) -> None:
     with pytest.raises(ValidationError):

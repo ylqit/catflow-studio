@@ -31,11 +31,15 @@ from catflow.application.project_library import (
     suggested_theme_tags,
 )
 from catflow.application.series import (
+    MAX_SERIES_PLANNING_BATCH,
     SeriesCreateCommand,
     SeriesEpisodeDto,
     SeriesPatchCommand,
     SeriesPlanDraft,
+    SeriesPlanSegmentActivationCommand,
+    SeriesPlanSegmentVersionDto,
     SeriesPlanVersionDto,
+    SeriesSourceBeatDto,
     SeriesValidationIssueDto,
     StorySeriesDto,
     validate_series_plan,
@@ -70,8 +74,10 @@ from catflow.application.service import (
     StudioIdempotencyInputConflictError,
     StudioNotFoundError,
     ValidationRunDto,
+    VideoEditDraftDto,
     VideoRepairDto,
     VideoRepairStatus,
+    VideoReviewDto,
 )
 from catflow.application.story_imports import (
     StoryImportAnalysisDraft,
@@ -146,12 +152,13 @@ class MemoryStudioRepository:
         self._story_series: dict[uuid.UUID, StorySeriesDto] = {}
         self._series_plans: dict[uuid.UUID, list[SeriesPlanVersionDto]] = {}
         self._series_episodes: dict[uuid.UUID, list[SeriesEpisodeDto]] = {}
+        self._series_source_beats: dict[uuid.UUID, list[SeriesSourceBeatDto]] = {}
+        self._series_plan_segments: dict[uuid.UUID, list[SeriesPlanSegmentVersionDto]] = {}
         self._series_activation_idempotency: dict[str, uuid.UUID] = {}
         self._series_plan_materialization_idempotency: dict[str, uuid.UUID] = {}
+        self._series_segment_activation_idempotency: dict[str, uuid.UUID] = {}
         self._series_materialization_idempotency: dict[str, uuid.UUID] = {}
-        self._episode_continuity: dict[
-            uuid.UUID, list[EpisodeContinuitySnapshotDto]
-        ] = {}
+        self._episode_continuity: dict[uuid.UUID, list[EpisodeContinuitySnapshotDto]] = {}
         self._continuity_idempotency: dict[str, uuid.UUID] = {}
         self._series_asset_bindings: dict[uuid.UUID, list[SeriesAssetBindingDto]] = {}
         self._episode_reference_manifests: dict[uuid.UUID, list[dict[str, Any]]] = {}
@@ -172,6 +179,8 @@ class MemoryStudioRepository:
         self._jobs_by_idempotency: dict[str, uuid.UUID] = {}
         self._job_events: list[JobEventDto] = []
         self._edits: dict[uuid.UUID, list[EditVersionDto]] = {}
+        self._edit_drafts: dict[uuid.UUID, VideoEditDraftDto] = {}
+        self._video_reviews: dict[uuid.UUID, VideoReviewDto] = {}
         self._video_repairs: dict[uuid.UUID, VideoRepairDto] = {}
         self._repair_approvals_by_idempotency: dict[str, uuid.UUID] = {}
         self._validation_runs: dict[uuid.UUID, ValidationRunDto] = {}
@@ -679,7 +688,12 @@ class MemoryStudioRepository:
         self._story_series[series.id] = series
         self._series_plans[series.id] = []
         self._series_episodes[series.id] = []
+        self._series_source_beats[series.id] = []
+        self._series_plan_segments[series.id] = []
         return series
+
+    def list_series_source_beats(self, series_id: uuid.UUID) -> list[SeriesSourceBeatDto]:
+        return list(self._series_source_beats.get(series_id, ()))
 
     def list_story_series(self) -> list[StorySeriesDto]:
         return sorted(
@@ -730,10 +744,17 @@ class MemoryStudioRepository:
                 item.status = "superseded"
                 item.decided_at = now
         if validation_issues is None:
+            expected_episode_count = min(
+                series.planned_episode_count or len(plan.episodes),
+                MAX_SERIES_PLANNING_BATCH,
+            )
             disposition, issues = validate_series_plan(
                 plan,
-                expected_episode_count=series.planned_episode_count,
+                expected_episode_count=expected_episode_count,
                 narrative_mode=series.narrative_mode,
+                source_unit_ordinals={
+                    beat.binding_order for beat in self._series_source_beats.get(series_id, [])
+                },
             )
         else:
             issues = validation_issues
@@ -801,8 +822,14 @@ class MemoryStudioRepository:
                 item.decided_at = now
         disposition, issues = validate_series_plan(
             plan,
-            expected_episode_count=series.planned_episode_count,
+            expected_episode_count=min(
+                series.planned_episode_count or len(plan.episodes),
+                MAX_SERIES_PLANNING_BATCH,
+            ),
             narrative_mode=series.narrative_mode,
+            source_unit_ordinals={
+                beat.binding_order for beat in self._series_source_beats.get(series_id, [])
+            },
         )
         input_hash = hashlib.sha256(
             json.dumps(
@@ -867,9 +894,7 @@ class MemoryStudioRepository:
             item.active = item.id == selected.id
         selected.status = "accepted"
         selected.decided_at = now
-        existing_by_order = {
-            item.order: item for item in self._series_episodes.get(series_id, [])
-        }
+        existing_by_order = {item.order: item for item in self._series_episodes.get(series_id, [])}
         episodes: list[SeriesEpisodeDto] = []
         for outline in selected.plan.episodes:
             existing_episode = existing_by_order.get(outline.order)
@@ -953,6 +978,187 @@ class MemoryStudioRepository:
         selected.decided_at = datetime.now(UTC)
         return selected
 
+    def create_series_plan_segment_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        start_episode_order: int,
+        requested_episode_count: int,
+        expected_series_plan_version_id: uuid.UUID,
+        previous_segment_version_id: uuid.UUID | None,
+        plan: SeriesPlanDraft,
+        input_hash: str,
+        prompt_revision: str,
+        producing_job_id: uuid.UUID,
+        validation_issues: list[SeriesValidationIssueDto],
+    ) -> SeriesPlanSegmentVersionDto:
+        versions = self._series_plan_segments.setdefault(series_id, [])
+        existing = next(
+            (item for item in versions if item.producing_job_id == producing_job_id),
+            None,
+        )
+        if existing is not None:
+            return existing
+        now = datetime.now(UTC)
+        segment_id = next(
+            (
+                item.segment_id
+                for item in versions
+                if item.start_episode_order == start_episode_order
+            ),
+            uuid.uuid4(),
+        )
+        for item in versions:
+            if item.segment_id == segment_id and item.status == "candidate":
+                item.status = "superseded"
+                item.decided_at = now
+        version = SeriesPlanSegmentVersionDto(
+            id=uuid.uuid4(),
+            segmentId=segment_id,
+            seriesId=series_id,
+            startEpisodeOrder=start_episode_order,
+            requestedEpisodeCount=requested_episode_count,
+            revision=(
+                max(
+                    (item.revision for item in versions if item.segment_id == segment_id),
+                    default=0,
+                )
+                + 1
+            ),
+            status="candidate",
+            active=False,
+            disposition=(
+                "needs_input"
+                if any(item.severity == "blocking" for item in validation_issues)
+                else "candidate_ready"
+            ),
+            plan=plan,
+            issues=validation_issues,
+            producingJobId=producing_job_id,
+            expectedSeriesPlanVersionId=expected_series_plan_version_id,
+            previousSegmentVersionId=previous_segment_version_id,
+            inputHash=input_hash,
+            promptRevision=prompt_revision,
+            createdAt=now,
+        )
+        versions.append(version)
+        job = self._jobs.get(producing_job_id)
+        if job is not None:
+            self._jobs[producing_job_id] = job.model_copy(
+                update={"status": "succeeded", "updated_at": now}
+            )
+        return version
+
+    def list_series_plan_segment_versions(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesPlanSegmentVersionDto]:
+        return sorted(
+            self._series_plan_segments.get(series_id, []),
+            key=lambda item: (item.start_episode_order, item.revision),
+            reverse=True,
+        )
+
+    def activate_series_plan_segment_version(
+        self,
+        series_id: uuid.UUID,
+        segment_version_id: uuid.UUID,
+        command: SeriesPlanSegmentActivationCommand,
+    ) -> SeriesPlanSegmentVersionDto:
+        prior_id = self._series_segment_activation_idempotency.get(command.idempotency_key)
+        versions = self._series_plan_segments.get(series_id, [])
+        selected = next((item for item in versions if item.id == segment_version_id), None)
+        if prior_id is not None:
+            if selected is None or selected.id != prior_id:
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            return selected
+        series = self._story_series.get(series_id)
+        if series is None or selected is None:
+            raise StudioNotFoundError("series plan segment version not found")
+        if series.active_plan_version_id != command.expected_series_plan_version_id:
+            raise StudioConflictError("active series plan changed")
+        active_segments = [item for item in versions if item.active]
+        previous = max(active_segments, key=lambda item: item.start_episode_order, default=None)
+        if (
+            previous.id if previous is not None else None
+        ) != command.expected_previous_segment_version_id:
+            raise StudioConflictError("previous series planning segment changed")
+        if selected.status != "candidate" or selected.disposition != "candidate_ready":
+            raise StudioConflictError("series planning segment requires completion")
+        existing_orders = {item.order for item in self._series_episodes.get(series_id, [])}
+        if any(item.order in existing_orders for item in selected.plan.episodes):
+            raise StudioConflictError("series planning segment overlaps existing episodes")
+        now = datetime.now(UTC)
+        selected.status = "accepted"
+        selected.active = True
+        selected.decided_at = now
+        episodes = self._series_episodes.setdefault(series_id, [])
+        for outline in selected.plan.episodes:
+            episode = SeriesEpisodeDto(
+                id=uuid.uuid4(),
+                seriesId=series_id,
+                order=outline.order,
+                title=outline.title,
+                targetDurationSeconds=outline.target_duration_seconds,
+                status="outline",
+                projectId=None,
+                activeOutlineVersionId=uuid.uuid4(),
+                outline=outline,
+                createdAt=now,
+                updatedAt=now,
+            )
+            episodes.append(episode)
+            previous_outline = next(
+                (item.outline for item in episodes if item.order == episode.order - 1),
+                None,
+            )
+            history = self._episode_continuity.setdefault(episode.id, [])
+            for direction in ("incoming", "outgoing"):
+                history.append(
+                    EpisodeContinuitySnapshotDto(
+                        id=uuid.uuid4(),
+                        episodeId=episode.id,
+                        direction=direction,
+                        source="planned",
+                        state=planned_continuity_state(
+                            bible=selected.plan.series_bible,
+                            episode=outline,
+                            direction=direction,
+                            previous_episode=previous_outline,
+                        ),
+                        decisions={},
+                        confirmed=False,
+                        active=True,
+                        createdAt=now,
+                    )
+                )
+        episodes.sort(key=lambda item: item.order)
+        self._story_series[series_id] = series.model_copy(
+            update={"planned_count": len(episodes), "updated_at": now}
+        )
+        self._series_segment_activation_idempotency[command.idempotency_key] = selected.id
+        return selected
+
+    def reject_series_plan_segment_version(
+        self, series_id: uuid.UUID, segment_version_id: uuid.UUID
+    ) -> SeriesPlanSegmentVersionDto:
+        selected = next(
+            (
+                item
+                for item in self._series_plan_segments.get(series_id, [])
+                if item.id == segment_version_id
+            ),
+            None,
+        )
+        if selected is None:
+            raise StudioNotFoundError("series plan segment version not found")
+        if selected.active or selected.status != "candidate":
+            raise StudioConflictError("only a pending planning segment can be rejected")
+        selected.status = "rejected"
+        selected.decided_at = datetime.now(UTC)
+        return selected
+
     def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]:
         return sorted(self._series_episodes.get(series_id, []), key=lambda item: item.order)
 
@@ -1020,9 +1226,7 @@ class MemoryStudioRepository:
         self._series_materialization_idempotency[idempotency_key] = project.id
         return project
 
-    def list_episode_continuity(
-        self, episode_id: uuid.UUID
-    ) -> list[EpisodeContinuitySnapshotDto]:
+    def list_episode_continuity(self, episode_id: uuid.UUID) -> list[EpisodeContinuitySnapshotDto]:
         return sorted(
             self._episode_continuity.get(episode_id, []),
             key=lambda item: (item.created_at, item.id.hex),
@@ -1042,11 +1246,7 @@ class MemoryStudioRepository:
                 )
             return prior
         active = next(
-            (
-                item
-                for item in history
-                if item.direction == command.direction and item.active
-            ),
+            (item for item in history if item.direction == command.direction and item.active),
             None,
         )
         if active is None:
@@ -1074,11 +1274,7 @@ class MemoryStudioRepository:
     ) -> EpisodeContinuitySnapshotDto:
         history = self._episode_continuity.get(episode_id, [])
         active = next(
-            (
-                item
-                for item in history
-                if item.direction == command.direction and item.active
-            ),
+            (item for item in history if item.direction == command.direction and item.active),
             None,
         )
         if active is None or active.id != command.expected_snapshot_id:
@@ -1111,14 +1307,8 @@ class MemoryStudioRepository:
             None,
         )
 
-    def list_series_asset_bindings(
-        self, series_id: uuid.UUID
-    ) -> list[SeriesAssetBindingDto]:
-        return [
-            item
-            for item in self._series_asset_bindings.get(series_id, [])
-            if item.active
-        ]
+    def list_series_asset_bindings(self, series_id: uuid.UUID) -> list[SeriesAssetBindingDto]:
+        return [item for item in self._series_asset_bindings.get(series_id, []) if item.active]
 
     def replace_series_asset_bindings(
         self, series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
@@ -1126,12 +1316,8 @@ class MemoryStudioRepository:
         if series_id not in self._story_series:
             raise StudioNotFoundError("story series not found")
         current = self.list_series_asset_bindings(series_id)
-        desired = {
-            item.binding_key: (item.role, item.asset_id) for item in command.bindings
-        }
-        existing = {
-            item.binding_key: (item.role, item.asset_id) for item in current
-        }
+        desired = {item.binding_key: (item.role, item.asset_id) for item in command.bindings}
+        existing = {item.binding_key: (item.role, item.asset_id) for item in current}
         if desired == existing:
             return current
         for binding in command.bindings:
@@ -1139,8 +1325,7 @@ class MemoryStudioRepository:
                 raise StudioNotFoundError("series asset not found")
         history = self._series_asset_bindings.setdefault(series_id, [])
         history[:] = [
-            item.model_copy(update={"active": False}) if item.active else item
-            for item in history
+            item.model_copy(update={"active": False}) if item.active else item for item in history
         ]
         now = datetime.now(UTC)
         for binding in command.bindings:
@@ -1159,16 +1344,6 @@ class MemoryStudioRepository:
             )
         return self.list_series_asset_bindings(series_id)
 
-    def find_story_source_document(self, *, content_hash: str) -> StorySourceDocumentDto | None:
-        return next(
-            (
-                item
-                for item in self._story_source_documents.values()
-                if item.content_hash == content_hash
-            ),
-            None,
-        )
-
     def list_story_source_documents(self) -> list[StorySourceDocumentDto]:
         return sorted(
             (
@@ -1182,9 +1357,7 @@ class MemoryStudioRepository:
     def get_story_source_document(self, document_id: uuid.UUID) -> StorySourceDocumentDto | None:
         document = self._story_source_documents.get(document_id)
         return (
-            self._story_source_document_with_job_status(document)
-            if document is not None
-            else None
+            self._story_source_document_with_job_status(document) if document is not None else None
         )
 
     def create_story_source_document(
@@ -1195,9 +1368,21 @@ class MemoryStudioRepository:
         content_hash: str,
         job: JobDto,
     ) -> StorySourceDocumentDto:
-        duplicate = self.find_story_source_document(content_hash=content_hash)
-        if duplicate is not None:
-            return duplicate
+        existing_job = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
+        if existing_job is not None:
+            if (
+                existing_job.kind != "analyze_story_source"
+                or existing_job.story_source_document_id is None
+            ):
+                raise StudioIdempotencyInputConflictError(
+                    "idempotency key already belongs to different input"
+                )
+            existing_document = self._story_source_documents.get(
+                existing_job.story_source_document_id
+            )
+            if existing_document is None:
+                raise StudioConflictError("story source document is missing")
+            return self._story_source_document_with_job_status(existing_document)
         now = datetime.now(UTC)
         document = StorySourceDocumentDto(
             id=document_id,
@@ -1216,9 +1401,7 @@ class MemoryStudioRepository:
         self.create_job(job)
         return document
 
-    def restart_story_source_analysis(
-        self, document_id: uuid.UUID, job: JobDto
-    ) -> JobDto:
+    def restart_story_source_analysis(self, document_id: uuid.UUID, job: JobDto) -> JobDto:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
             if existing.story_source_document_id != document_id:
@@ -1305,6 +1488,7 @@ class MemoryStudioRepository:
                 suggestedSeriesId=item.suggested_series_id,
                 confidence=item.confidence,
                 rationale=item.rationale,
+                episodeCountRecommendation=item.episode_count_recommendation,
                 status="suggested",
                 createdAt=now,
             )
@@ -1334,6 +1518,14 @@ class MemoryStudioRepository:
                 or existing.target != command.target
                 or existing.target_series_id != command.target_series_id
                 or existing.target_project_id != command.target_project_id
+                or (
+                    command.target == "new_series"
+                    and existing.series is not None
+                    and (
+                        existing.series.length_mode != command.series_length_mode
+                        or existing.series.planned_episode_count != command.planned_episode_count
+                    )
+                )
             ):
                 raise StudioIdempotencyInputConflictError(
                     "idempotency key already belongs to different input"
@@ -1353,14 +1545,13 @@ class MemoryStudioRepository:
         series: StorySeriesDto | None = None
         projects: list[ProjectDto] = []
         if command.target == "new_series":
-            if len(units) < 2:
-                raise StudioConflictError("a series requires at least two source units")
             series = self.create_story_series(
                 SeriesCreateCommand(
                     title=suggestion.title,
                     premise="\n".join(item.raw_text for item in units),
                     narrativeMode=suggestion.narrative_mode or "continuous",
-                    plannedEpisodeCount=len(units),
+                    lengthMode=command.series_length_mode,
+                    plannedEpisodeCount=command.planned_episode_count,
                     defaultEpisodeDurationSeconds=12,
                     worldSetting="由已导入原文中的地点、时间和环境归纳",
                     emotionalDirection="保持原文的情绪变化",
@@ -1399,6 +1590,29 @@ class MemoryStudioRepository:
         else:
             raise StudioConflictError("story relationship target is missing")
         now = datetime.now(UTC)
+        if series is not None and command.target in {"new_series", "append_series"}:
+            existing_unit_ids = {
+                item.source_unit_id for item in self._series_source_beats.setdefault(series.id, [])
+            }
+            next_order = len(self._series_source_beats[series.id]) + 1
+            for unit in units:
+                if unit.id in existing_unit_ids:
+                    continue
+                self._series_source_beats[series.id].append(
+                    SeriesSourceBeatDto(
+                        id=uuid.uuid4(),
+                        seriesId=series.id,
+                        sourceUnitId=unit.id,
+                        sourceUnitOrdinal=unit.ordinal,
+                        bindingOrder=next_order,
+                        title=unit.title,
+                        theme=unit.theme,
+                        rawText=unit.raw_text,
+                        createdAt=now,
+                    )
+                )
+                existing_unit_ids.add(unit.id)
+                next_order += 1
         suggestion.status = "accepted"
         materialization = StoryImportMaterializationDto(
             id=uuid.uuid4(),
@@ -1943,6 +2157,95 @@ class MemoryStudioRepository:
     def latest_job_event_id(self) -> int:
         return self._job_events[-1].id if self._job_events else 0
 
+    def create_video_edit_draft(
+        self,
+        draft: VideoEditDraftDto,
+        edit: EditVersionDto,
+    ) -> VideoEditDraftDto:
+        existing = next(
+            (
+                item
+                for item in self._edit_drafts.values()
+                if item.idempotency_key == draft.idempotency_key
+            ),
+            None,
+        )
+        if existing:
+            if existing.input_hash != draft.input_hash:
+                raise StudioIdempotencyInputConflictError("editing draft input changed")
+            return existing
+        edits = self._edits.setdefault(draft.project_id, [])
+        edits.append(edit.model_copy(update={"revision": len(edits) + 1}))
+        self._edit_drafts[draft.id] = draft
+        return draft
+
+    def get_video_edit_draft(self, draft_id: uuid.UUID) -> VideoEditDraftDto | None:
+        return self._edit_drafts.get(draft_id)
+
+    def save_video_draft_revision(
+        self,
+        edit: EditVersionDto,
+        expected_hash: str,
+        repair_id: uuid.UUID | None,
+    ) -> EditVersionDto:
+        existing = self.get_edit(edit.id)
+        if existing:
+            if existing.save_request_hash != edit.save_request_hash:
+                raise StudioIdempotencyInputConflictError("draft save input changed")
+            return existing
+        draft = self._edit_drafts.get(edit.edit_draft_id)
+        parent = self.get_edit(edit.parent_edit_version_id)
+        if (
+            draft is None
+            or parent is None
+            or draft.head_edit_version_id != parent.id
+            or parent.timeline_hash != expected_hash
+        ):
+            raise StudioConflictError("editing draft has changed")
+        edits = self._edits.setdefault(edit.project_id, [])
+        saved = edit.model_copy(update={"revision": len(edits) + 1})
+        edits.append(saved)
+        self._edit_drafts[draft.id] = draft.model_copy(update={"head_edit_version_id": saved.id})
+        if repair_id:
+            self.set_video_repair_status(repair_id, status="applied_to_draft")
+        return saved
+
+    def list_video_edit_drafts(self, project_id: uuid.UUID) -> list[VideoEditDraftDto]:
+        return sorted(
+            (item for item in self._edit_drafts.values() if item.project_id == project_id),
+            key=lambda item: item.created_at,
+            reverse=True,
+        )
+
+    def create_video_review(self, review: VideoReviewDto) -> VideoReviewDto:
+        existing = next(
+            (
+                item
+                for item in self._video_reviews.values()
+                if item.idempotency_key == review.idempotency_key
+            ),
+            None,
+        )
+        if existing:
+            if existing.input_hash != review.input_hash:
+                raise StudioIdempotencyInputConflictError("video review input changed")
+            return existing
+        self._video_reviews[review.id] = review
+        return review
+
+    def list_video_reviews(
+        self, project_id: uuid.UUID, asset_id: uuid.UUID
+    ) -> list[VideoReviewDto]:
+        return sorted(
+            (
+                item
+                for item in self._video_reviews.values()
+                if item.project_id == project_id and item.asset_id == asset_id
+            ),
+            key=lambda item: item.created_at,
+            reverse=True,
+        )
+
     def create_edit(
         self,
         project_id: uuid.UUID,
@@ -2004,6 +2307,22 @@ class MemoryStudioRepository:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
             return existing
+        if any(
+            item.project_id == job.project_id
+            and item.kind == "regenerate_video_segment"
+            and item.status not in {"succeeded", "failed", "cancelled"}
+            for item in self._jobs.values()
+        ):
+            raise StudioConflictError("已有局部修改任务正在处理，请等待当前任务完成。")
+        if repair.preview.edit_draft_id:
+            draft = self._edit_drafts.get(repair.preview.edit_draft_id)
+            head = self.get_edit(draft.head_edit_version_id) if draft else None
+            if (
+                head is None
+                or head.id != repair.base_edit_version_id
+                or head.timeline_hash != repair.base_timeline_hash
+            ):
+                raise StudioConflictError("编辑草稿已经变化，请刷新后再操作。")
         self._video_repairs[repair.id] = repair
         try:
             return self.create_job(job)

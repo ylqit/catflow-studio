@@ -83,3 +83,13 @@ def test_start_script_invokes_the_serve_subcommand_before_its_port_option() -> N
         "ArgumentList = @('-m', 'catflow.interfaces.cli', 'serve', "
         "'--port', $catflowPort.ToString())"
     ) in script
+
+
+def test_start_script_waits_between_every_readiness_attempt() -> None:
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "start-local.ps1"
+    ).read_text(encoding="utf-8")
+
+    readiness_loop = script[script.index("for ($attempt = 1;") : script.index("if (-not $ready)")]
+
+    assert "} catch {}\n    Start-Sleep -Seconds 1\n}" in readiness_loop

@@ -75,11 +75,18 @@ from .series import (
     SeriesPlanGenerationCommand,
     SeriesPlanMaterializeCommand,
     SeriesPlanPreviewDto,
+    SeriesPlanSegmentActivationCommand,
+    SeriesPlanSegmentCommand,
+    SeriesPlanSegmentGenerationCommand,
+    SeriesPlanSegmentPreviewDto,
+    SeriesPlanSegmentVersionDto,
     SeriesPlanVersionDto,
+    SeriesSourceBeatDto,
     SeriesValidationIssueDto,
     StorySeriesDto,
     compile_series_episode_story_preview,
     compile_series_plan_preview,
+    compile_series_plan_segment_preview,
 )
 from .story_imports import (
     StoryImportAnalysisDraft,
@@ -93,10 +100,12 @@ from .story_imports import (
     StoryImportReanalyzeCommand,
     StorySourceDocumentDto,
     compile_story_import_preview,
+    normalize_import_relationship_suggestions,
 )
 from .video_generation import (
     VIDEO_PROMPT_COMPILER_REVISION,
     GenerationPromptSectionDto,
+    compile_prompt_sentence,
     compile_provider_video_prompt,
     compile_video_generation_prompt,
     synchronize_professional_shot_summaries,
@@ -215,9 +224,7 @@ class PlannerMessageCommand(ContractModel):
 
 
 class GenerationPreviewCommand(ContractModel):
-    include_previous_episode_video: bool = Field(
-        alias="includePreviousEpisodeVideo", default=False
-    )
+    include_previous_episode_video: bool = Field(alias="includePreviousEpisodeVideo", default=False)
 
 
 class GenerationCommand(GenerationPreviewCommand):
@@ -556,6 +563,8 @@ class GenerationVideoSpecDto(ContractModel):
 
 
 class GenerationInputSourceDto(ContractModel):
+    edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
+    base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
     story_version_id: uuid.UUID | None = Field(alias="storyVersionId", default=None)
     shot_plan_version_id: uuid.UUID | None = Field(alias="shotPlanVersionId", default=None)
     selection_hash: str | None = Field(alias="selectionHash", default=None)
@@ -564,6 +573,11 @@ class GenerationInputSourceDto(ContractModel):
 
 
 class SegmentEditInputDto(ContractModel):
+    base_edl: EditDecisionListV2 | None = Field(alias="baseEdl", default=None)
+    end_state_policy: Literal["match_original", "replace"] = Field(
+        alias="endStatePolicy", default="match_original"
+    )
+    desired_end_state: str = Field(alias="desiredEndState", default="")
     instruction: str
     issue_range: FrameRange = Field(alias="issueRange")
     generation_range: FrameRange = Field(alias="generationRange")
@@ -622,6 +636,7 @@ class JobDto(ContractModel):
         "plan_story",
         "plan_shots",
         "plan_series",
+        "plan_series_segment",
         "plan_series_episode",
         "analyze_story_source",
         "extract_continuity_frames",
@@ -631,6 +646,7 @@ class JobDto(ContractModel):
         "diagnose_video",
         "regenerate_video_segment",
         "render_export",
+        "render_edit_preview",
     ]
     status: JobStatus
     input_hash: str = Field(alias="inputHash")
@@ -747,9 +763,7 @@ class GenerationPreviewDto(ContractModel):
     duration_seconds: int = Field(alias="durationSeconds", ge=4, le=15)
     input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
     series_episode_id: uuid.UUID | None = Field(alias="seriesEpisodeId", default=None)
-    continuity_snapshot_id: uuid.UUID | None = Field(
-        alias="continuitySnapshotId", default=None
-    )
+    continuity_snapshot_id: uuid.UUID | None = Field(alias="continuitySnapshotId", default=None)
     warnings: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -837,6 +851,73 @@ class EditVersionDto(ContractModel):
     active: bool = False
     timeline_hash: str | None = Field(alias="timelineHash", default=None)
     created_at: datetime = Field(alias="createdAt")
+    edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
+    save_request_hash: str | None = Field(alias="saveRequestHash", default=None)
+
+
+class VideoEditDraftCreateCommand(ContractModel):
+    source_video_asset_id: uuid.UUID = Field(alias="sourceVideoAssetId")
+    source_edit_version_id: uuid.UUID | None = Field(alias="sourceEditVersionId", default=None)
+    confirm_current_references: bool = Field(alias="confirmCurrentReferences", default=False)
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class VideoEditDraftDto(ContractModel):
+    id: uuid.UUID
+    project_id: uuid.UUID = Field(alias="projectId")
+    source_video_asset_id: uuid.UUID = Field(alias="sourceVideoAssetId")
+    head_edit_version_id: uuid.UUID = Field(alias="headEditVersionId")
+    references: list[dict[str, Any]] = Field(default_factory=list)
+    references_confirmed: bool = Field(alias="referencesConfirmed", default=False)
+    input_hash: str = Field(alias="inputHash")
+    idempotency_key: str = Field(alias="idempotencyKey")
+    created_at: datetime = Field(alias="createdAt")
+
+
+class VideoIssueDto(ContractModel):
+    range: FrameRange
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class VideoDraftPreviewCommand(ContractModel):
+    expected_edit_version_id: uuid.UUID = Field(alias="expectedEditVersionId")
+    expected_timeline_hash: str = Field(alias="expectedTimelineHash")
+    repair_id: uuid.UUID | None = Field(alias="repairId", default=None)
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class VideoDraftSaveCommand(VideoDraftPreviewCommand):
+    edl: EditDecisionListV2
+
+
+class VideoReviewCreateCommand(ContractModel):
+    asset_id: uuid.UUID = Field(alias="assetId")
+    edit_version_id: uuid.UUID | None = Field(alias="editVersionId", default=None)
+    timeline_hash: str | None = Field(alias="timelineHash", default=None)
+    checks: dict[str, Literal["pass", "warning", "fail"]]
+    notes: str = Field(default="", max_length=4000)
+    issues: list[VideoIssueDto] = Field(default_factory=list, max_length=100)
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class VideoReviewDto(VideoReviewCreateCommand):
+    id: uuid.UUID
+    project_id: uuid.UUID = Field(alias="projectId")
+    input_hash: str = Field(alias="inputHash")
+    created_at: datetime = Field(alias="createdAt")
+
+
+VIDEO_REVIEW_KEYS = frozenset(
+    {
+        "childIdentity",
+        "catIdentity",
+        "pairScale",
+        "styleConsistency",
+        "anatomy",
+        "technical",
+        "causalChainAndActiveEnding",
+    }
+)
 
 
 SegmentReferenceRole = Literal[
@@ -874,6 +955,7 @@ VideoRepairStatus = Literal[
     "rejected",
     "outdated",
     "cancelled",
+    "applied_to_draft",
 ]
 
 
@@ -882,11 +964,18 @@ class SegmentRepairPreviewCommand(ContractModel):
     base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
     issue_range: FrameRange = Field(alias="issueRange")
     instruction: str = Field(min_length=1, max_length=4_000)
+    edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
+    end_state_policy: Literal["match_original", "replace"] = Field(
+        alias="endStatePolicy", default="match_original"
+    )
+    desired_end_state: str = Field(alias="desiredEndState", default="", max_length=2000)
 
     @model_validator(mode="after")
     def require_supported_issue_duration(self) -> SegmentRepairPreviewCommand:
+        if self.end_state_policy == "replace" and not self.desired_end_state.strip():
+            raise ValueError("replacing the ending requires desiredEndState")
         if self.issue_range.duration_frames < MIN_ISSUE_FRAMES:
-            raise ValueError("issueRange must be at least 4 seconds (96 frames)")
+            raise ValueError("issueRange must contain at least one frame")
         if self.issue_range.duration_frames > MAX_ISSUE_FRAMES:
             raise ValueError("issueRange must not exceed 15 seconds (360 frames)")
         return self
@@ -914,6 +1003,12 @@ class SegmentRepairPreviewDto(ContractModel):
     cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
     input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
+    edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
+    base_edl: EditDecisionListV2 | None = Field(alias="baseEdl", default=None)
+    end_state_policy: Literal["match_original", "replace"] = Field(
+        alias="endStatePolicy", default="match_original"
+    )
+    desired_end_state: str = Field(alias="desiredEndState", default="")
 
 
 class VideoRepairDto(ContractModel):
@@ -947,21 +1042,9 @@ class VideoRepairDto(ContractModel):
     approved_at: datetime | None = Field(alias="approvedAt", default=None)
 
 
-class SegmentRepairCreateCommand(ContractModel):
-    base_video_asset_id: uuid.UUID = Field(alias="baseVideoAssetId")
-    base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
-    issue_range: FrameRange = Field(alias="issueRange")
-    instruction: str = Field(min_length=1, max_length=4_000)
+class SegmentRepairCreateCommand(SegmentRepairPreviewCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
-
-    @model_validator(mode="after")
-    def require_supported_issue_duration(self) -> SegmentRepairCreateCommand:
-        if self.issue_range.duration_frames < MIN_ISSUE_FRAMES:
-            raise ValueError("issueRange must be at least 4 seconds (96 frames)")
-        if self.issue_range.duration_frames > MAX_ISSUE_FRAMES:
-            raise ValueError("issueRange must not exceed 15 seconds (360 frames)")
-        return self
 
 
 class SegmentRepairTransitionCommand(ContractModel):
@@ -1034,6 +1117,8 @@ class StudioRepository(Protocol):
         self, series_id: uuid.UUID, command: SeriesPatchCommand
     ) -> StorySeriesDto: ...
 
+    def list_series_source_beats(self, series_id: uuid.UUID) -> list[SeriesSourceBeatDto]: ...
+
     def create_series_plan_version(
         self,
         series_id: uuid.UUID,
@@ -1069,6 +1154,36 @@ class StudioRepository(Protocol):
         self, series_id: uuid.UUID, plan_version_id: uuid.UUID
     ) -> SeriesPlanVersionDto: ...
 
+    def create_series_plan_segment_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        start_episode_order: int,
+        requested_episode_count: int,
+        expected_series_plan_version_id: uuid.UUID,
+        previous_segment_version_id: uuid.UUID | None,
+        plan: SeriesPlanDraft,
+        input_hash: str,
+        prompt_revision: str,
+        producing_job_id: uuid.UUID,
+        validation_issues: list[SeriesValidationIssueDto],
+    ) -> SeriesPlanSegmentVersionDto: ...
+
+    def list_series_plan_segment_versions(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesPlanSegmentVersionDto]: ...
+
+    def activate_series_plan_segment_version(
+        self,
+        series_id: uuid.UUID,
+        segment_version_id: uuid.UUID,
+        command: SeriesPlanSegmentActivationCommand,
+    ) -> SeriesPlanSegmentVersionDto: ...
+
+    def reject_series_plan_segment_version(
+        self, series_id: uuid.UUID, segment_version_id: uuid.UUID
+    ) -> SeriesPlanSegmentVersionDto: ...
+
     def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]: ...
 
     def list_series_jobs(self, series_id: uuid.UUID) -> list[JobDto]: ...
@@ -1095,9 +1210,7 @@ class StudioRepository(Protocol):
 
     def series_episode_for_project(self, project_id: uuid.UUID) -> SeriesEpisodeDto | None: ...
 
-    def list_series_asset_bindings(
-        self, series_id: uuid.UUID
-    ) -> list[SeriesAssetBindingDto]: ...
+    def list_series_asset_bindings(self, series_id: uuid.UUID) -> list[SeriesAssetBindingDto]: ...
 
     def replace_series_asset_bindings(
         self, series_id: uuid.UUID, command: SeriesAssetBindingsPatchCommand
@@ -1114,8 +1227,6 @@ class StudioRepository(Protocol):
         continuity_snapshot_id: uuid.UUID | None,
         references: list[dict[str, Any]],
     ) -> None: ...
-
-    def find_story_source_document(self, *, content_hash: str) -> StorySourceDocumentDto | None: ...
 
     def list_story_source_documents(self) -> list[StorySourceDocumentDto]: ...
 
@@ -1136,9 +1247,7 @@ class StudioRepository(Protocol):
         self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
     ) -> StorySourceDocumentDto: ...
 
-    def restart_story_source_analysis(
-        self, document_id: uuid.UUID, job: JobDto
-    ) -> JobDto: ...
+    def restart_story_source_analysis(self, document_id: uuid.UUID, job: JobDto) -> JobDto: ...
 
     def confirm_story_source(
         self, document_id: uuid.UUID, command: StoryImportConfirmCommand
@@ -1246,6 +1355,31 @@ class StudioRepository(Protocol):
     def list_job_events(self, *, after_event_id: int, limit: int = 100) -> list[JobEventDto]: ...
 
     def latest_job_event_id(self) -> int: ...
+
+    def create_video_edit_draft(
+        self,
+        draft: VideoEditDraftDto,
+        edit: EditVersionDto,
+    ) -> VideoEditDraftDto: ...
+
+    def get_video_edit_draft(self, draft_id: uuid.UUID) -> VideoEditDraftDto | None: ...
+
+    def save_video_draft_revision(
+        self,
+        edit: EditVersionDto,
+        expected_hash: str,
+        repair_id: uuid.UUID | None,
+    ) -> EditVersionDto: ...
+
+    def list_video_edit_drafts(self, project_id: uuid.UUID) -> list[VideoEditDraftDto]: ...
+
+    def create_video_review(self, review: VideoReviewDto) -> VideoReviewDto: ...
+
+    def list_video_reviews(
+        self,
+        project_id: uuid.UUID,
+        asset_id: uuid.UUID,
+    ) -> list[VideoReviewDto]: ...
 
     def create_edit(
         self,
@@ -1383,6 +1517,10 @@ class StudioService:
         self.get_story_series(series_id)
         return self._repository.update_story_series(series_id, command)
 
+    def list_series_source_beats(self, series_id: uuid.UUID) -> list[SeriesSourceBeatDto]:
+        self.get_story_series(series_id)
+        return self._repository.list_series_source_beats(series_id)
+
     def preview_series_plan(self, series_id: uuid.UUID) -> SeriesPlanPreviewDto:
         series = self.get_story_series(series_id)
         canon = self._repository.current_canon_profile()
@@ -1390,6 +1528,7 @@ class StudioService:
             raise StudioConflictError("series Canon changed")
         return compile_series_plan_preview(
             series,
+            source_beats=self._repository.list_series_source_beats(series_id),
             canon_profile_hash=canon.profile_hash,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
@@ -1431,6 +1570,92 @@ class StudioService:
             )
         )
 
+    def preview_series_plan_segment(
+        self, series_id: uuid.UUID, command: SeriesPlanSegmentCommand
+    ) -> SeriesPlanSegmentPreviewDto:
+        series = self.get_story_series(series_id)
+        active_plan = next(
+            (plan for plan in self._repository.list_series_plan_versions(series_id) if plan.active),
+            None,
+        )
+        if active_plan is None:
+            raise StudioConflictError("adopt an initial series plan before planning a segment")
+        if active_plan.id != command.expected_series_plan_version_id:
+            raise StudioConflictError("active series plan changed")
+        expected_start = series.planned_count + 1
+        if command.start_episode_order != expected_start:
+            raise StudioConflictError(
+                f"next planning segment must start at episode {expected_start}"
+            )
+        if (
+            series.length_mode == "fixed"
+            and series.planned_episode_count is not None
+            and command.start_episode_order + command.requested_episode_count - 1
+            > series.planned_episode_count
+        ):
+            raise StudioConflictError("planning segment exceeds the fixed series length")
+        canon = self._repository.current_canon_profile()
+        if canon.id != series.canon_profile_id:
+            raise StudioConflictError("series Canon changed")
+        return compile_series_plan_segment_preview(
+            series,
+            active_plan=active_plan,
+            command=command,
+            source_beats=self._repository.list_series_source_beats(series_id),
+            canon_profile_hash=canon.profile_hash,
+            provider=self._provider_runtime.provider,
+            model=self._provider_runtime.planning_model,
+            capability_revision=self._provider_runtime.capability_revision,
+        )
+
+    def create_series_plan_segment_job(
+        self, series_id: uuid.UUID, command: SeriesPlanSegmentGenerationCommand
+    ) -> JobDto:
+        preview = self.preview_series_plan_segment(
+            series_id,
+            SeriesPlanSegmentCommand(
+                startEpisodeOrder=command.start_episode_order,
+                requestedEpisodeCount=command.requested_episode_count,
+                expectedSeriesPlanVersionId=command.expected_series_plan_version_id,
+                expectedPreviousSegmentVersionId=(command.expected_previous_segment_version_id),
+            ),
+        )
+        if preview.input_hash != command.expected_input_hash:
+            raise StudioConflictError("series planning segment input changed")
+        self._require_paid_calls_enabled()
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=None,
+                seriesId=series_id,
+                kind="plan_series_segment",
+                status="queued",
+                inputHash=preview.input_hash,
+                idempotencyKey=command.idempotency_key,
+                provider=preview.provider,
+                model=preview.model,
+                frozenInput={
+                    "seriesId": str(series_id),
+                    "expectedSeriesPlanVersionId": str(command.expected_series_plan_version_id),
+                    "expectedPreviousSegmentVersionId": (
+                        str(command.expected_previous_segment_version_id)
+                        if command.expected_previous_segment_version_id is not None
+                        else None
+                    ),
+                    "startEpisodeOrder": preview.start_episode_order,
+                    "plannedEpisodeCount": preview.requested_episode_count,
+                    "prompt": preview.prompt,
+                    "outputSchema": preview.output_schema,
+                    "seriesPlannerPromptRevision": preview.prompt_revision,
+                    "capabilityRevision": preview.capability_revision,
+                },
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
     def complete_series_plan_job(
         self,
         job_id: uuid.UUID,
@@ -1460,17 +1685,68 @@ class StudioService:
             validation_issues=validation_issues,
         )
 
+    def complete_series_plan_segment_job(
+        self,
+        job_id: uuid.UUID,
+        plan: SeriesPlanDraft,
+        *,
+        validation_issues: list[SeriesValidationIssueDto],
+    ) -> SeriesPlanSegmentVersionDto:
+        job = self.get_job(job_id)
+        if job.kind != "plan_series_segment" or job.series_id is None:
+            raise StudioConflictError("job is not a series planning segment job")
+        frozen = job.frozen_input
+        return self._repository.create_series_plan_segment_version(
+            job.series_id,
+            start_episode_order=int(frozen["startEpisodeOrder"]),
+            requested_episode_count=int(frozen["plannedEpisodeCount"]),
+            expected_series_plan_version_id=uuid.UUID(str(frozen["expectedSeriesPlanVersionId"])),
+            previous_segment_version_id=(
+                uuid.UUID(str(frozen["expectedPreviousSegmentVersionId"]))
+                if frozen.get("expectedPreviousSegmentVersionId")
+                else None
+            ),
+            plan=plan,
+            input_hash=job.input_hash,
+            prompt_revision=str(frozen.get("seriesPlannerPromptRevision", "")),
+            producing_job_id=job.id,
+            validation_issues=validation_issues,
+        )
+
     def record_series_plan_validation(
         self, job_id: uuid.UUID, validation: dict[str, object]
     ) -> JobDto:
         job = self.get_job(job_id)
-        if job.kind != "plan_series":
+        if job.kind not in {"plan_series", "plan_series_segment"}:
             raise StudioConflictError("job is not a series planning job")
         return self._repository.record_series_plan_validation(job_id, validation)
 
     def list_series_plan_versions(self, series_id: uuid.UUID) -> list[SeriesPlanVersionDto]:
         self.get_story_series(series_id)
         return self._repository.list_series_plan_versions(series_id)
+
+    def list_series_plan_segment_versions(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesPlanSegmentVersionDto]:
+        self.get_story_series(series_id)
+        return self._repository.list_series_plan_segment_versions(series_id)
+
+    def activate_series_plan_segment(
+        self,
+        series_id: uuid.UUID,
+        segment_version_id: uuid.UUID,
+        command: SeriesPlanSegmentActivationCommand,
+    ) -> SeriesPlanSegmentVersionDto:
+        self.get_story_series(series_id)
+        return self._repository.activate_series_plan_segment_version(
+            series_id, segment_version_id, command
+        )
+
+    def reject_series_plan_segment(
+        self, series_id: uuid.UUID, segment_version_id: uuid.UUID
+    ) -> SeriesPlanSegmentVersionDto:
+        self.get_story_series(series_id)
+        return self._repository.reject_series_plan_segment_version(series_id, segment_version_id)
 
     def materialize_series_plan(
         self,
@@ -1664,27 +1940,17 @@ class StudioService:
         episode = next((item for item in episodes if item.id == episode_id), None)
         if episode is None:
             raise StudioNotFoundError("series episode not found")
-        previous = next(
-            (item for item in episodes if item.order == episode.order - 1), None
-        )
+        previous = next((item for item in episodes if item.order == episode.order - 1), None)
         snapshots = self._repository.list_episode_continuity(episode_id)
         return EpisodeContinuityDto(
             episodeId=episode_id,
             previousEpisodeId=previous.id if previous is not None else None,
             incoming=next(
-                (
-                    item
-                    for item in snapshots
-                    if item.direction == "incoming" and item.active
-                ),
+                (item for item in snapshots if item.direction == "incoming" and item.active),
                 None,
             ),
             outgoing=next(
-                (
-                    item
-                    for item in snapshots
-                    if item.direction == "outgoing" and item.active
-                ),
+                (item for item in snapshots if item.direction == "outgoing" and item.active),
                 None,
             ),
         )
@@ -1749,8 +2015,7 @@ class StudioService:
         selected_keyframes = [
             selections[slot]
             for slot in ("continuity_keyframe_1", "continuity_keyframe_2")
-            if slot in selections
-            and selections[slot].id in {asset.id for asset in candidates}
+            if slot in selections and selections[slot].id in {asset.id for asset in candidates}
         ]
         return EpisodeContinuityFramesDto(
             episodeId=episode.id,
@@ -1775,23 +2040,14 @@ class StudioService:
         candidates = {asset.id: asset for asset in frames.candidates}
         if any(asset_id not in candidates for asset_id in command.asset_ids):
             raise StudioConflictError("continuity keyframe is not a candidate for this final video")
-        return self._repository.replace_continuity_keyframes(
-            episode.project_id, command.asset_ids
-        )
+        return self._repository.replace_continuity_keyframes(episode.project_id, command.asset_ids)
 
     def preview_story_import(self, command: StoryImportPreviewCommand) -> StoryImportPreviewDto:
-        provisional = compile_story_import_preview(
+        return compile_story_import_preview(
             command,
-            duplicate_document_id=None,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
             capability_revision=self._provider_runtime.capability_revision,
-        )
-        duplicate = self._repository.find_story_source_document(
-            content_hash=provisional.content_hash
-        )
-        return provisional.model_copy(
-            update={"duplicate_document_id": duplicate.id if duplicate is not None else None}
         )
 
     def create_story_import(self, command: StoryImportCreateCommand) -> StoryImportCreateResultDto:
@@ -1804,18 +2060,6 @@ class StudioService:
         )
         if preview.input_hash != command.expected_input_hash:
             raise StudioConflictError("story import input changed")
-        if preview.duplicate_document_id is not None:
-            document = self.get_story_import(preview.duplicate_document_id)
-            job = (
-                self.get_job(document.analysis_job_id)
-                if document.analysis_job_id is not None
-                else None
-            )
-            return StoryImportCreateResultDto(
-                document=document,
-                analysisJob=_story_import_job(job) if job is not None else None,
-                reused=True,
-            )
         self._require_paid_calls_enabled()
         document_id = uuid.uuid4()
         job = self._build_story_import_analysis_job(
@@ -1832,16 +2076,12 @@ class StudioService:
             job=job,
         )
         persisted_job = (
-            self.get_job(document.analysis_job_id)
-            if document.analysis_job_id is not None
-            else None
+            self.get_job(document.analysis_job_id) if document.analysis_job_id is not None else None
         )
         return StoryImportCreateResultDto(
             document=document,
-            analysisJob=(
-                _story_import_job(persisted_job) if persisted_job is not None else None
-            ),
-            reused=document.id != document_id,
+            analysisJob=(_story_import_job(persisted_job) if persisted_job is not None else None),
+            idempotencyReplayed=document.id != document_id,
         )
 
     def list_story_imports(self) -> list[StorySourceDocumentDto]:
@@ -1919,7 +2159,9 @@ class StudioService:
         job = self.get_job(job_id)
         if job.kind != "analyze_story_source" or job.story_source_document_id is None:
             raise StudioConflictError("job is not a story source analysis job")
-        return self._repository.complete_story_source_analysis(job_id, analysis)
+        return self._repository.complete_story_source_analysis(
+            job_id, normalize_import_relationship_suggestions(analysis)
+        )
 
     def confirm_story_import(
         self, document_id: uuid.UUID, command: StoryImportConfirmCommand
@@ -2156,9 +2398,7 @@ class StudioService:
             raise StudioNotFoundError("base shot plan version not found")
         synchronized_draft = draft.model_copy(
             update={
-                "shots": [
-                    synchronize_professional_shot_summaries(shot) for shot in draft.shots
-                ]
+                "shots": [synchronize_professional_shot_summaries(shot) for shot in draft.shots]
             }
         )
         return self._repository.create_shot_plan(
@@ -2723,9 +2963,9 @@ class StudioService:
         ]
         previous_video: AssetDto | None = None
         if previous_episode is not None and previous_episode.project_id is not None:
-            previous_video = self._repository.current_selections(
-                previous_episode.project_id
-            ).get("final")
+            previous_video = self._repository.current_selections(previous_episode.project_id).get(
+                "final"
+            )
             if previous_video is not None and previous_video.media_type != "video":
                 previous_video = None
         if include_previous_episode_video:
@@ -2770,9 +3010,7 @@ class StudioService:
             if frames is not None:
                 continuity_assets: list[tuple[str, AssetDto]] = []
                 if frames.last_frame is not None:
-                    continuity_assets.append(
-                        ("previous_episode_last_frame", frames.last_frame)
-                    )
+                    continuity_assets.append(("previous_episode_last_frame", frames.last_frame))
                 continuity_assets.extend(
                     (f"previous_episode_keyframe_{index}", asset)
                     for index, asset in enumerate(frames.selected_keyframes, start=1)
@@ -2868,9 +3106,7 @@ class StudioService:
             "durationSeconds": project.target_duration_seconds,
             "resolution": "480p",
             "aspectRatio": "9:16",
-            "seriesEpisodeId": (
-                str(series_episode.id) if series_episode is not None else None
-            ),
+            "seriesEpisodeId": (str(series_episode.id) if series_episode is not None else None),
             "continuitySnapshotId": (
                 str(confirmed_continuity.id) if confirmed_continuity is not None else None
             ),
@@ -3212,11 +3448,7 @@ class StudioService:
                     if item.included
                 ],
                 "previousEpisodeVideoAssetId": next(
-                    (
-                        str(item.asset_id)
-                        for item in preview.video_references
-                        if item.included
-                    ),
+                    (str(item.asset_id) for item in preview.video_references if item.included),
                     None,
                 ),
                 "previousEpisodeVideoSha256": next(
@@ -3308,6 +3540,394 @@ class StudioService:
             )
         )
 
+    def create_video_edit_draft(
+        self,
+        project_id: uuid.UUID,
+        command: VideoEditDraftCreateCommand,
+    ) -> VideoEditDraftDto:
+        self._require_project(project_id)
+        asset = self.get_asset(command.source_video_asset_id)
+        reference_source = asset
+        if asset.project_id != project_id or asset.media_type != "video":
+            raise StudioConflictError("editing source must be a video from this project")
+        total = asset.metadata.get("durationFrames")
+        if not isinstance(total, int) or total < 1:
+            raise StudioConflictError("editing source has no valid frame metadata")
+        timeline = build_base_timeline(asset_id=asset.id, sha256=asset.sha256, total_frames=total)
+        if command.source_edit_version_id:
+            previous = self._repository.get_edit(command.source_edit_version_id)
+            if previous is None or previous.project_id != project_id:
+                raise StudioNotFoundError("source edit not found")
+            if isinstance(previous.edl, EditDecisionListDto):
+                if any(item.asset_id != asset.id for item in previous.edl.source_video_selections):
+                    raise StudioConflictError("source edit belongs to another video")
+                rendered = next(
+                    (
+                        item
+                        for item in self._repository.list_assets(project_id)
+                        if item.role == "edit_preview"
+                        and item.metadata.get("editVersionId") == str(previous.id)
+                        and item.metadata.get("timelineHash")
+                        == _hash_document(previous.edl.model_dump(mode="json", by_alias=True))
+                    ),
+                    None,
+                )
+                if rendered is None:
+                    raise StudioConflictError(
+                        "请先准备旧剪辑完整预览；裁切、转场和音轨不能被忽略。"
+                    )
+                asset = rendered
+                timeline = build_base_timeline(
+                    asset_id=asset.id,
+                    sha256=asset.sha256,
+                    total_frames=asset.metadata["durationFrames"],
+                )
+            else:
+                if previous.edl.root_video_asset_id != asset.id:
+                    raise StudioConflictError("source edit belongs to another video")
+                timeline = previous.edl
+        references: list[dict[str, Any]] = []
+        if reference_source.producing_job_id:
+            source_job = self.get_job(reference_source.producing_job_id)
+            source_snapshot = source_job.frozen_input.get("inputSnapshot", {})
+            if source_job.frozen_input.get("editDraftId"):
+                source_draft = self.get_video_edit_draft(
+                    project_id, uuid.UUID(source_job.frozen_input["editDraftId"])
+                )
+                source_snapshot = {"references": source_draft.references}
+            references = [
+                dict(item)
+                for item in source_snapshot.get("references", [])
+                if item.get("included", True)
+                and item.get("assetId")
+                and item.get("role")
+                in {
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board",
+                }
+            ]
+        confirmed = len({item["role"] for item in references}) == 5
+        if not confirmed and command.confirm_current_references:
+            selected = self._repository.current_selections(project_id)
+            roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
+            if any(role not in selected for role in roles):
+                raise StudioConflictError("complete references are required for editing")
+            references = [
+                {"role": role, "assetId": str(selected[role].id), "sha256": selected[role].sha256}
+                for role in roles
+            ]
+            confirmed = True
+        input_hash = _hash_document(
+            {
+                "projectId": str(project_id),
+                "command": command.model_dump(
+                    mode="json", by_alias=True, exclude={"idempotency_key"}
+                ),
+                "sourceSha256": asset.sha256,
+            }
+        )
+        now = datetime.now(UTC)
+        draft_id, edit_id = uuid.uuid4(), uuid.uuid4()
+        edit = EditVersionDto(
+            id=edit_id,
+            projectId=project_id,
+            revision=1,
+            sourceSelectionHash=input_hash,
+            edl=timeline,
+            status="draft",
+            formatVersion=2,
+            active=False,
+            timelineHash=_hash_document(timeline.model_dump(mode="json", by_alias=True)),
+            editDraftId=draft_id,
+            parentEditVersionId=command.source_edit_version_id,
+            createdAt=now,
+        )
+        draft = VideoEditDraftDto(
+            id=draft_id,
+            projectId=project_id,
+            sourceVideoAssetId=asset.id,
+            headEditVersionId=edit.id,
+            references=references,
+            referencesConfirmed=confirmed,
+            inputHash=input_hash,
+            idempotencyKey=command.idempotency_key,
+            createdAt=now,
+        )
+        return self._repository.create_video_edit_draft(draft, edit)
+
+    def get_video_edit_draft(self, project_id: uuid.UUID, draft_id: uuid.UUID) -> VideoEditDraftDto:
+        draft = self._repository.get_video_edit_draft(draft_id)
+        if draft is None or draft.project_id != project_id:
+            raise StudioNotFoundError("editing draft not found")
+        return draft
+
+    def list_video_edit_drafts(self, project_id: uuid.UUID) -> list[VideoEditDraftDto]:
+        self._require_project(project_id)
+        return self._repository.list_video_edit_drafts(project_id)
+
+    def create_video_review(
+        self,
+        project_id: uuid.UUID,
+        command: VideoReviewCreateCommand,
+    ) -> VideoReviewDto:
+        asset = self.get_asset(command.asset_id)
+        if asset.project_id != project_id or asset.media_type != "video":
+            raise StudioConflictError("review source must be a project video")
+        if not set(command.checks).issubset(VIDEO_REVIEW_KEYS):
+            raise StudioValidationError("unknown quality check")
+        for issue in command.issues:
+            if issue.range.end_frame > asset.metadata.get("durationFrames", 0):
+                raise StudioValidationError("review issue is outside the video")
+        if command.edit_version_id:
+            edit = self._repository.get_edit(command.edit_version_id)
+            if (
+                edit is None
+                or edit.project_id != project_id
+                or edit.timeline_hash != command.timeline_hash
+                or str(asset.metadata.get("editVersionId")) != str(edit.id)
+                or asset.metadata.get("timelineHash") != command.timeline_hash
+                or asset.metadata.get("repairId") is not None
+            ):
+                raise StudioConflictError("review does not match the rendered edit")
+        document = command.model_dump(mode="json", by_alias=True)
+        return self._repository.create_video_review(
+            VideoReviewDto(
+                **document,
+                id=uuid.uuid4(),
+                projectId=project_id,
+                inputHash=_hash_document({"projectId": str(project_id), **document}),
+                createdAt=datetime.now(UTC),
+            )
+        )
+
+    def list_video_reviews(
+        self, project_id: uuid.UUID, asset_id: uuid.UUID
+    ) -> list[VideoReviewDto]:
+        self._require_project(project_id)
+        return self._repository.list_video_reviews(project_id, asset_id)
+
+    def require_video_review(
+        self,
+        project_id: uuid.UUID,
+        asset_id: uuid.UUID,
+        review_id: uuid.UUID | None,
+    ) -> None:
+        asset = self.get_asset(asset_id)
+        if (
+            asset.project_id != project_id
+            or asset.media_type != "video"
+            or asset.role not in {"video", "edit_preview", "final"}
+        ):
+            raise StudioConflictError("只能验收并选择完整视频，不能直接采用局部片段。")
+        review = next(
+            (
+                item
+                for item in self.list_video_reviews(project_id, asset_id)
+                if item.id == review_id
+            ),
+            None,
+        )
+        if (
+            review is None
+            or set(review.checks) != VIDEO_REVIEW_KEYS
+            or any(value != "pass" for value in review.checks.values())
+        ):
+            raise StudioConflictError("视频尚未通过完整验收；可以先进入编辑草稿修复。")
+        if asset.role == "edit_preview":
+            draft_id = asset.metadata.get("editDraftId")
+            if not draft_id or asset.metadata.get("repairId") or review.edit_version_id is None:
+                raise StudioConflictError("请先将修改应用到草稿，再验收当前完整视频。")
+            draft = self.get_video_edit_draft(project_id, uuid.UUID(str(draft_id)))
+            if draft.head_edit_version_id != review.edit_version_id:
+                raise StudioConflictError("草稿已经变化，请验收最新的完整视频。")
+
+    def draft_preview_timeline(
+        self,
+        project_id: uuid.UUID,
+        draft_id: uuid.UUID,
+        command: VideoDraftPreviewCommand,
+    ) -> tuple[EditVersionDto, EditDecisionListV2]:
+        draft = self.get_video_edit_draft(project_id, draft_id)
+        edit = self._repository.get_edit(draft.head_edit_version_id)
+        if (
+            edit is None
+            or edit.id != command.expected_edit_version_id
+            or edit.timeline_hash != command.expected_timeline_hash
+            or not isinstance(edit.edl, EditDecisionListV2)
+        ):
+            raise StudioConflictError("草稿版本已经变化，请刷新后再操作。")
+        timeline = edit.edl
+        if command.repair_id is not None:
+            repair = self.get_video_repair(command.repair_id)
+            if (
+                repair.project_id != project_id
+                or repair.preview.edit_draft_id != draft.id
+                or repair.base_edit_version_id != edit.id
+                or repair.base_timeline_hash != edit.timeline_hash
+                or repair.status != "candidate_ready"
+                or repair.candidate_asset_id is None
+            ):
+                raise StudioConflictError("修改候选与当前草稿不一致。")
+            candidate = self.get_asset(repair.candidate_asset_id)
+            count = candidate.metadata.get("durationFrames")
+            if (
+                candidate.project_id != project_id
+                or candidate.media_type != "video"
+                or not isinstance(count, int)
+                or count < repair.candidate_core_range.end_frame
+            ):
+                raise StudioConflictError("修改候选没有完整的替换帧。")
+            timeline = splice_repair_candidate(
+                timeline,
+                issue_range=repair.issue_range,
+                candidate_asset_id=candidate.id,
+                candidate_sha256=candidate.sha256,
+                candidate_source_range=repair.candidate_core_range,
+                repair_id=repair.id,
+                transition=EditTransitionV2(afterSegmentIndex=0, type="cut", durationFrames=0),
+            )
+        return edit, timeline
+
+    def create_draft_preview(
+        self,
+        project_id: uuid.UUID,
+        draft_id: uuid.UUID,
+        command: VideoDraftPreviewCommand,
+    ) -> JobDto:
+        edit, timeline = self.draft_preview_timeline(project_id, draft_id, command)
+        frozen = {
+            "editDraftId": str(draft_id),
+            "editVersionId": str(edit.id),
+            "timelineHash": _hash_document(timeline.model_dump(mode="json", by_alias=True)),
+            "repairId": str(command.repair_id) if command.repair_id else None,
+            "edl": timeline.model_dump(mode="json", by_alias=True),
+        }
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=project_id,
+                kind="render_edit_preview",
+                status="queued",
+                inputHash=_hash_document(frozen),
+                idempotencyKey=command.idempotency_key,
+                provider="local_ffmpeg",
+                model="ffmpeg-edl-v2-preview",
+                expectedCostMicros=0,
+                frozenInput=frozen,
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    def create_edit_preview(self, project_id: uuid.UUID, command: ExportCommand) -> JobDto:
+        """Freeze an existing official edit for a free, non-official materialization."""
+        edit = self._repository.get_edit(command.edit_version_id)
+        if edit is None or edit.project_id != project_id or edit.edit_draft_id is not None:
+            raise StudioNotFoundError("source edit not found")
+        edl = edit.edl.model_dump(mode="json", by_alias=True)
+        frozen = {"editVersionId": str(edit.id), "timelineHash": _hash_document(edl), "edl": edl}
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=project_id,
+                kind="render_edit_preview",
+                status="queued",
+                inputHash=_hash_document(frozen),
+                idempotencyKey=command.idempotency_key,
+                provider="local_ffmpeg",
+                model=f"ffmpeg-edl-v{edit.format_version}-preview",
+                expectedCostMicros=0,
+                frozenInput=frozen,
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    def list_video_draft_jobs(self, project_id: uuid.UUID, draft_id: uuid.UUID) -> list[JobDto]:
+        self.get_video_edit_draft(project_id, draft_id)
+        return [
+            job
+            for job in self._repository.list_project_jobs(project_id)
+            if job.frozen_input and job.frozen_input.get("editDraftId") == str(draft_id)
+        ]
+
+    def save_video_draft(
+        self,
+        project_id: uuid.UUID,
+        draft_id: uuid.UUID,
+        command: VideoDraftSaveCommand,
+    ) -> EditVersionDto:
+        request_hash = _hash_document(
+            {
+                "project": str(project_id),
+                "draft": str(draft_id),
+                "command": command.model_dump(mode="json", by_alias=True),
+            }
+        )
+        edit_id = uuid.uuid5(uuid.NAMESPACE_URL, f"catflow:draft-save:{command.idempotency_key}")
+        existing = self._repository.get_edit(edit_id)
+        if existing is not None:
+            if existing.save_request_hash != request_hash:
+                raise StudioIdempotencyInputConflictError("草稿保存输入已经变化。")
+            return existing
+        parent, expected_timeline = self.draft_preview_timeline(project_id, draft_id, command)
+        # Candidate placement is derived from the frozen ranges, never from mutable UI state.
+        if command.repair_id is not None and command.edl != expected_timeline:
+            raise StudioConflictError("候选叠放范围与已冻结的修改范围不一致。")
+        if (
+            command.edl.root_video_asset_id != expected_timeline.root_video_asset_id
+            or command.edl.total_frames != expected_timeline.total_frames
+            or command.edl.audio != expected_timeline.audio
+        ):
+            raise StudioConflictError("草稿的原片、长度和音轨不能被静默替换。")
+        for segment in command.edl.video_segments:
+            asset = self.get_asset(segment.asset_id)
+            frames = asset.metadata.get("durationFrames")
+            if (
+                asset.project_id != project_id
+                or asset.media_type != "video"
+                or asset.sha256 != segment.sha256
+                or not isinstance(frames, int)
+                or segment.source_in_frame + segment.duration_frames > frames
+            ):
+                raise StudioConflictError("草稿引用的媒体或帧范围无效。")
+            if segment.origin == "repair_candidate":
+                if segment.repair_id is None:
+                    raise StudioConflictError("修改片段缺少来源任务。")
+                repair = self.get_video_repair(segment.repair_id)
+                if (
+                    repair.project_id != project_id
+                    or repair.preview.edit_draft_id != draft_id
+                    or repair.candidate_asset_id != asset.id
+                    or repair.status not in {"candidate_ready", "applied_to_draft"}
+                ):
+                    raise StudioConflictError("草稿不能引用其他修改任务的候选。")
+        edit = EditVersionDto(
+            id=edit_id,
+            projectId=project_id,
+            editDraftId=draft_id,
+            revision=1,
+            sourceSelectionHash=parent.source_selection_hash,
+            edl=command.edl,
+            status="draft",
+            parentEditVersionId=parent.id,
+            formatVersion=2,
+            active=False,
+            timelineHash=_hash_document(command.edl.model_dump(mode="json", by_alias=True)),
+            saveRequestHash=request_hash,
+            createdAt=datetime.now(UTC),
+        )
+        return self._repository.save_video_draft_revision(
+            edit, command.expected_timeline_hash, command.repair_id
+        )
+
     def preview_video_repair(
         self, project_id: uuid.UUID, command: SegmentRepairPreviewCommand
     ) -> SegmentRepairPreviewDto:
@@ -3318,6 +3938,7 @@ class StudioService:
             project_id,
             base_video_asset_id=command.base_video_asset_id,
             expected_edit_version_id=command.base_edit_version_id,
+            edit_draft_id=command.edit_draft_id,
         )
         frame_rate = timeline.frame_rate
         if frame_rate.numerator != 24 or frame_rate.denominator != 1:
@@ -3334,6 +3955,16 @@ class StudioService:
 
         selections = self._repository.current_selections(project_id)
         canon_roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
+        if command.edit_draft_id:
+            draft = self.get_video_edit_draft(project_id, command.edit_draft_id)
+            if not draft.references_confirmed:
+                raise StudioConflictError("旧视频缺少完整冻结参考，请明确确认编辑参考后继续。")
+            selections = {}
+            for ref in draft.references:
+                asset = self.get_asset(uuid.UUID(str(ref["assetId"])))
+                if asset.sha256 != ref["sha256"]:
+                    raise StudioConflictError("editing reference content changed")
+                selections[ref["role"]] = asset
         missing = [role for role in canon_roles if role not in selections]
         if missing:
             raise StudioConflictError(f"missing segment repair references: {', '.join(missing)}")
@@ -3363,6 +3994,8 @@ class StudioService:
                 for role in canon_roles
             ],
         ]
+        if command.end_state_policy == "replace":
+            image_references = [item for item in image_references if item.role != "anchor_out"]
         video_reference = SegmentRepairVideoReferenceDto(
             role="reference_video",
             assetId=base_video.id,
@@ -3379,8 +4012,15 @@ class StudioService:
             issue_range=command.issue_range,
             generation_range=window.generation_range,
             frame_rate=frame_rate,
+            end_state_policy=command.end_state_policy,
+            desired_end_state=command.desired_end_state,
         )
         document = {
+            "editDraftId": str(command.edit_draft_id) if command.edit_draft_id else None,
+            "baseEdl": timeline.model_dump(mode="json", by_alias=True),
+            "endStatePolicy": command.end_state_policy,
+            "desiredEndState": command.desired_end_state,
+            "promptCompilerRevision": "segment-edit-v3",
             "projectId": str(project_id),
             "baseVideoAssetId": str(base_video.id),
             "baseVideoSha256": base_video.sha256,
@@ -3405,6 +4045,10 @@ class StudioService:
             "capabilityRevision": self._provider_runtime.capability_revision,
         }
         preview = SegmentRepairPreviewDto(
+            editDraftId=command.edit_draft_id,
+            baseEdl=timeline,
+            endStatePolicy=command.end_state_policy,
+            desiredEndState=command.desired_end_state,
             projectId=project_id,
             baseVideoAssetId=base_video.id,
             baseEditVersionId=active_edit.id if active_edit is not None else None,
@@ -3447,6 +4091,9 @@ class StudioService:
                 baseEditVersionId=command.base_edit_version_id,
                 issueRange=command.issue_range,
                 instruction=command.instruction,
+                editDraftId=command.edit_draft_id,
+                endStatePolicy=command.end_state_policy,
+                desiredEndState=command.desired_end_state,
             ),
         )
         if preview.input_hash != command.expected_input_hash:
@@ -3465,7 +4112,7 @@ class StudioService:
             generationRange=preview.generation_range,
             candidateCoreRange=preview.candidate_core_range,
             providerDurationSeconds=preview.provider_duration_seconds,
-            selectionPolicyVersion=2,
+            selectionPolicyVersion=3,
             instruction=preview.instruction,
             prompt=preview.prompt,
             negativePrompt=preview.negative_prompt,
@@ -3492,6 +4139,11 @@ class StudioService:
                 expectedCostMicros=preview.expected_cost_micros,
                 inputSnapshot=input_snapshot,
                 frozenInput={
+                    "editDraftId": str(preview.edit_draft_id) if preview.edit_draft_id else None,
+                    "baseEdl": preview.base_edl.model_dump(mode="json", by_alias=True),
+                    "endStatePolicy": preview.end_state_policy,
+                    "desiredEndState": preview.desired_end_state,
+                    "promptCompilerRevision": "segment-edit-v3",
                     "inputSnapshot": input_snapshot,
                     "baseVideoAssetId": str(preview.base_video_asset_id),
                     "baseEditVersionId": (
@@ -3654,6 +4306,8 @@ class StudioService:
         repair = self.get_video_repair(repair_id)
         if repair.project_id != project_id:
             raise StudioNotFoundError("video repair not found")
+        if repair.status not in {"candidate_ready", "rejected"}:
+            raise StudioConflictError("只有尚未应用的修改候选可以不采用。")
         return self._repository.set_video_repair_status(repair_id, status="rejected")
 
     def get_job(self, job_id: uuid.UUID) -> JobDto:
@@ -3719,7 +4373,20 @@ class StudioService:
         *,
         base_video_asset_id: uuid.UUID,
         expected_edit_version_id: uuid.UUID | None,
+        edit_draft_id: uuid.UUID | None = None,
     ) -> tuple[AssetDto, EditVersionDto | None, EditDecisionListV2, str]:
+        if edit_draft_id is not None:
+            draft = self.get_video_edit_draft(project_id, edit_draft_id)
+            if (
+                draft.source_video_asset_id != base_video_asset_id
+                or draft.head_edit_version_id != expected_edit_version_id
+            ):
+                raise StudioConflictError("editing draft has changed")
+            edit = self._repository.get_edit(draft.head_edit_version_id)
+            if edit is None or not isinstance(edit.edl, EditDecisionListV2):
+                raise StudioConflictError("editing draft has no readable timeline")
+            source = self.get_asset(base_video_asset_id)
+            return source, edit, edit.edl, edit.timeline_hash
         selections = self._repository.current_selections(project_id)
         selected_video = selections.get("video")
         if selected_video is None or selected_video.id != base_video_asset_id:
@@ -3736,6 +4403,8 @@ class StudioService:
             if not isinstance(active_edit.edl, EditDecisionListV2):
                 raise StudioConflictError("active edit has an invalid v2 timeline")
             timeline = active_edit.edl
+        elif active_edit is not None:
+            raise StudioConflictError("请先准备旧剪辑完整预览并进入编辑草稿，不能忽略旧剪辑。")
         else:
             timeline = build_base_timeline(
                 asset_id=selected_video.id,
@@ -3761,6 +4430,8 @@ class StudioService:
         edit = self._repository.get_edit(command.edit_version_id)
         if edit is None or edit.project_id != project_id:
             raise StudioNotFoundError("edit version not found")
+        if edit.edit_draft_id is not None:
+            raise StudioConflictError("编辑草稿须先完整验收并正式选择，再进入导出流程。")
         if edit.source_selection_hash != self.current_delivery_selection_hash(project_id):
             raise StudioConflictError("edit version is outdated")
         input_hash = _hash_document(
@@ -4137,21 +4808,30 @@ def _segment_edit_prompt(
     issue_range: FrameRange,
     generation_range: FrameRange,
     frame_rate: RationalFrameRate,
+    end_state_policy: str = "match_original",
+    desired_end_state: str = "",
 ) -> str:
     fps = frame_rate.numerator / frame_rate.denominator
-    issue_start = issue_range.start_frame / fps
-    issue_end = issue_range.end_frame / fps
-    generation_start = generation_range.start_frame / fps
-    generation_end = generation_range.end_frame / fps
+    issue_start = (issue_range.start_frame - generation_range.start_frame) / fps
+    issue_end = (issue_range.end_frame - generation_range.start_frame) / fps
+    ending = (
+        compile_prompt_sentence(f"结尾状态必须改为：{desired_end_state}")
+        + "不继承原视频中与此目标冲突的道具状态。"
+        if end_state_policy == "replace"
+        else "出点参考负责与原片结束状态衔接。"
+    )
+    roles = (
+        ["入点衔接"]
+        + ([] if end_state_policy == "replace" else ["出点衔接"])
+        + ["儿童身份", "猫咪身份", "人猫比例", "环境", "画风"]
+    )
     return (
-        f"对参考视频执行时间区间语义编辑。本区间修改目标：{instruction}"
-        f"问题区间为第{issue_range.start_frame}帧（{issue_start:.3f}秒）至"
-        f"第{issue_range.end_frame}帧（{issue_end:.3f}秒），结束帧不包含；"
-        f"上下文生成区间为第{generation_range.start_frame}帧（{generation_start:.3f}秒）至"
-        f"第{generation_range.end_frame}帧（{generation_end:.3f}秒）。"
-        "reference_video只负责原有机位、动作节奏、构图、光线和前后连续性。"
-        "只修改问题区间对应的目标问题，其他上下文保持稳定。"
-        "入点锚帧定义修改段开始状态，出点锚帧定义修改段结束状态。"
+        f"【修改目标】\n{instruction.strip()}\n"
+        f"【片段内时间】\n参考视频从0秒开始；仅替换{issue_start:.3f}–{issue_end:.3f}秒，结束点不包含。\n"
+        "【保留与参考职责】\n视频1提供机位、构图、光线与未指定修改的内容；"
+        "需要修正的错误动作和道具状态不得照搬。入点参考负责起始衔接。"
+        + "；".join(f"图{index}：{role}" for index, role in enumerate(roles, 1))
+        + f"。\n【结束状态】\n{ending}\n"
         "角色动作必须明确表现初始状态—运动路径—结束状态，并在结束状态形成可观察的"
         "物理闭合；不得静止、原地互看或循环动作填充时长。"
     )
@@ -4186,9 +4866,7 @@ def _whole_generation_input_snapshot(
             )
             for item in preview.references
         ],
-        videoReferences=[
-            item for item in preview.video_references if item.included
-        ],
+        videoReferences=[item for item in preview.video_references if item.included],
         video={
             "durationSeconds": preview.duration_seconds,
             "resolution": "480p",
@@ -4223,7 +4901,7 @@ def _segment_generation_input_snapshot(
         for index, item in enumerate(preview.image_references, start=1)
     ]
     snapshot = GenerationInputSnapshotDto(
-        schemaVersion=1,
+        schemaVersion=2 if preview.base_edl is not None else 1,
         kind="segment_edit",
         state=state,
         provider=preview.provider,
@@ -4242,14 +4920,21 @@ def _segment_generation_input_snapshot(
         source={
             "baseVideoAssetId": preview.base_video_asset_id,
             "baseTimelineHash": preview.base_timeline_hash,
+            "baseEditVersionId": preview.base_edit_version_id,
+            "editDraftId": preview.edit_draft_id,
         },
         segmentEdit={
+            "baseEdl": preview.base_edl,
+            "endStatePolicy": preview.end_state_policy,
+            "desiredEndState": preview.desired_end_state,
             "instruction": preview.instruction,
             "issueRange": preview.issue_range,
             "generationRange": preview.generation_range,
             "candidateCoreRange": preview.candidate_core_range,
         },
-        promptCompilerRevision="segment-edit-v2",
+        promptCompilerRevision="segment-edit-v3"
+        if preview.base_edl is not None
+        else "segment-edit-v2",
         createdAt=created_at,
     )
     return snapshot.model_dump(mode="json", by_alias=True)

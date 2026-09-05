@@ -9,9 +9,12 @@ const client = vi.hoisted(() => ({
   assets: vi.fn(), runtime: vi.fn(), previewVideo: vi.fn(), createVideoJob: vi.fn(),
   eventsUrl: vi.fn(() => "/api/v1/events"), job: vi.fn(), resumeJobStorage: vi.fn(),
   diagnoseVideo: vi.fn(), selectAsset: vi.fn(), projectUsageSummary: vi.fn(),
+  videoReviews: vi.fn(), createVideoReview: vi.fn(), createVideoEditDraft: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: client }));
+const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("vue-router", () => ({ useRouter: () => navigation }));
 
 const workspace: WorkspaceDto = {
   eventCursor: 0,
@@ -30,6 +33,8 @@ describe("GenerationStep", () => {
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
     client.assets.mockResolvedValue([]);
+    client.videoReviews.mockResolvedValue([]);
+    client.createVideoReview.mockResolvedValue({ id: "review-1" });
     client.runtime.mockResolvedValue({ provider: { name: "ark", videoModel: "seedance" } });
     client.projectUsageSummary.mockResolvedValue({ projectId: "project-1", jobs: [], totals: {}, calculatedCostMicros: 0, unpricedJobCount: 0, currency: "CNY" });
     client.previewVideo.mockResolvedValue({
@@ -69,6 +74,24 @@ describe("GenerationStep", () => {
     expect(wrapper.text()).not.toContain("Validation Run");
     expect(wrapper.text()).not.toContain("额度");
     expect(wrapper.text()).not.toContain("确认并提交");
+    wrapper.unmount();
+  });
+
+  it("saves failed quality and enters an unselected video draft without acceptance", async () => {
+    client.assets.mockResolvedValue([{ id: "problem-video", projectId: "project-1", role: "video", mediaType: "video", sha256: "e".repeat(64), byteSize: 100, metadata: { durationFrames: 289 }, createdAt: "2026-09-05T00:00:00Z" }]);
+    client.createVideoEditDraft.mockResolvedValue({ id: "new-draft" });
+    const wrapper = mount(GenerationStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()] } });
+    await flushPromises();
+    await wrapper.findAll("button").find(button => button.text() === "检查视频")!.trigger("click");
+    await flushPromises();
+    await wrapper.findAll('input[value="fail"]')[6].setValue(true);
+    await wrapper.get("textarea").setValue("7.5 秒饼干被拿到桌面");
+    await wrapper.findAll("button").find(button => button.text() === "进入编辑草稿")!.trigger("click");
+    await flushPromises();
+    expect(client.createVideoReview).toHaveBeenCalledWith("project-1", expect.objectContaining({ checks: expect.objectContaining({ causalChainAndActiveEnding: "fail" }) }));
+    expect(client.createVideoEditDraft).toHaveBeenCalledTimes(1);
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    expect(navigation.push).toHaveBeenCalledWith({ path: "/projects/project-1/delivery", query: { draftId: "new-draft" } });
     wrapper.unmount();
   });
 

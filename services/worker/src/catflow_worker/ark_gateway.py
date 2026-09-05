@@ -221,8 +221,7 @@ class ArkTypedGateway:
             {
                 "type": "text",
                 "text": (
-                    f"{prompt}\n参考图片按顺序承担以下职责：{role_sequence}。"
-                    f"{video_guidance}"
+                    f"{prompt}\n参考图片按顺序承担以下职责：{role_sequence}。{video_guidance}"
                 ),
             }
         ]
@@ -321,12 +320,12 @@ class ArkTypedGateway:
     def submit_segment_video(self, request: SegmentVideoGenerationRequest) -> VideoSubmissionResult:
         image_paths = (
             request.anchor_in_path,
-            request.anchor_out_path,
+            *((request.anchor_out_path,) if request.anchor_out_path is not None else ()),
             *request.canon_reference_paths,
         )
         image_roles = (
             "anchor_in",
-            "anchor_out",
+            *(("anchor_out",) if request.anchor_out_path is not None else ()),
             *request.canon_reference_roles,
         )
         role_sequence = " → ".join(image_roles)
@@ -334,12 +333,16 @@ class ArkTypedGateway:
             {
                 "type": "text",
                 "text": (
-                    f"本区间修改目标：{request.instruction}\n"
-                    f"精确问题时间：{request.issue_start_seconds:.3f}–"
-                    f"{request.issue_end_seconds:.3f}秒。\n{request.prompt}\n"
-                    f"负面约束：{request.negative_prompt}\n"
-                    "视频1只负责原动作、机位、节奏和前后连续性；"
-                    f"图片职责按顺序为：{role_sequence}。"
+                    f"{request.prompt}\n需要避免的问题：{request.negative_prompt}"
+                    if request.prompt_compiler_revision == "segment-edit-v3"
+                    else (
+                        f"本区间修改目标：{request.instruction}\n"
+                        f"精确问题时间：{request.issue_start_seconds:.3f}–"
+                        f"{request.issue_end_seconds:.3f}秒。\n{request.prompt}\n"
+                        f"负面约束：{request.negative_prompt}\n"
+                        "视频1只负责原动作、机位、节奏和前后连续性；"
+                        f"图片职责按顺序为：{role_sequence}。"
+                    )
                 ),
             },
             {

@@ -73,12 +73,14 @@ export interface ProjectDto extends ProjectCreate {
 }
 
 export type SeriesNarrativeMode = "continuous" | "lightly_serialized" | "anthology";
+export type SeriesLengthMode = "fixed" | "ongoing";
 
 export interface SeriesCreateCommand {
   title: string;
   premise: string;
   narrativeMode: SeriesNarrativeMode;
-  plannedEpisodeCount: number;
+  lengthMode: SeriesLengthMode;
+  plannedEpisodeCount: number | null;
   defaultEpisodeDurationSeconds: number;
   worldSetting: string;
   emotionalDirection: string;
@@ -116,6 +118,11 @@ export interface SeriesEpisodeOutlineDraft {
   recurringLocationKeys: string[];
   recurringPropKeys: string[];
   productionWarnings: string[];
+  sourceCoverage: Array<{
+    sourceUnitOrdinal: number;
+    coverage: "whole" | "partial" | "continuation";
+    coverageNote: string;
+  }>;
 }
 
 export interface SeriesPlanDraft {
@@ -173,6 +180,18 @@ export interface ProjectSeriesContextDto {
   episodes: SeriesEpisodeDto[];
 }
 
+export interface SeriesSourceBeatDto {
+  id: string;
+  seriesId: string;
+  sourceUnitId: string;
+  sourceUnitOrdinal: number;
+  bindingOrder: number;
+  title: string;
+  theme?: string | null;
+  rawText: string;
+  createdAt: string;
+}
+
 export interface SeriesPlanPreviewDto {
   seriesId: string;
   provider: string;
@@ -182,8 +201,51 @@ export interface SeriesPlanPreviewDto {
   prompt: string;
   outputSchema: Record<string, unknown>;
   plannedEpisodeCount: number;
+  totalPlannedEpisodeCount?: number | null;
+  remainingEpisodeCount?: number | null;
+  lengthMode: SeriesLengthMode;
   defaultEpisodeDurationSeconds: number;
   promptRevision: string;
+}
+
+export interface SeriesPlanSegmentCommand {
+  startEpisodeOrder: number;
+  requestedEpisodeCount: number;
+  expectedSeriesPlanVersionId: string;
+  expectedPreviousSegmentVersionId?: string | null;
+}
+
+export interface SeriesPlanSegmentPreviewDto extends SeriesPlanSegmentCommand {
+  seriesId: string;
+  remainingEpisodeCount?: number | null;
+  provider: string;
+  model: string;
+  capabilityRevision: string;
+  inputHash: string;
+  prompt: string;
+  outputSchema: Record<string, unknown>;
+  promptRevision: string;
+}
+
+export interface SeriesPlanSegmentVersionDto {
+  id: string;
+  segmentId: string;
+  seriesId: string;
+  startEpisodeOrder: number;
+  requestedEpisodeCount: number;
+  revision: number;
+  status: "candidate" | "accepted" | "rejected" | "superseded";
+  active: boolean;
+  disposition: "candidate_ready" | "needs_input" | "invalid";
+  plan: SeriesPlanDraft;
+  issues: Array<{ code: string; severity: "fatal" | "blocking" | "warning"; path: string; message: string; suggestedAction?: string | null }>;
+  producingJobId?: string | null;
+  expectedSeriesPlanVersionId: string;
+  previousSegmentVersionId?: string | null;
+  inputHash: string;
+  promptRevision: string;
+  decidedAt?: string | null;
+  createdAt: string;
 }
 
 export interface SeriesEpisodeStoryPreviewDto {
@@ -258,7 +320,6 @@ export interface StoryImportPreviewDto {
   contentHash: string;
   inputHash: string;
   characterCount: number;
-  duplicateDocumentId?: string | null;
   prompt: string;
   outputSchema: Record<string, unknown>;
   promptRevision: string;
@@ -285,6 +346,12 @@ export interface StorySourceRelationSuggestionDto {
   suggestedSeriesId?: string | null;
   confidence: number;
   rationale: string;
+  episodeCountRecommendation?: {
+    minimumRecommended: number;
+    preferred: number;
+    maximumRecommended: number;
+    rationale: string;
+  } | null;
   status: "suggested" | "accepted" | "rejected";
   createdAt: string;
 }
@@ -306,7 +373,7 @@ export interface StorySourceDocumentDto {
 export interface StoryImportCreateResultDto {
   document: StorySourceDocumentDto;
   analysisJob?: JobDto | null;
-  reused: boolean;
+  idempotencyReplayed: boolean;
 }
 
 export interface StoryImportProjectDto {
@@ -409,7 +476,7 @@ export interface JobDto {
   projectId?: string | null;
   seriesId?: string | null;
   storySourceDocumentId?: string | null;
-  kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
+  kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_segment" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export" | "render_edit_preview";
   status:
     | "queued"
     | "submitting"
@@ -760,6 +827,8 @@ export interface EditDecisionListDto {
 }
 
 export interface EditVersionDto {
+  editDraftId?: string | null;
+  saveRequestHash?: string | null;
   id: string;
   projectId: string;
   revision: number;
@@ -781,6 +850,12 @@ export type SegmentRepairPreviewDto = components["schemas"]["SegmentRepairPrevie
 export type SegmentRepairCreateCommand = components["schemas"]["SegmentRepairCreateCommand"];
 export type SegmentRepairApproveCommand = components["schemas"]["SegmentRepairApproveCommand"];
 export type VideoRepairDto = components["schemas"]["VideoRepairDto"];
+export type VideoEditDraftDto = components["schemas"]["VideoEditDraftDto"];
+export type VideoEditDraftCreateCommand = components["schemas"]["VideoEditDraftCreateCommand"];
+export type VideoDraftPreviewCommand = components["schemas"]["VideoDraftPreviewCommand"];
+export type VideoDraftSaveCommand = components["schemas"]["VideoDraftSaveCommand"];
+export type VideoReviewCreateCommand = components["schemas"]["VideoReviewCreateCommand"];
+export type VideoReviewDto = components["schemas"]["VideoReviewDto"];
 
 export interface WorkspaceDto {
     eventCursor: number;

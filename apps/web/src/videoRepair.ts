@@ -3,7 +3,7 @@ import type { FrameRangeDto } from "./api/types";
 export type RepairVerdict = "pass" | "warning" | "fail" | "";
 
 export const EDIT_FRAMES_PER_SECOND = 24;
-export const MIN_ISSUE_FRAMES = 4 * EDIT_FRAMES_PER_SECOND;
+export const MIN_ISSUE_FRAMES = 1;
 export const MAX_ISSUE_FRAMES = 15 * EDIT_FRAMES_PER_SECOND;
 
 const requiredQualityChecks = [

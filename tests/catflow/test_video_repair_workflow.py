@@ -117,7 +117,8 @@ def test_repair_preview_and_paid_job_freeze_frame_ranges_and_reference_roles() -
     assert preview.video_reference.role == "reference_video"
     assert preview.video_reference.asset_id == video_id
     assert preview.instruction == "让孩子用毛巾逐只擦干猫爪。"
-    assert "第96帧（4.000秒）至第192帧（8.000秒）" in preview.prompt
+    assert "替换1.000–5.000秒" in preview.prompt
+    assert "4.000秒" not in preview.prompt
     assert "初始状态—运动路径—结束状态" in preview.prompt
     assert all(item.role != "style_source" for item in preview.image_references)
 

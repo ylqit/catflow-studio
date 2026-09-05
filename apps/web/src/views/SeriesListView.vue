@@ -37,8 +37,9 @@ onMounted(load);
     </section>
     <section v-else class="series-grid">
       <RouterLink v-for="item in series" :key="item.id" class="card series-card" :to="`/series/${item.id}`">
-        <div class="series-card-head"><span>{{ item.narrativeMode === "continuous" ? "连续剧情" : item.narrativeMode === "lightly_serialized" ? "轻连续" : "单元故事" }}</span><b>{{ item.plannedEpisodeCount }} 集</b></div>
+        <div class="series-card-head"><span>{{ item.narrativeMode === "continuous" ? "连续剧情" : item.narrativeMode === "lightly_serialized" ? "轻连续" : "单元故事" }}</span><b>{{ item.lengthMode === "ongoing" ? `持续连载 · 已规划 ${item.plannedCount} 集` : `固定系列 · 计划 ${item.plannedEpisodeCount} 集` }}</b></div>
         <h2>{{ item.title }}</h2><p>{{ item.premise }}</p>
+        <time :datetime="item.createdAt">创建于 {{ new Date(item.createdAt).toLocaleString("zh-CN") }}</time>
         <footer><span>已规划 {{ item.plannedCount }}</span><span>制作中 {{ item.materializedCount }}</span><span>已完成 {{ item.completedCount }}</span></footer>
       </RouterLink>
     </section>
@@ -46,5 +47,5 @@ onMounted(load);
 </template>
 
 <style scoped>
-.action-link { min-height: 40px; display: inline-flex; align-items: center; }.series-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }.series-card { min-height: 230px; padding: 24px; display: flex; flex-direction: column; }.series-card-head, .series-card footer { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }.series-card-head b { color: var(--accent-dark); }.series-card h2 { margin: 22px 0 10px; }.series-card p { color: var(--muted); line-height: 1.65; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }.series-card footer { margin-top: auto; padding-top: 18px; border-top: 1px solid var(--line); }.notice button { border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; }
+.action-link { min-height: 40px; display: inline-flex; align-items: center; }.series-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }.series-card { min-height: 230px; padding: 24px; display: flex; flex-direction: column; }.series-card-head, .series-card footer { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }.series-card-head b { color: var(--accent-dark); }.series-card h2 { margin: 22px 0 10px; }.series-card p { color: var(--muted); line-height: 1.65; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }.series-card time { margin-top: 10px; color: var(--muted); font-size: 11px; }.series-card footer { margin-top: auto; padding-top: 18px; border-top: 1px solid var(--line); }.notice button { border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; }
 </style>

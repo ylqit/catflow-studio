@@ -25,6 +25,8 @@ EXPECTED_TABLES = {
     "edit_versions",
     "validation_runs",
     "video_repairs",
+    "video_edit_drafts",
+    "video_reviews",
     "media_publications",
     "provider_rate_cards",
     "project_collections",
@@ -41,6 +43,10 @@ EXPECTED_TABLES = {
     "series_asset_bindings",
     "project_asset_bindings",
     "episode_reference_manifests",
+    "series_source_bindings",
+    "series_episode_outline_source_coverage",
+    "series_plan_segments",
+    "series_plan_segment_versions",
 }
 
 
@@ -81,9 +87,7 @@ def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
         "rate_card_revision",
         "pricing_snapshot_json",
         "provider_request_id",
-    } <= set(
-        tables["jobs"].columns.keys()
-    )
+    } <= set(tables["jobs"].columns.keys())
     assert tables["jobs"].columns.idempotency_key.unique is True
     assert {"storage_key", "sha256", "producing_job_id"} <= set(tables["assets"].columns.keys())
     assert "uq_assets_job_role_candidate" in {
@@ -105,9 +109,7 @@ def test_core_constraints_keep_versions_jobs_and_media_recoverable() -> None:
         "producing_job_id",
         "base_shot_plan_version_id",
         "decided_at",
-    } <= set(
-        tables["shot_plan_versions"].columns.keys()
-    )
+    } <= set(tables["shot_plan_versions"].columns.keys())
     assert "uq_shot_plan_versions_candidate" in {
         index.name for index in tables["shot_plan_versions"].indexes
     }
@@ -177,6 +179,8 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
     for table_name in EXPECTED_TABLES - {
         "validation_runs",
         "video_repairs",
+        "video_edit_drafts",
+        "video_reviews",
         "media_publications",
         "provider_rate_cards",
         "project_collections",
@@ -193,6 +197,10 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
         "series_asset_bindings",
         "project_asset_bindings",
         "episode_reference_manifests",
+        "series_source_bindings",
+        "series_episode_outline_source_coverage",
+        "series_plan_segments",
+        "series_plan_segment_versions",
     }:
         assert f"CREATE TABLE {SCHEMA_NAME}.{table_name}" in sql
     assert "production_runs" not in sql

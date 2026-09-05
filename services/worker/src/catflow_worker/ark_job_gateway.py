@@ -52,9 +52,7 @@ class ArkProviderJobGateway:
         self._extract_video_frames = extract_video_frames
         self._prepare_segment_media = prepare_segment_media
         self._video_reference_publisher = publish_segment_reference
-        self._prepared_video_references: dict[
-            uuid.UUID, PublishedSegmentReference
-        ] = {}
+        self._prepared_video_references: dict[uuid.UUID, PublishedSegmentReference] = {}
         self._prepared_segment_media: dict[
             uuid.UUID, tuple[Path, Path, Path, PublishedSegmentReference]
         ] = {}
@@ -148,7 +146,7 @@ class ArkProviderJobGateway:
                 output_schema=_required_dict(frozen_input, "outputSchema"),
             )
             return _structured_submission(result)
-        if kind == "plan_series":
+        if kind in {"plan_series", "plan_series_segment"}:
             result = self._gateway.plan_series(
                 prompt=_required_string(frozen_input, "prompt"),
                 output_schema=_required_dict(frozen_input, "outputSchema"),
@@ -218,9 +216,7 @@ class ArkProviderJobGateway:
                 prompt=compiled_prompt,
                 reference_paths=self._resolve_asset_paths(reference_ids),
                 reference_roles=reference_roles,
-                reference_video_url=(
-                    published_video.url if published_video is not None else None
-                ),
+                reference_video_url=(published_video.url if published_video is not None else None),
                 duration_seconds=int(frozen_input.get("durationSeconds", 12)),
                 resolution=_required_string(frozen_input, "resolution"),
             )
@@ -258,7 +254,7 @@ class ArkProviderJobGateway:
             )
             expected_roles = (
                 "anchor_in",
-                "anchor_out",
+                *(("anchor_out",) if frozen_input.get("endStatePolicy") != "replace" else ()),
                 "episode_child",
                 "episode_cat",
                 "pair_scale",
@@ -270,21 +266,34 @@ class ArkProviderJobGateway:
             canon_ids = _uuid_tuple(frozen_input.get("referenceAssetIds", []))
             if len(canon_ids) != 5:
                 raise ValueError("segment repair requires exactly five stored references")
+            compiler_revision = str(frozen_input.get("promptCompilerRevision", "segment-edit-v2"))
+            time_origin = (
+                _required_frame_range(frozen_input, "generationRange")[0]
+                if compiler_revision == "segment-edit-v3"
+                else 0
+            )
             result = self._gateway.submit_segment_video(
                 SegmentVideoGenerationRequest(
                     instruction=_required_string(frozen_input, "instruction"),
                     prompt=_required_string(frozen_input, "prompt"),
                     negative_prompt=_required_string(frozen_input, "negativePrompt"),
                     context_video_url=published.url,
-                    issue_start_seconds=_required_frame_range(frozen_input, "issueRange")[0] / 24,
-                    issue_end_seconds=_required_frame_range(frozen_input, "issueRange")[1] / 24,
+                    issue_start_seconds=(
+                        _required_frame_range(frozen_input, "issueRange")[0] - time_origin
+                    )
+                    / 24,
+                    issue_end_seconds=(
+                        _required_frame_range(frozen_input, "issueRange")[1] - time_origin
+                    )
+                    / 24,
                     anchor_in_path=anchor_in,
-                    anchor_out_path=anchor_out,
+                    anchor_out_path=anchor_out if "anchor_out" in reference_roles else None,
                     canon_reference_paths=self._resolve_asset_paths(canon_ids),
-                    canon_reference_roles=reference_roles[2:],
+                    canon_reference_roles=reference_roles[-5:],
                     duration_seconds=duration_seconds,
                     resolution="480p",
                     ratio="9:16",
+                    prompt_compiler_revision=compiler_revision,
                 )
             )
             metadata = {"publicationId": str(published.publication_id)}

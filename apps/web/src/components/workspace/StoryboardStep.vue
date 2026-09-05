@@ -140,6 +140,18 @@ const directorProgressHeadline = computed(() => {
     && displayedAttempt.value?.resultShotPlanVersionId
   ) {
     const issueCount = displayedGenerationResult.value?.issues.length ?? 0;
+    const resultPlan = availablePlans.value.find(
+      (plan) => plan.id === displayedAttempt.value?.resultShotPlanVersionId,
+    );
+    if (resultPlan?.active && resultPlan.reviewStatus === "accepted") {
+      return `分镜版本 ${resultPlan.revision} 已采用，包含 ${issueCount} 项制作提示。`;
+    }
+    if (resultPlan?.reviewStatus === "rejected") {
+      return `分镜版本 ${resultPlan.revision} 已不采用。`;
+    }
+    if (resultPlan?.reviewStatus === "superseded") {
+      return `分镜版本 ${resultPlan.revision} 已被较新的候选取代。`;
+    }
     return `新版分镜已经恢复，包含 ${issueCount} 项制作提示，等待确认。`;
   }
   if (recoverableDisplayedResult.value) {

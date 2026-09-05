@@ -103,9 +103,7 @@ def test_incomplete_structured_response_preserves_reason_usage_and_response_id()
         incomplete_details=SimpleNamespace(reason="max_output_tokens"),
         usage=SimpleNamespace(input_tokens=321, output_tokens=8000, total_tokens=8321),
     )
-    gateway = ArkTypedGateway(
-        _settings(), client=SimpleNamespace(responses=Recorder(response))
-    )
+    gateway = ArkTypedGateway(_settings(), client=SimpleNamespace(responses=Recorder(response)))
 
     with pytest.raises(ProviderGatewayError) as captured:
         gateway.plan_shots(prompt="专业分镜", output_schema={"type": "object"})
@@ -194,8 +192,7 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
     assert image_request["response_format"] == "url"
     assert image_request["optimize_prompt"] is False
     assert image_request["prompt"] == (
-        "【生成目标】\n生成雨天玄关空场景\n\n"
-        "【必须避免】\n不得出现儿童、猫咪或其他动物"
+        "【生成目标】\n生成雨天玄关空场景\n\n【必须避免】\n不得出现儿童、猫咪或其他动物"
     )
     assert len(image_request["image"]) == 3
     video_request = video_tasks.calls[0]
@@ -203,10 +200,14 @@ def test_ark_image_and_video_gateways_preserve_five_reference_order(
     assert video_request["resolution"] == "480p"
     assert video_request["ratio"] == "9:16"
     image_content = [
-        item for item in video_request["content"] if item["type"] == "image_url"  # type: ignore[index]
+        item
+        for item in video_request["content"]
+        if item["type"] == "image_url"  # type: ignore[index]
     ]
     text_content = [
-        item for item in video_request["content"] if item["type"] == "text"  # type: ignore[index]
+        item
+        for item in video_request["content"]
+        if item["type"] == "text"  # type: ignore[index]
     ]
     assert len(text_content) == 1
     assert text_content[0]["text"].endswith(
@@ -259,9 +260,7 @@ def test_ark_video_gateway_places_an_explicit_https_video_after_fixed_images(
     ]
     assert content[-1] == {
         "type": "video_url",
-        "video_url": {
-            "url": "https://media.example.test/episode-1.mp4?signature=safe"
-        },
+        "video_url": {"url": "https://media.example.test/episode-1.mp4?signature=safe"},
         "role": "reference_video",
     }
     assert "不得取代前五张图片" in content[0]["text"]
@@ -407,6 +406,44 @@ def test_ark_segment_gateway_submits_one_video_and_seven_ordered_images(
     assert "编辑类型" not in content[0]["text"]  # type: ignore[index]
 
 
+def test_v3_replace_end_state_submits_six_images_and_compiles_instruction_once(tmp_path: Path):
+    tasks = Recorder(SimpleNamespace(id="v3-task"))
+    gateway = ArkTypedGateway(
+        _settings(), client=SimpleNamespace(content_generation=SimpleNamespace(tasks=tasks))
+    )
+    images = tuple(_image(tmp_path / f"v3-{index}.png", "blue") for index in range(6))
+    prompt = "【修改目标】饼干留在篮内\n【片段内时间】替换1.000–7.042秒"
+    gateway.submit_segment_video(
+        SegmentVideoGenerationRequest(
+            instruction="饼干留在篮内",
+            prompt=prompt,
+            negative_prompt="桌面不出现饼干",
+            context_video_url="https://media.example.test/context.mp4",
+            issue_start_seconds=1,
+            issue_end_seconds=169 / 24,
+            anchor_in_path=images[0],
+            anchor_out_path=None,
+            canon_reference_paths=images[1:],
+            canon_reference_roles=(
+                "episode_child",
+                "episode_cat",
+                "pair_scale",
+                "environment",
+                "style_board",
+            ),
+            duration_seconds=8,
+            resolution="480p",
+            ratio="9:16",
+            prompt_compiler_revision="segment-edit-v3",
+        )
+    )
+    assert len(tasks.calls) == 1
+    content = tasks.calls[0]["content"]
+    assert sum(item["type"] == "image_url" for item in content) == 6
+    assert content[0]["text"].count("饼干留在篮内") == 1
+    assert content[0]["text"] == prompt + "\n需要避免的问题：桌面不出现饼干"
+
+
 def test_ark_segment_request_rejects_a_non_https_reference_url_before_submission(
     tmp_path: Path,
 ) -> None:
@@ -450,9 +487,7 @@ def test_ark_submission_timeout_is_never_presented_as_safe_to_retry() -> None:
         def create(self, **_kwargs: object) -> object:
             raise TimeoutError("timed out after sending")
 
-    gateway = ArkTypedGateway(
-        _settings(), client=SimpleNamespace(responses=TimeoutResponses())
-    )
+    gateway = ArkTypedGateway(_settings(), client=SimpleNamespace(responses=TimeoutResponses()))
 
     with pytest.raises(ProviderGatewayError) as captured:
         gateway.plan_story(prompt="雨天擦爪", output_schema={"type": "object"})

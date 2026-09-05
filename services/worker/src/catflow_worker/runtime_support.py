@@ -24,10 +24,12 @@ class AssetMediaResolver:
         media_store: LocalMediaStore,
         *,
         ffmpeg_path: Path,
+        timeline_renderer: LocalMediaJobExecutor | None = None,
     ) -> None:
         self._sessions = sessions
         self._media_store = media_store
         self._ffmpeg_path = ffmpeg_path
+        self._timeline_renderer = timeline_renderer
 
     def resolve_paths(self, asset_ids: tuple[uuid.UUID, ...]) -> tuple[Path, ...]:
         paths: list[Path] = []
@@ -109,6 +111,7 @@ class AssetMediaResolver:
                 raise ValueError("segment media source does not match the repair job")
             source = self._media_store.resolve(asset.storage_key)
             project_id = job.project_id
+            frozen_timeline = job.frozen_input_json.get("baseEdl")
         if not source.is_file():
             raise ValueError("segment media source file is missing")
 
@@ -120,6 +123,15 @@ class AssetMediaResolver:
         anchor_in = self._media_store.resolve(anchor_in_key)
         anchor_out = self._media_store.resolve(anchor_out_key)
         context.parent.mkdir(parents=True, exist_ok=True)
+        if frozen_timeline is not None:
+            if self._timeline_renderer is None:
+                raise ValueError(
+                    "frozen timeline renderer is unavailable; refusing root-video fallback"
+                )
+            source = context.parent / "base-timeline.mp4"
+            self._timeline_renderer.render_timeline(
+                job_id, frozen_timeline, source, allow_draft=True
+            )
 
         context_frames = generation_end_frame - generation_start_frame
         pad_seconds = max(0.0, provider_duration_seconds - context_frames / 24)
@@ -223,9 +235,7 @@ class AssetMediaResolver:
         )
         if completed.returncode != 0 or not temporary.is_file():
             temporary.unlink(missing_ok=True)
-            raise ValueError(
-                f"ffmpeg segment media preparation failed: {completed.stderr.strip()}"
-            )
+            raise ValueError(f"ffmpeg segment media preparation failed: {completed.stderr.strip()}")
         temporary.replace(destination)
 
     def _persist_prepared_asset(
@@ -247,9 +257,11 @@ class AssetMediaResolver:
                 image.verify()
                 width, height = image.size
         with self._sessions.begin() as session:
-            existing = session.query(AssetRecord).filter_by(
-                project_id=project_id, role=role, sha256=sha256
-            ).one_or_none()
+            existing = (
+                session.query(AssetRecord)
+                .filter_by(project_id=project_id, role=role, sha256=sha256)
+                .one_or_none()
+            )
             if existing is not None:
                 return
             session.add(

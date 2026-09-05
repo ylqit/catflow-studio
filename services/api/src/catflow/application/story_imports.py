@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -10,7 +11,7 @@ from pydantic import Field, model_validator
 
 from catflow.domain.contract import ContractModel
 
-from .series import SeriesNarrativeMode, StorySeriesDto
+from .series import SeriesLengthMode, SeriesNarrativeMode, StorySeriesDto
 
 StorySourceFormat = Literal["paste", "txt", "md"]
 StorySourceStatus = Literal["pending", "analyzing", "analyzed", "confirmed", "failed"]
@@ -49,7 +50,6 @@ class StoryImportPreviewDto(ContractModel):
     content_hash: str = Field(alias="contentHash", pattern=r"^[a-f0-9]{64}$")
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
     character_count: int = Field(alias="characterCount")
-    duplicate_document_id: uuid.UUID | None = Field(alias="duplicateDocumentId", default=None)
     prompt: str
     output_schema: dict[str, Any] = Field(alias="outputSchema")
     prompt_revision: str = Field(alias="promptRevision")
@@ -63,6 +63,19 @@ class StorySourceUnitDraft(ContractModel):
     analysis: dict[str, Any] = Field(default_factory=dict)
 
 
+class EpisodeCountRecommendationDto(ContractModel):
+    minimum_recommended: int = Field(alias="minimumRecommended", ge=1)
+    preferred: int = Field(ge=1)
+    maximum_recommended: int = Field(alias="maximumRecommended", ge=1)
+    rationale: str = Field(min_length=1, max_length=2_000)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> EpisodeCountRecommendationDto:
+        if not self.minimum_recommended <= self.preferred <= self.maximum_recommended:
+            raise ValueError("episode recommendation must be ordered")
+        return self
+
+
 class StorySourceRelationSuggestionDraft(ContractModel):
     relation_type: StorySourceRelationType = Field(alias="relationType")
     unit_ordinals: list[int] = Field(alias="unitOrdinals", min_length=1)
@@ -71,6 +84,9 @@ class StorySourceRelationSuggestionDraft(ContractModel):
     suggested_series_id: uuid.UUID | None = Field(alias="suggestedSeriesId", default=None)
     confidence: int = Field(ge=0, le=100)
     rationale: str = Field(min_length=1, max_length=2_000)
+    episode_count_recommendation: EpisodeCountRecommendationDto | None = Field(
+        alias="episodeCountRecommendation", default=None
+    )
 
 
 class StoryImportAnalysisDraft(ContractModel):
@@ -107,6 +123,9 @@ class StorySourceRelationSuggestionDto(ContractModel):
     suggested_series_id: uuid.UUID | None = Field(alias="suggestedSeriesId", default=None)
     confidence: int
     rationale: str
+    episode_count_recommendation: EpisodeCountRecommendationDto | None = Field(
+        alias="episodeCountRecommendation", default=None
+    )
     status: Literal["suggested", "accepted", "rejected"]
     created_at: datetime = Field(alias="createdAt")
 
@@ -161,7 +180,7 @@ class StoryImportProjectDto(ContractModel):
 class StoryImportCreateResultDto(ContractModel):
     document: StorySourceDocumentDto
     analysis_job: StoryImportAnalysisJobDto | None = Field(alias="analysisJob", default=None)
-    reused: bool
+    idempotency_replayed: bool = Field(alias="idempotencyReplayed")
 
 
 class StoryImportConfirmCommand(ContractModel):
@@ -169,6 +188,8 @@ class StoryImportConfirmCommand(ContractModel):
     target: StorySourceRelationType
     target_series_id: uuid.UUID | None = Field(alias="targetSeriesId", default=None)
     target_project_id: uuid.UUID | None = Field(alias="targetProjectId", default=None)
+    series_length_mode: SeriesLengthMode | None = Field(alias="seriesLengthMode", default=None)
+    planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None)
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
     @model_validator(mode="after")
@@ -187,6 +208,17 @@ class StoryImportConfirmCommand(ContractModel):
             raise ValueError("append_series cannot target a project")
         if self.target_series_id is not None and self.target_project_id is not None:
             raise ValueError("a story relationship can have only one target")
+        if self.target == "new_series":
+            if self.series_length_mode is None:
+                raise ValueError("new_series requires seriesLengthMode")
+            if self.series_length_mode == "fixed" and (
+                self.planned_episode_count is None or self.planned_episode_count < 2
+            ):
+                raise ValueError("fixed new_series requires plannedEpisodeCount of at least 2")
+            if self.series_length_mode == "ongoing" and self.planned_episode_count is not None:
+                raise ValueError("ongoing new_series cannot have plannedEpisodeCount")
+        elif self.series_length_mode is not None or self.planned_episode_count is not None:
+            raise ValueError("series length applies only to new_series")
         return self
 
 
@@ -201,28 +233,67 @@ class StoryImportMaterializationDto(ContractModel):
     created_at: datetime = Field(alias="createdAt")
 
 
+def recommended_episode_count(beat_count: int) -> EpisodeCountRecommendationDto:
+    if beat_count < 1:
+        raise ValueError("episode-count recommendation requires at least one story beat")
+    return EpisodeCountRecommendationDto(
+        minimumRecommended=math.ceil(beat_count / 2),
+        preferred=math.ceil(beat_count * 2 / 3),
+        maximumRecommended=beat_count,
+        rationale=(
+            f"根据 {beat_count} 个剧情节拍提供确定性编排建议；最终集数由用户确认。"
+        ),
+    )
+
+
+def normalize_import_relationship_suggestions(
+    analysis: StoryImportAnalysisDraft,
+) -> StoryImportAnalysisDraft:
+    """Keep Provider analysis independent until the user explicitly chooses an old target."""
+    normalized = []
+    for suggestion in analysis.relation_suggestions:
+        relation_type: StorySourceRelationType = suggestion.relation_type
+        if relation_type not in {"new_series", "independent"}:
+            relation_type = (
+                "new_series" if len(suggestion.unit_ordinals) > 1 else "independent"
+            )
+        beat_count = len(suggestion.unit_ordinals)
+        recommendation = suggestion.episode_count_recommendation
+        if recommendation is None:
+            recommendation = recommended_episode_count(beat_count)
+        normalized.append(
+            suggestion.model_copy(
+                update={
+                    "relation_type": relation_type,
+                    "suggested_series_id": None,
+                    "episode_count_recommendation": recommendation,
+                }
+            )
+        )
+    return analysis.model_copy(update={"relation_suggestions": normalized})
+
+
 def compile_story_import_preview(
     command: StoryImportPreviewCommand,
     *,
-    duplicate_document_id: uuid.UUID | None,
     provider: str,
     model: str,
     capability_revision: str,
 ) -> StoryImportPreviewDto:
     normalized_text = command.raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
     content_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
-    prompt_revision = "catflow-story-source-analyzer-v2"
+    prompt_revision = "catflow-story-source-analyzer-v3"
     prompt = (
         "分析下面的故事来源文本。不要依赖标题编号、‘第X集’或固定分隔符；"
-        "根据主题、事件边界、人物目标、时间与地点变化识别语义单元。"
+        "根据主题、事件边界、人物目标、时间与地点变化识别最小但有意义、可追溯的剧情节拍。"
         "原文可能只含一个故事，也可能包含多个主题、续集、修订稿或参考材料。"
-        "每个输出单元必须对应一条可独立制作的 8–15 秒竖屏微短片，并且只包含一个主要可见事件。"
-        "标题或段落只是来源边界提示，不是最终集数；如果一个段落依次包含准备、发现、互动、"
-        "转场、收拾或离开等多个可观察事件，必须继续拆成多个相邻单元。"
-        "短而完整的单一事件不要机械拆分；较长段落通常可以拆成 2–4 个单元，具体数量由事件边界决定。"
-        "保持所有单元的顺序和主题归属，覆盖原文全部关键事实、道具状态、时间地点变化与结尾，"
+        "剧情节拍用于忠实理解来源，不直接决定最终集数；后续可以把多个相邻节拍组合为一集，"
+        "也可以把内容密度过高的节拍拆到连续多集。不要为了落入固定数量而裁剪或机械拆分。"
+        "保持所有节拍的顺序和主题归属，覆盖原文全部关键事实、道具状态、时间地点变化与结尾，"
         "不得截断、压缩掉事实或添加原文不存在的主要事件。"
-        "每个 rawText 只放与该微短片有关的原文内容；analysis 中说明预计时长、来源覆盖和前后承接。"
+        "每个 rawText 保存对应的来源内容；analysis 中说明事件密度、来源覆盖和前后承接。"
+        "对每项关系建议给出 minimumRecommended、preferred、maximumRecommended 和 rationale，"
+        "这些只是非阻塞的系列集数建议，不是最终决定。"
         "为独立短片、新系列、追加系列、修订稿或参考材料提出关系建议，"
         "但不得替用户确认任何关系。当前没有提供既有系列或项目 ID，"
         "因此不得输出 append_series、revision 或 reference；连续的多个单元应建议 new_series，"
@@ -248,7 +319,6 @@ def compile_story_import_preview(
         contentHash=content_hash,
         inputHash=input_hash,
         characterCount=len(normalized_text),
-        duplicateDocumentId=duplicate_document_id,
         prompt=prompt,
         outputSchema=output_schema,
         promptRevision=prompt_revision,

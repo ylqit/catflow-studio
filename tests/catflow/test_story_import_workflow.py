@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from catflow.application.provider_config import ProviderRuntime
-from catflow.application.service import ProjectCreate, StudioService
+from catflow.application.series import SeriesCreateCommand
+from catflow.application.service import (
+    ProjectCreate,
+    StudioIdempotencyInputConflictError,
+    StudioService,
+)
 from catflow.application.story_imports import (
     StoryImportAnalysisDraft,
     StoryImportConfirmCommand,
@@ -121,19 +128,81 @@ def _micro_short_analysis() -> StoryImportAnalysisDraft:
     )
 
 
-def test_preview_requires_event_level_micro_short_splitting() -> None:
+def _eleven_beat_analysis() -> StoryImportAnalysisDraft:
+    return StoryImportAnalysisDraft.model_validate(
+        {
+            "units": [
+                {
+                    "ordinal": ordinal,
+                    "title": f"剧情节拍 {ordinal}",
+                    "theme": "森林野餐",
+                    "rawText": f"原文中的第 {ordinal} 个连续事件。",
+                }
+                for ordinal in range(1, 12)
+            ],
+            "relationSuggestions": [
+                {
+                    "relationType": "new_series",
+                    "unitOrdinals": list(range(1, 12)),
+                    "title": "森林野餐",
+                    "narrativeMode": "continuous",
+                    "confidence": 95,
+                    "rationale": "十一条相邻节拍共同构成从准备到返程的连续一天。",
+                }
+            ],
+        }
+    )
+
+
+def test_preview_extracts_event_beats_without_assigning_episode_length() -> None:
     preview = _service().preview_story_import(
         StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
     )
 
-    assert preview.prompt_revision == "catflow-story-source-analyzer-v2"
-    assert "8–15 秒" in preview.prompt
-    assert "一个主要可见事件" in preview.prompt
-    assert "必须继续拆成多个相邻单元" in preview.prompt
-    assert "过长内容只标记需要拆分" not in preview.prompt
+    assert preview.prompt_revision == "catflow-story-source-analyzer-v3"
+    assert "剧情节拍" in preview.prompt
+    assert "不直接决定最终集数" in preview.prompt
+    assert "一个来源单元必须等于一个 8–15 秒视频" not in preview.prompt
 
 
-def test_one_document_creates_one_analysis_job_and_exact_duplicate_reuses_it() -> None:
+def test_preview_extracts_traceable_beats_without_treating_each_as_one_episode() -> None:
+    preview = _service().preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+
+    assert preview.prompt_revision == "catflow-story-source-analyzer-v3"
+    assert "剧情节拍" in preview.prompt
+    assert "不直接决定最终集数" in preview.prompt
+    assert "每个来源单元必须独立成为一条 8–15 秒" not in preview.prompt
+
+
+def test_explicit_project_and_series_creation_never_reuses_matching_titles() -> None:
+    service = _service()
+    project_command = ProjectCreate(
+        title="同名短片", theme="相同主题", targetDurationSeconds=12
+    )
+    series_command = SeriesCreateCommand.model_validate(
+        {
+            "title": "同名系列",
+            "premise": "相同构想",
+            "narrativeMode": "continuous",
+            "plannedEpisodeCount": 2,
+            "defaultEpisodeDurationSeconds": 12,
+            "worldSetting": "同一地点",
+            "emotionalDirection": "温暖",
+        }
+    )
+
+    first_project = service.create_project(project_command)
+    second_project = service.create_project(project_command)
+    first_series = service.create_story_series(series_command)
+    second_series = service.create_story_series(series_command)
+
+    assert first_project.id != second_project.id
+    assert first_series.id != second_series.id
+
+
+def test_each_intentional_import_creates_a_new_document_and_analysis_job() -> None:
     service = _service()
     preview = service.preview_story_import(
         StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
@@ -146,19 +215,71 @@ def test_one_document_creates_one_analysis_job_and_exact_duplicate_reuses_it() -
     )
 
     first = service.create_story_import(command)
-    duplicate_preview = service.preview_story_import(
-        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
-    )
     duplicate = service.create_story_import(
         command.model_copy(update={"idempotency_key": "different-http-request"})
     )
 
-    assert first.document.id == duplicate.document.id
+    assert first.document.id != duplicate.document.id
     assert first.analysis_job is not None
     assert duplicate.analysis_job is not None
-    assert duplicate.analysis_job.id == first.analysis_job.id
-    assert duplicate_preview.duplicate_document_id == first.document.id
-    assert duplicate.reused is True
+    assert duplicate.analysis_job.id != first.analysis_job.id
+    assert duplicate.document.content_hash == first.document.content_hash
+    assert duplicate.idempotency_replayed is False
+    assert len(service.list_story_imports()) == 2
+
+
+def test_story_import_http_retry_returns_the_same_document_and_job() -> None:
+    service = _service()
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    command = StoryImportCreateCommand(
+        rawText=SOURCE_TEXT,
+        sourceFormat="paste",
+        expectedInputHash=preview.input_hash,
+        idempotencyKey="same-story-import-request",
+    )
+
+    first = service.create_story_import(command)
+    replayed = service.create_story_import(command)
+
+    assert first.document.id == replayed.document.id
+    assert first.analysis_job is not None
+    assert replayed.analysis_job is not None
+    assert first.analysis_job.id == replayed.analysis_job.id
+    assert replayed.idempotency_replayed is True
+    assert len(service.list_story_imports()) == 1
+
+
+def test_story_import_idempotency_key_cannot_be_reused_for_different_input() -> None:
+    service = _service()
+    first_preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=SOURCE_TEXT,
+            sourceFormat="paste",
+            expectedInputHash=first_preview.input_hash,
+            idempotencyKey="conflicting-story-import-request",
+        )
+    )
+    changed_text = f"{SOURCE_TEXT}\n新增一段明确不同的故事。"
+    changed_preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=changed_text, sourceFormat="paste")
+    )
+
+    with pytest.raises(StudioIdempotencyInputConflictError):
+        service.create_story_import(
+            StoryImportCreateCommand(
+                rawText=changed_text,
+                sourceFormat="paste",
+                expectedInputHash=changed_preview.input_hash,
+                idempotencyKey="conflicting-story-import-request",
+            )
+        )
+
+    assert len(service.list_story_imports()) == 1
 
 
 def test_failed_analysis_can_restart_on_the_same_document_idempotently() -> None:
@@ -241,6 +362,8 @@ def test_analysis_preserves_source_units_until_user_confirms_relationship() -> N
         StoryImportConfirmCommand(
             suggestionId=first_suggestion.id,
             target="new_series",
+            seriesLengthMode="fixed",
+            plannedEpisodeCount=2,
             idempotencyKey="confirm-forest-series",
         ),
     )
@@ -250,6 +373,156 @@ def test_analysis_preserves_source_units_until_user_confirms_relationship() -> N
     assert result.series.planned_episode_count == 2
     assert len(service.list_story_series()) == 1
     assert service.list_projects() == []
+
+
+def test_eleven_beats_recommend_eight_episodes_and_create_a_fixed_series_without_projects() -> None:
+    service = _service()
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    created = service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=SOURCE_TEXT,
+            sourceFormat="paste",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="analyze-eleven-beats",
+        )
+    )
+    assert created.analysis_job is not None
+
+    analyzed = service.complete_story_import_analysis(
+        created.analysis_job.id, _eleven_beat_analysis()
+    )
+    suggestion = analyzed.relation_suggestions[0]
+
+    assert len(analyzed.units) == 11
+    assert suggestion.episode_count_recommendation is not None
+    assert suggestion.episode_count_recommendation.model_dump(by_alias=True) == {
+        "minimumRecommended": 6,
+        "preferred": 8,
+        "maximumRecommended": 11,
+        "rationale": "根据 11 个剧情节拍提供确定性编排建议；最终集数由用户确认。",
+    }
+
+    result = service.confirm_story_import(
+        analyzed.id,
+        StoryImportConfirmCommand(
+            suggestionId=suggestion.id,
+            target="new_series",
+            seriesLengthMode="fixed",
+            plannedEpisodeCount=8,
+            idempotencyKey="confirm-eleven-beats-as-eight-episodes",
+        ),
+    )
+
+    assert result.series is not None
+    assert result.series.length_mode == "fixed"
+    assert result.series.planned_episode_count == 8
+    assert len(service.list_series_source_beats(result.series.id)) == 11
+    assert service.list_series_episodes(result.series.id) == []
+    assert service.list_projects() == []
+
+
+def test_one_saved_analysis_can_explicitly_create_two_independent_series() -> None:
+    service = _service()
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    created = service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=SOURCE_TEXT,
+            sourceFormat="paste",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="analyze-source-once-for-two-series",
+        )
+    )
+    assert created.analysis_job is not None
+    analyzed = service.complete_story_import_analysis(
+        created.analysis_job.id, _eleven_beat_analysis()
+    )
+    suggestion = analyzed.relation_suggestions[0]
+
+    first = service.confirm_story_import(
+        analyzed.id,
+        StoryImportConfirmCommand(
+            suggestionId=suggestion.id,
+            target="new_series",
+            seriesLengthMode="fixed",
+            plannedEpisodeCount=9,
+            idempotencyKey="first-series-from-one-analysis",
+        ),
+    )
+    second = service.confirm_story_import(
+        analyzed.id,
+        StoryImportConfirmCommand(
+            suggestionId=suggestion.id,
+            target="new_series",
+            seriesLengthMode="fixed",
+            plannedEpisodeCount=8,
+            idempotencyKey="second-series-from-one-analysis",
+        ),
+    )
+
+    assert first.series is not None and second.series is not None
+    assert first.series.id != second.series.id
+    assert first.series.planned_episode_count == 9
+    assert second.series.planned_episode_count == 8
+    assert len(service.list_series_source_beats(first.series.id)) == 11
+    assert len(service.list_series_source_beats(second.series.id)) == 11
+    assert service.list_projects() == []
+
+
+def test_provider_cannot_automatically_attach_a_new_import_to_existing_content() -> None:
+    service = _service()
+    existing = service.create_story_series(
+        SeriesCreateCommand.model_validate({
+            "title": "旧系列",
+            "premise": "旧内容",
+            "narrativeMode": "continuous",
+            "plannedEpisodeCount": 2,
+            "defaultEpisodeDurationSeconds": 12,
+            "worldSetting": "家中",
+            "emotionalDirection": "温暖",
+        })
+    )
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    created = service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=SOURCE_TEXT,
+            sourceFormat="paste",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="provider-must-not-auto-attach",
+        )
+    )
+    assert created.analysis_job is not None
+    provider_analysis = StoryImportAnalysisDraft.model_validate(
+        {
+            "units": [
+                {"ordinal": 1, "title": "准备", "rawText": "准备野餐篮。"},
+                {"ordinal": 2, "title": "出发", "rawText": "一起出发。"},
+            ],
+            "relationSuggestions": [
+                {
+                    "relationType": "append_series",
+                    "unitOrdinals": [1, 2],
+                    "title": "错误的自动追加建议",
+                    "suggestedSeriesId": str(existing.id),
+                    "confidence": 90,
+                    "rationale": "模型误以为应该自动追加。",
+                }
+            ],
+        }
+    )
+
+    analyzed = service.complete_story_import_analysis(
+        created.analysis_job.id, provider_analysis
+    )
+
+    assert analyzed.relation_suggestions[0].relation_type == "new_series"
+    assert analyzed.relation_suggestions[0].suggested_series_id is None
+    assert len(service.list_story_series()) == 1
 
 
 def test_unconfirmed_analysis_can_be_reanalyzed_without_discarding_the_old_result_first() -> None:

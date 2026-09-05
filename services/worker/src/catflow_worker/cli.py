@@ -81,6 +81,7 @@ def _run_worker(*, once: bool, poll_interval: float) -> None:
         sessions,
         media_store,
         ffmpeg_path=ffmpeg_path,
+        timeline_renderer=local_results,
     )
     segment_publisher = (
         SegmentReferencePublisher(sessions, object_publisher_runtime.store)

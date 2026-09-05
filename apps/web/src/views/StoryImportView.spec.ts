@@ -1,15 +1,18 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import StoryImportView from "./StoryImportView.vue";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
-const route = vi.hoisted(() => ({ params: {} as Record<string, string> }));
+const routeState = vi.hoisted(() => ({ params: {} as Record<string, string> }));
+const route = reactive(routeState);
 const client = vi.hoisted(() => ({
   previewStoryImport: vi.fn(),
   createStoryImport: vi.fn(),
   reanalyzeStoryImport: vi.fn(),
   storyImport: vi.fn(),
+  storyImports: vi.fn(),
   storySeries: vi.fn(),
   projects: vi.fn(),
   confirmStoryImport: vi.fn(),
@@ -26,7 +29,6 @@ const preview = {
   contentHash: "a".repeat(64),
   inputHash: "b".repeat(64),
   characterCount: 30,
-  duplicateDocumentId: null,
   prompt: "识别一个或多个故事单元。",
   outputSchema: {},
   promptRevision: "import-v1",
@@ -53,7 +55,7 @@ const analyzedDocument = {
 
 function mountView() {
   return mount(StoryImportView, {
-    global: { stubs: { RouterLink: { props: ["to"], template: "<a><slot /></a>" } } },
+    global: { stubs: { RouterLink: { props: ["to"], template: '<a :href="to"><slot /></a>' } } },
   });
 }
 
@@ -63,11 +65,73 @@ describe("StoryImportView", () => {
     route.params = {};
     client.storySeries.mockResolvedValue([]);
     client.projects.mockResolvedValue([]);
+    client.storyImports.mockResolvedValue([]);
     client.previewStoryImport.mockResolvedValue(preview);
-    client.createStoryImport.mockResolvedValue({ document: analyzedDocument, analysisJob: null, reused: false });
+    client.createStoryImport.mockResolvedValue({ document: analyzedDocument, analysisJob: null, idempotencyReplayed: false });
   });
 
-  it("moves an accepted import onto a stable document URL and blocks duplicate analysis while it runs", async () => {
+  it("lists prior source records so an analyzed result can be resumed without reanalysis", async () => {
+    client.storyImports.mockResolvedValue([analyzedDocument]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const history = wrapper.get(".import-history");
+    expect(history.text()).toContain("森林野餐");
+    expect(history.text()).toContain("2 个剧情节拍");
+    expect(history.get("a").attributes("href")).toBe("/story-imports/document-1");
+  });
+
+  it("loads a saved analysis when the reused route component changes document id", async () => {
+    client.storyImport.mockResolvedValue(analyzedDocument);
+    const wrapper = mountView();
+    await flushPromises();
+
+    route.params = { documentId: "document-1" };
+    await flushPromises();
+
+    expect(client.storyImport).toHaveBeenCalledWith("document-1");
+    expect(wrapper.text()).toContain("识别到 2 个剧情节拍");
+  });
+
+  it("allows an accepted source suggestion to explicitly create another independent series", async () => {
+    const accepted = {
+      ...analyzedDocument,
+      relationSuggestions: analyzedDocument.relationSuggestions.map((item, index) => ({
+        ...item,
+        status: index === 0 ? "accepted" : item.status,
+        episodeCountRecommendation: index === 0
+          ? { minimumRecommended: 2, preferred: 2, maximumRecommended: 3, rationale: "建议" }
+          : null,
+      })),
+    };
+    route.params = { documentId: "document-1" };
+    client.storyImport.mockResolvedValue(accepted);
+    client.confirmStoryImport.mockResolvedValue({
+      series: { id: "series-new" },
+      projects: [],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const button = wrapper.findAll("button.confirm-relation")[0];
+    expect(button.text()).toContain("创建另一个新系列");
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(client.confirmStoryImport).toHaveBeenCalledWith(
+      "document-1",
+      expect.objectContaining({
+        suggestionId: "suggestion-1",
+        target: "new_series",
+        seriesLengthMode: "fixed",
+        plannedEpisodeCount: 2,
+      }),
+    );
+    expect(router.push).toHaveBeenCalledWith("/series/series-new");
+  });
+
+  it("moves an accepted import onto a stable document URL and blocks another import while it runs", async () => {
     const analyzingDocument = {
       ...analyzedDocument,
       status: "analyzing",
@@ -77,7 +141,7 @@ describe("StoryImportView", () => {
     client.createStoryImport.mockResolvedValue({
       document: analyzingDocument,
       analysisJob: { id: "job-1" },
-      reused: false,
+      idempotencyReplayed: false,
     });
     const wrapper = mountView();
     await flushPromises();
@@ -131,7 +195,7 @@ describe("StoryImportView", () => {
 
   it("retries a failed analysis against the same stored document", async () => {
     const failedDocument = { ...analyzedDocument, status: "failed", units: [], relationSuggestions: [] };
-    client.createStoryImport.mockResolvedValue({ document: failedDocument, analysisJob: null, reused: true });
+    client.createStoryImport.mockResolvedValue({ document: failedDocument, analysisJob: null, idempotencyReplayed: false });
     client.reanalyzeStoryImport.mockResolvedValue({ id: "job-2" });
     const wrapper = mountView();
     await flushPromises();
@@ -192,5 +256,108 @@ describe("StoryImportView", () => {
     const target = wrapper.get("select[aria-label='森林野餐的处理方式']");
     expect((target.element as HTMLSelectElement).value).toBe("new_series");
     expect(wrapper.get(".relation-action button").attributes("disabled")).toBeUndefined();
+  });
+
+  it("always presents an intentional import as a new paid analysis", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("textarea[aria-label='故事来源文本']").setValue(analyzedDocument.rawText);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("每次导入都会新建来源记录");
+    expect(wrapper.get("button.analyze-button").text()).toBe("导入并分析（付费）");
+    expect(wrapper.text()).not.toContain("打开已有分析");
+    expect(wrapper.text()).not.toContain("已有相同内容");
+  });
+
+  it("presents source units as beats and lets the user confirm a recommended series length", async () => {
+    const elevenBeatDocument = {
+      ...analyzedDocument,
+      units: Array.from({ length: 11 }, (_, index) => ({
+        id: `unit-${index + 1}`,
+        documentId: "document-1",
+        ordinal: index + 1,
+        title: `剧情节拍 ${index + 1}`,
+        theme: "森林野餐",
+        rawText: `原文事件 ${index + 1}`,
+        analysis: {},
+        createdAt: now,
+      })),
+      relationSuggestions: [{
+        ...analyzedDocument.relationSuggestions[0],
+        unitIds: Array.from({ length: 11 }, (_, index) => `unit-${index + 1}`),
+        episodeCountRecommendation: {
+          minimumRecommended: 6,
+          preferred: 8,
+          maximumRecommended: 11,
+          rationale: "相邻节拍可以组合为单集。",
+        },
+      }],
+    };
+    route.params = { documentId: "document-1" };
+    client.storyImport.mockResolvedValue(elevenBeatDocument);
+    client.confirmStoryImport.mockResolvedValue({
+      series: { id: "series-new" },
+      projects: [],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("识别到 11 个剧情节拍");
+    expect(wrapper.text()).toContain("建议范围：6–11 集");
+    expect(wrapper.text()).toContain("推荐：8 集");
+    expect((wrapper.get("input[aria-label='森林野餐计划集数']").element as HTMLInputElement).value).toBe("8");
+
+    await wrapper.get("button.confirm-relation").trigger("click");
+    await flushPromises();
+
+    expect(client.confirmStoryImport).toHaveBeenCalledWith(
+      "document-1",
+      expect.objectContaining({
+        target: "new_series",
+        seriesLengthMode: "fixed",
+        plannedEpisodeCount: 8,
+      }),
+    );
+  });
+
+  it("settles a successful import request so the next explicit import gets a new key", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("textarea[aria-label='故事来源文本']").setValue(analyzedDocument.rawText);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await flushPromises();
+
+    await wrapper.get("button.analyze-button").trigger("click");
+    await flushPromises();
+    const firstKey = client.createStoryImport.mock.calls[0][0].idempotencyKey;
+    await wrapper.get("button.analyze-button").trigger("click");
+    await flushPromises();
+    const secondKey = client.createStoryImport.mock.calls[1][0].idempotencyKey;
+
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("submits only once when the paid import button is clicked twice quickly", async () => {
+    let resolveRequest: ((value: unknown) => void) | undefined;
+    client.createStoryImport.mockImplementation(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    }));
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("textarea[aria-label='故事来源文本']").setValue(analyzedDocument.rawText);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await flushPromises();
+
+    const button = wrapper.get("button.analyze-button");
+    const firstClick = button.trigger("click");
+    const secondClick = button.trigger("click");
+    await Promise.all([firstClick, secondClick]);
+
+    expect(client.createStoryImport).toHaveBeenCalledTimes(1);
+    resolveRequest?.({ document: analyzedDocument, analysisJob: null, idempotencyReplayed: false });
+    await flushPromises();
   });
 });

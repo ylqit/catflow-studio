@@ -1,258 +1,73 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import type { JobDto, SegmentRepairPreviewDto, WorkspaceDto } from "../../api/types";
+import type { WorkspaceDto } from "../../api/types";
 import VideoRepairWorkspace from "./VideoRepairWorkspace.vue";
 
+const state = vi.hoisted(() => ({ query: { draftId: "draft-1" } as Record<string, string>, replace: vi.fn() }));
+vi.mock("vue-router", () => ({ useRoute: () => state, useRouter: () => ({ replace: state.replace }) }));
 const client = vi.hoisted(() => ({
-  videoRepairs: vi.fn(),
-  assets: vi.fn(),
-  edits: vi.fn(),
-  runtime: vi.fn(),
-  previewVideoRepair: vi.fn(),
-  createVideoRepair: vi.fn(),
-  approveVideoRepair: vi.fn(),
-  rejectVideoRepair: vi.fn(),
-  job: vi.fn(),
+  videoEditDrafts: vi.fn(), videoEditDraft: vi.fn(), videoDraftJobs: vi.fn(), videoReviews: vi.fn(),
+  videoRepairs: vi.fn(), assets: vi.fn(), edits: vi.fn(), runtime: vi.fn(), previewVideoRepair: vi.fn(),
+  createVideoRepair: vi.fn(), renderDraftPreview: vi.fn(), saveVideoDraft: vi.fn(), selectAsset: vi.fn(),
 }));
-
-vi.mock("../../api/client", () => ({ api: client }));
-
-const workspace: WorkspaceDto = {
-  eventCursor: 0,
-  project: {
-    id: "project-1",
-    title: "雨天擦爪",
-    theme: "雨天擦爪",
-    targetDurationSeconds: 12,
-    aspectRatio: "9:16",
-    canonProfileId: "canon-1",
-    createdAt: "2026-09-01T00:00:00Z",
-    updatedAt: "2026-09-01T00:00:00Z",
-  },
-  steps: [],
-  activeStory: null,
-  activeShotPlan: null,
-  selectionHash: "1".repeat(64),
-  selections: {
-    video: {
-      id: "video-1",
-      projectId: "project-1",
-      role: "video",
-      mediaType: "video",
-      sha256: "a".repeat(64),
-      byteSize: 1,
-      metadata: { durationFrames: 288 },
-      createdAt: "2026-09-01T00:00:00Z",
-    },
-  },
-};
-
-const preview: SegmentRepairPreviewDto = {
-  projectId: "project-1",
-  baseVideoAssetId: "video-1",
-  baseTimelineHash: "b".repeat(64),
-  frameRate: { numerator: 24, denominator: 1 },
-  issueRange: { startFrame: 0, endFrame: 96 },
-  generationRange: { startFrame: 0, endFrame: 120 },
-  candidateCoreRange: { startFrame: 0, endFrame: 96 },
-  providerDurationSeconds: 5,
-  instruction: "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。",
-  provider: "ark",
-  model: "doubao-seedance-2-0-260128",
-  capabilityRevision: "ark-seedance-2.0-v1",
-  prompt: "重拍擦爪动作",
-  negativePrompt: "禁止身份漂移",
-  imageReferences: [
-    { role: "anchor_in", sha256: "1".repeat(64), frameNumber: 0, derived: true },
-    { role: "anchor_out", sha256: "2".repeat(64), frameNumber: 95, derived: true },
-  ],
-  videoReference: {
-    role: "reference_video",
-    assetId: "video-1",
-    sha256: "a".repeat(64),
-    range: { startFrame: 0, endFrame: 120 },
-  },
-  expectedCostMicros: 0,
-  costEstimateStatus: "priced",
-  inputHash: "c".repeat(64),
-};
-
-const recoveredRepairJob: JobDto = {
-  id: "repair-job-1",
-  projectId: "project-1",
-  kind: "regenerate_video_segment",
-  status: "polling",
-  inputHash: "d".repeat(64),
-  provider: "ark",
-  model: "doubao-seedance-2-0-260128",
-  providerTaskId: "cgt-repair-task-1",
-  videoRepairId: "repair-1",
-  providerResult: { publicationId: "publication-1", requestId: "req-repair-1" },
-  publication: {
-    id: "publication-1",
-    state: "ready",
-    publicHost: "test-vedio-ylq.tos-s3-cn-beijing.volces.com",
-    signedUrlExpiresAt: "2026-09-02T14:20:00Z",
-    deleteAfter: "2026-09-09T12:20:00Z",
-  },
-  frozenInput: {},
-  resultAssetIds: [],
-  createdAt: "2026-09-02T12:20:00Z",
-  updatedAt: "2026-09-02T12:21:00Z",
-};
-
-describe("VideoRepairWorkspace", () => {
-  beforeEach(() => {
-    sessionStorage.clear();
-    client.videoRepairs.mockResolvedValue([]);
-    client.assets.mockResolvedValue([]);
-    client.edits.mockResolvedValue([]);
-    client.runtime.mockResolvedValue({
-      provider: { name: "ark", apiKeyConfigured: true, paidCallsEnabled: true },
-      objectPublisher: {
-        configured: true,
-        ready: true,
-        backend: "s3",
-        endpointHost: "tos-s3-cn-beijing.volces.com",
-        publicHost: "test-vedio-ylq.tos-s3-cn-beijing.volces.com",
-        bucket: "test-vedio-ylq",
-        region: "cn-beijing",
-        addressingStyle: "virtual",
-        presignTtlSeconds: 7200,
-        retentionDays: 7,
-      },
-    });
-    client.previewVideoRepair.mockResolvedValue(preview);
-    client.createVideoRepair.mockResolvedValue(recoveredRepairJob);
+vi.mock("../../api/client", async (original) => ({ ...await original<typeof import("../../api/client")>(), api: client }));
+const source = { id: "video-1", projectId: "project-1", role: "video", mediaType: "video", sha256: "a".repeat(64), byteSize: 1, metadata: { durationFrames: 289 }, createdAt: "2026-09-05T00:00:00Z" };
+const workspace = { project: { id: "project-1", targetDurationSeconds: 12 }, selections: {}, eventCursor: 0 } as unknown as WorkspaceDto;
+const head = { id: "edit-1", projectId: "project-1", editDraftId: "draft-1", revision: 1, timelineHash: "b".repeat(64), formatVersion: 2, edl: { videoSegments: [{ durationFrames: 289 }] }, createdAt: "2026-09-05T00:00:00Z" };
+const draft = { id: "draft-1", sourceVideoAssetId: "video-1", headEditVersionId: "edit-1", referencesConfirmed: true };
+const preview = { issueRange: { startFrame: 144, endFrame: 289 }, generationRange: { startFrame: 120, endFrame: 289 }, candidateCoreRange: { startFrame: 24, endFrame: 169 }, providerDurationSeconds: 8, editDraftId: "draft-1", endStatePolicy: "replace", desiredEndState: "饼干留在篮内", instruction: "不把饼干放到桌上", prompt: "片段内 1.000–7.042 秒", imageReferences: [], inputHash: "c".repeat(64) };
+beforeEach(() => {
+  vi.clearAllMocks(); state.query = { draftId: "draft-1" };
+  client.videoEditDrafts.mockResolvedValue([draft]); client.videoEditDraft.mockResolvedValue(draft);
+  client.assets.mockResolvedValue([source, { ...source, id: "base-preview", role: "edit_preview", metadata: { editVersionId: "edit-1" } }]);
+  client.edits.mockResolvedValue([head]); client.videoRepairs.mockResolvedValue([]); client.videoDraftJobs.mockResolvedValue([]); client.videoReviews.mockResolvedValue([]);
+  client.runtime.mockResolvedValue({ workerReady: true, worker: { ready: true }, provider: { name: "ark", apiKeyConfigured: true, paidCallsEnabled: true }, objectPublisher: { ready: true } });
+  client.previewVideoRepair.mockResolvedValue(preview);
+});
+describe("persistent video edit drafts", () => {
+  it("restores a source issue range without promoting its failed review", async () => {
+    client.videoReviews.mockImplementation(async (_project, assetId) => assetId === "video-1" ? [{ id: "review-1", notes: "饼干被拿出", checks: { causalChainAndActiveEnding: "fail" }, issues: [{ range: { startFrame: 144, endFrame: 289 }, note: "饼干被拿出" }] }] : []);
+    const view = mount(VideoRepairWorkspace, { props: { projectId: "project-1", workspace } });
+    await flushPromises();
+    expect(view.get('input[aria-label="入点帧（包含）"]').element).toHaveProperty("value", "144");
+    expect(view.get('input[aria-label="出点帧（不包含）"]').element).toHaveProperty("value", "289");
+    expect(view.findAll("select").some(select => select.element.value === "fail")).toBe(true);
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    view.unmount();
   });
-
-  it("auto-previews one free-text instruction and exposes a four-second accessible range", async () => {
-    const wrapper = mount(VideoRepairWorkspace, {
-      props: { projectId: "project-1", workspace },
-    });
+  it("allows an unselected video to be edited without pretending quality passed", async () => {
+    const view = mount(VideoRepairWorkspace, { props: { projectId: "project-1", workspace } });
     await flushPromises();
-
-    expect(wrapper.find('[data-testid="edit-intent"]').exists()).toBe(false);
-    expect(client.previewVideoRepair).toHaveBeenCalledWith("project-1", expect.objectContaining({
-      issueRange: { startFrame: 0, endFrame: 96 },
-      instruction: expect.any(String),
-    }));
-    expect(wrapper.text()).toContain("最短修改区间为 4.00 秒");
-    expect(wrapper.text()).toContain("本次修改效果");
-    expect(wrapper.text()).toContain("预览不产生费用");
-    const start = wrapper.get('[aria-label="修改区间起点"]');
-    const end = wrapper.get('[aria-label="修改区间终点"]');
-    expect(start.attributes("max")).toBe("0");
-    expect(end.attributes("min")).toBe("96");
-    wrapper.unmount();
+    expect(view.text()).toContain("进入编辑不等于验收通过");
+    expect(view.get('input[aria-label="出点帧（不包含）"]').attributes("max")).toBe("289");
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    expect(client.createVideoRepair).not.toHaveBeenCalled();
+    expect(view.findAll("video")).toHaveLength(1);
+    view.unmount();
   });
-
-  it("submits the current free-text preview in one click", async () => {
-    const wrapper = mount(VideoRepairWorkspace, {
-      props: { projectId: "project-1", workspace },
-    });
+  it("recovers the frozen selection and unknown provider state without resubmitting", async () => {
+    client.videoRepairs.mockResolvedValue([{ id: "repair-1", baseEditVersionId: "edit-1", status: "generating", issueRange: preview.issueRange, instruction: preview.instruction, preview }]);
+    client.videoDraftJobs.mockResolvedValue([{ id: "job-1", videoRepairId: "repair-1", kind: "regenerate_video_segment", status: "submission_unknown", createdAt: "2026-09-05T00:00:00Z", resultAssetIds: [] }]);
+    const view = mount(VideoRepairWorkspace, { props: { projectId: "project-1", workspace } });
     await flushPromises();
-
-    await wrapper.findAll("button").find((item) => item.text().includes("生成修改结果"))!.trigger("click");
-    await flushPromises();
-
-    expect(client.previewVideoRepair).toHaveBeenCalledWith("project-1", expect.objectContaining({
-      issueRange: { startFrame: 0, endFrame: 96 },
-      instruction: "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。",
-    }));
-    expect(client.createVideoRepair).toHaveBeenCalledWith("project-1", {
-      baseVideoAssetId: "video-1",
-      baseEditVersionId: undefined,
-      issueRange: { startFrame: 0, endFrame: 96 },
-      instruction: "孩子蹲下，用软毛巾逐只擦干猫爪；猫咪自然抬爪配合，湿爪和地面水印明显减少。",
-      expectedInputHash: "c".repeat(64),
-      idempotencyKey: expect.any(String),
-    });
-    expect(wrapper.text()).toContain("本次操作会产生模型费用，完成后显示实际用量");
-    expect(wrapper.text()).not.toContain("剩余额度");
-    expect(wrapper.text()).not.toContain("确认并生成");
-    expect(wrapper.get("details").attributes("open")).toBeUndefined();
-    expect(wrapper.text()).not.toContain("AccessKeyId");
-    wrapper.unmount();
+    expect(view.get('input[aria-label="入点帧（包含）"]').element).toHaveProperty("value", "144");
+    expect(view.get('input[aria-label="出点帧（不包含）"]').element).toHaveProperty("value", "289");
+    expect(view.get('input[aria-label="入点帧（包含）"]').attributes("disabled")).toBeDefined();
+    expect(view.text()).toContain("提交状态需要人工确认");
+    expect(view.text()).toContain("出点接缝检查不适用");
+    expect(client.createVideoRepair).not.toHaveBeenCalled();
+    view.unmount();
   });
-
-  it("clamps number input to the four-second boundary and restores the draft", async () => {
-    const wrapper = mount(VideoRepairWorkspace, {
-      props: { projectId: "project-1", workspace },
-    });
+  it("renders a complete local preview but never automatically applies a candidate", async () => {
+    client.videoRepairs.mockResolvedValue([{ id: "repair-1", baseEditVersionId: "edit-1", status: "candidate_ready", issueRange: preview.issueRange, instruction: preview.instruction, preview }]);
+    const view = mount(VideoRepairWorkspace, { props: { projectId: "project-1", workspace } });
     await flushPromises();
-
-    const numberInputs = wrapper.findAll('input[type="number"]');
-    await numberInputs[1].setValue("95");
-    await numberInputs[1].trigger("change");
-    await wrapper.get('[data-testid="edit-instruction"]').setValue("同时修正动作、毛巾和地面光线。");
-
-    expect((numberInputs[1].element as HTMLInputElement).value).toBe("96");
-    expect(wrapper.text()).toContain("96 帧 · 4.000 秒");
-    wrapper.unmount();
-
-    const reopened = mount(VideoRepairWorkspace, {
-      props: { projectId: "project-1", workspace },
-    });
+    await view.findAll("button").find(button => button.text() === "生成完整合成对比（免费）")!.trigger("click");
     await flushPromises();
-    expect((reopened.get('[data-testid="edit-instruction"]').element as HTMLTextAreaElement).value)
-      .toBe("同时修正动作、毛巾和地面光线。");
-    reopened.unmount();
+    expect(client.renderDraftPreview).toHaveBeenCalledWith("project-1", "draft-1", expect.objectContaining({ repairId: "repair-1", expectedEditVersionId: "edit-1" }));
+    expect(client.saveVideoDraft).not.toHaveBeenCalled();
+    expect(client.createVideoRepair).not.toHaveBeenCalled();
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    view.unmount();
   });
-
-  it("restores the durable repair job and provider task id after reopening the page", async () => {
-    client.videoRepairs.mockResolvedValue([{ ...preview, id: "repair-1", status: "generating", preview }]);
-    const wrapper = mount(VideoRepairWorkspace, {
-      props: {
-        projectId: "project-1",
-        workspace: { ...workspace, latestRepairJob: recoveredRepairJob },
-      },
-    });
-    await flushPromises();
-
-    expect(wrapper.get('[data-testid="repair-job-summary"]').text()).toContain("正在生成");
-    expect(wrapper.get('[data-testid="repair-job-summary"]').text()).not.toContain("repair-job-1");
-    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("cgt-repair-task-1");
-    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("publication-1");
-    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("req-repair-1");
-    expect(wrapper.get('[data-testid="repair-job-details"]').text()).toContain("2026-09-09T12:20:00Z");
-    wrapper.unmount();
-  });
-
-  it("keeps approved Ark repairs in history instead of reopening candidate review", async () => {
-    client.videoRepairs.mockResolvedValue([{
-      ...preview,
-      id: "repair-approved",
-      selectionPolicyVersion: 2,
-      legacyEditIntent: null,
-      status: "approved",
-      preview,
-      candidateAssetId: "candidate-1",
-      approvedEditVersionId: "edit-2",
-    }]);
-    client.assets.mockResolvedValue([{
-      id: "candidate-1",
-      projectId: "project-1",
-      role: "repair_candidate",
-      mediaType: "video",
-      sha256: "f".repeat(64),
-      byteSize: 1,
-      metadata: { durationFrames: 144 },
-      createdAt: "2026-09-01T00:00:00Z",
-    }]);
-
-    const wrapper = mount(VideoRepairWorkspace, {
-      props: { projectId: "project-1", workspace },
-    });
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("本次操作会产生模型费用");
-    expect(wrapper.text()).toContain("生成修改结果");
-    expect(wrapper.find('[data-testid="repair-candidate-review"]').exists()).toBe(false);
-    expect(wrapper.text()).toContain("repair-approved");
-    expect(wrapper.text()).toContain("已创建新视频版本");
-    wrapper.unmount();
-  });
-
 });

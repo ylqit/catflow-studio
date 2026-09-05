@@ -20,12 +20,16 @@ from catflow.application.continuity import (
 )
 from catflow.application.project_library import suggested_theme_tags
 from catflow.application.series import (
+    MAX_SERIES_PLANNING_BATCH,
     SeriesCreateCommand,
     SeriesEpisodeDto,
     SeriesEpisodeOutlineDraft,
     SeriesPatchCommand,
     SeriesPlanDraft,
+    SeriesPlanSegmentActivationCommand,
+    SeriesPlanSegmentVersionDto,
     SeriesPlanVersionDto,
+    SeriesSourceBeatDto,
     SeriesValidationIssueDto,
     StorySeriesDto,
     validate_series_plan,
@@ -63,8 +67,10 @@ from catflow.application.service import (
     StudioIdempotencyInputConflictError,
     StudioNotFoundError,
     ValidationRunDto,
+    VideoEditDraftDto,
     VideoRepairDto,
     VideoRepairStatus,
+    VideoReviewDto,
 )
 from catflow.application.story_imports import (
     StoryImportAnalysisDraft,
@@ -75,6 +81,7 @@ from catflow.application.story_imports import (
     StorySourceDocumentDto,
     StorySourceRelationSuggestionDto,
     StorySourceUnitDto,
+    recommended_episode_count,
 )
 from catflow.domain.billing import RateCardItem, rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
@@ -98,9 +105,13 @@ from .models import (
     ProjectTagRecord,
     ProviderRateCardRecord,
     SeriesAssetBindingRecord,
+    SeriesEpisodeOutlineSourceCoverageRecord,
     SeriesEpisodeOutlineVersionRecord,
     SeriesEpisodeRecord,
+    SeriesPlanSegmentRecord,
+    SeriesPlanSegmentVersionRecord,
     SeriesPlanVersionRecord,
+    SeriesSourceBindingRecord,
     ShotPlanVersionRecord,
     StorySeriesRecord,
     StorySourceDocumentRecord,
@@ -109,7 +120,9 @@ from .models import (
     StorySourceUnitRecord,
     StoryVersionRecord,
     ValidationRunRecord,
+    VideoEditDraftRecord,
     VideoRepairRecord,
+    VideoReviewRecord,
 )
 
 
@@ -346,6 +359,7 @@ class PostgresStudioRepository:
                 title=command.title,
                 premise=command.premise,
                 narrative_mode=command.narrative_mode,
+                length_mode=command.length_mode,
                 planned_episode_count=command.planned_episode_count,
                 default_episode_duration_seconds=command.default_episode_duration_seconds,
                 world_setting=command.world_setting,
@@ -374,6 +388,32 @@ class PostgresStudioRepository:
         with self._sessions() as session:
             record = session.get(StorySeriesRecord, series_id)
             return _story_series_dto(session, record) if record is not None else None
+
+    def list_series_source_beats(self, series_id: uuid.UUID) -> list[SeriesSourceBeatDto]:
+        with self._sessions() as session:
+            records = session.execute(
+                select(SeriesSourceBindingRecord, StorySourceUnitRecord)
+                .join(
+                    StorySourceUnitRecord,
+                    StorySourceUnitRecord.id == SeriesSourceBindingRecord.source_unit_id,
+                )
+                .where(SeriesSourceBindingRecord.series_id == series_id)
+                .order_by(SeriesSourceBindingRecord.binding_order)
+            ).all()
+            return [
+                SeriesSourceBeatDto(
+                    id=binding.id,
+                    seriesId=binding.series_id,
+                    sourceUnitId=unit.id,
+                    sourceUnitOrdinal=unit.ordinal,
+                    bindingOrder=binding.binding_order,
+                    title=unit.title,
+                    theme=unit.theme,
+                    rawText=unit.raw_text,
+                    createdAt=binding.created_at,
+                )
+                for binding, unit in records
+            ]
 
     def update_story_series(
         self, series_id: uuid.UUID, command: SeriesPatchCommand
@@ -434,10 +474,21 @@ class PostgresStudioRepository:
                 .values(status="superseded", decided_at=now)
             )
             if validation_issues is None:
+                expected_episode_count = min(
+                    series.planned_episode_count or len(plan.episodes),
+                    MAX_SERIES_PLANNING_BATCH,
+                )
                 disposition, issues = validate_series_plan(
                     plan,
-                    expected_episode_count=series.planned_episode_count,
+                    expected_episode_count=expected_episode_count,
                     narrative_mode=series.narrative_mode,
+                    source_unit_ordinals=set(
+                        session.scalars(
+                            select(SeriesSourceBindingRecord.binding_order).where(
+                                SeriesSourceBindingRecord.series_id == series_id
+                            )
+                        ).all()
+                    ),
                 )
             else:
                 issues = validation_issues
@@ -482,8 +533,7 @@ class PostgresStudioRepository:
         with self._sessions.begin() as session:
             prior = session.scalar(
                 select(SeriesPlanVersionRecord).where(
-                    SeriesPlanVersionRecord.materialization_idempotency_key
-                    == idempotency_key
+                    SeriesPlanVersionRecord.materialization_idempotency_key == idempotency_key
                 )
             )
             if prior is not None:
@@ -496,9 +546,7 @@ class PostgresStudioRepository:
                     )
                 return _series_plan_dto(prior)
             series = session.scalar(
-                select(StorySeriesRecord)
-                .where(StorySeriesRecord.id == series_id)
-                .with_for_update()
+                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
             )
             base = session.scalar(
                 select(SeriesPlanVersionRecord)
@@ -524,8 +572,9 @@ class PostgresStudioRepository:
             revision = (
                 int(
                     session.scalar(
-                        select(func.coalesce(func.max(SeriesPlanVersionRecord.revision), 0))
-                        .where(SeriesPlanVersionRecord.series_id == series_id)
+                        select(func.coalesce(func.max(SeriesPlanVersionRecord.revision), 0)).where(
+                            SeriesPlanVersionRecord.series_id == series_id
+                        )
                     )
                     or 0
                 )
@@ -533,8 +582,18 @@ class PostgresStudioRepository:
             )
             disposition, issues = validate_series_plan(
                 plan,
-                expected_episode_count=series.planned_episode_count,
+                expected_episode_count=min(
+                    series.planned_episode_count or len(plan.episodes),
+                    MAX_SERIES_PLANNING_BATCH,
+                ),
                 narrative_mode=series.narrative_mode,
+                source_unit_ordinals=set(
+                    session.scalars(
+                        select(SeriesSourceBindingRecord.binding_order).where(
+                            SeriesSourceBindingRecord.series_id == series_id
+                        )
+                    ).all()
+                ),
             )
             input_hash = hashlib.sha256(
                 json.dumps(
@@ -554,9 +613,7 @@ class PostgresStudioRepository:
                 active=False,
                 disposition=disposition,
                 plan_json=plan.model_dump(mode="json", by_alias=True),
-                issues_json=[
-                    issue.model_dump(mode="json", by_alias=True) for issue in issues
-                ],
+                issues_json=[issue.model_dump(mode="json", by_alias=True) for issue in issues],
                 input_hash=input_hash,
                 prompt_revision="manual-series-plan-v1",
                 producing_job_id=None,
@@ -656,23 +713,42 @@ class PostgresStudioRepository:
                                     func.coalesce(
                                         func.max(SeriesEpisodeOutlineVersionRecord.revision), 0
                                     )
-                                ).where(
-                                    SeriesEpisodeOutlineVersionRecord.episode_id == episode.id
-                                )
+                                ).where(SeriesEpisodeOutlineVersionRecord.episode_id == episode.id)
                             )
                             or 0
                         )
                         + 1
                     )
-                session.add(
-                    SeriesEpisodeOutlineVersionRecord(
-                        episode_id=episode.id,
-                        revision=revision,
-                        source_plan_version_id=selected.id,
-                        outline_json=outline.model_dump(mode="json", by_alias=True),
-                        active=True,
-                    )
+                outline_record = SeriesEpisodeOutlineVersionRecord(
+                    episode_id=episode.id,
+                    revision=revision,
+                    source_plan_version_id=selected.id,
+                    outline_json=outline.model_dump(mode="json", by_alias=True),
+                    active=True,
                 )
+                session.add(outline_record)
+                session.flush()
+                for coverage_index, coverage in enumerate(outline.source_coverage, start=1):
+                    binding = session.scalar(
+                        select(SeriesSourceBindingRecord).where(
+                            SeriesSourceBindingRecord.series_id == series_id,
+                            SeriesSourceBindingRecord.binding_order == coverage.source_unit_ordinal,
+                        )
+                    )
+                    if binding is None:
+                        raise StudioConflictError(
+                            f"source beat {coverage.source_unit_ordinal} "
+                            "is not bound to this series"
+                        )
+                    session.add(
+                        SeriesEpisodeOutlineSourceCoverageRecord(
+                            outline_version_id=outline_record.id,
+                            series_source_binding_id=binding.id,
+                            source_order=coverage_index,
+                            coverage=coverage.coverage,
+                            coverage_note=coverage.coverage_note,
+                        )
+                    )
                 session.execute(
                     update(EpisodeContinuitySnapshotRecord)
                     .where(
@@ -681,9 +757,7 @@ class PostgresStudioRepository:
                     )
                     .values(active=False)
                 )
-                previous_outline = (
-                    parsed_plan.episodes[index - 1] if index > 0 else None
-                )
+                previous_outline = parsed_plan.episodes[index - 1] if index > 0 else None
                 for direction in ("incoming", "outgoing"):
                     state = planned_continuity_state(
                         bible=parsed_plan.series_bible,
@@ -726,6 +800,309 @@ class PostgresStudioRepository:
             record.decided_at = datetime.now(UTC)
             session.flush()
             return _series_plan_dto(record)
+
+    def create_series_plan_segment_version(
+        self,
+        series_id: uuid.UUID,
+        *,
+        start_episode_order: int,
+        requested_episode_count: int,
+        expected_series_plan_version_id: uuid.UUID,
+        previous_segment_version_id: uuid.UUID | None,
+        plan: SeriesPlanDraft,
+        input_hash: str,
+        prompt_revision: str,
+        producing_job_id: uuid.UUID,
+        validation_issues: list[SeriesValidationIssueDto],
+    ) -> SeriesPlanSegmentVersionDto:
+        with self._sessions.begin() as session:
+            existing = session.scalar(
+                select(SeriesPlanSegmentVersionRecord).where(
+                    SeriesPlanSegmentVersionRecord.producing_job_id == producing_job_id
+                )
+            )
+            if existing is not None:
+                return _series_plan_segment_dto(session, existing)
+            active_plan_id = session.scalar(
+                select(SeriesPlanVersionRecord.id).where(
+                    SeriesPlanVersionRecord.series_id == series_id,
+                    SeriesPlanVersionRecord.active.is_(True),
+                )
+            )
+            if active_plan_id != expected_series_plan_version_id:
+                raise StudioConflictError("active series plan changed")
+            segment = session.scalar(
+                select(SeriesPlanSegmentRecord)
+                .where(
+                    SeriesPlanSegmentRecord.series_id == series_id,
+                    SeriesPlanSegmentRecord.start_episode_order == start_episode_order,
+                )
+                .with_for_update()
+            )
+            if segment is None:
+                segment = SeriesPlanSegmentRecord(
+                    series_id=series_id,
+                    start_episode_order=start_episode_order,
+                    requested_episode_count=requested_episode_count,
+                )
+                session.add(segment)
+                session.flush()
+            elif segment.requested_episode_count != requested_episode_count:
+                raise StudioConflictError(
+                    "planning segment already exists with a different episode count"
+                )
+            now = datetime.now(UTC)
+            session.execute(
+                update(SeriesPlanSegmentVersionRecord)
+                .where(
+                    SeriesPlanSegmentVersionRecord.segment_id == segment.id,
+                    SeriesPlanSegmentVersionRecord.status == "candidate",
+                )
+                .values(status="superseded", decided_at=now)
+            )
+            revision = (
+                int(
+                    session.scalar(
+                        select(
+                            func.coalesce(func.max(SeriesPlanSegmentVersionRecord.revision), 0)
+                        ).where(SeriesPlanSegmentVersionRecord.segment_id == segment.id)
+                    )
+                    or 0
+                )
+                + 1
+            )
+            record = SeriesPlanSegmentVersionRecord(
+                segment_id=segment.id,
+                revision=revision,
+                status="candidate",
+                active=False,
+                disposition=(
+                    "needs_input"
+                    if any(item.severity == "blocking" for item in validation_issues)
+                    else "candidate_ready"
+                ),
+                plan_json=plan.model_dump(mode="json", by_alias=True),
+                issues_json=[
+                    item.model_dump(mode="json", by_alias=True) for item in validation_issues
+                ],
+                producing_job_id=producing_job_id,
+                expected_series_plan_version_id=expected_series_plan_version_id,
+                previous_segment_version_id=previous_segment_version_id,
+                input_hash=input_hash,
+                prompt_revision=prompt_revision,
+            )
+            session.add(record)
+            session.flush()
+            return _series_plan_segment_dto(session, record)
+
+    def list_series_plan_segment_versions(
+        self, series_id: uuid.UUID
+    ) -> list[SeriesPlanSegmentVersionDto]:
+        with self._sessions() as session:
+            records = session.scalars(
+                select(SeriesPlanSegmentVersionRecord)
+                .join(
+                    SeriesPlanSegmentRecord,
+                    SeriesPlanSegmentRecord.id == SeriesPlanSegmentVersionRecord.segment_id,
+                )
+                .where(SeriesPlanSegmentRecord.series_id == series_id)
+                .order_by(
+                    SeriesPlanSegmentRecord.start_episode_order.desc(),
+                    SeriesPlanSegmentVersionRecord.revision.desc(),
+                )
+            ).all()
+            return [_series_plan_segment_dto(session, item) for item in records]
+
+    def activate_series_plan_segment_version(
+        self,
+        series_id: uuid.UUID,
+        segment_version_id: uuid.UUID,
+        command: SeriesPlanSegmentActivationCommand,
+    ) -> SeriesPlanSegmentVersionDto:
+        with self._sessions.begin() as session:
+            prior = session.scalar(
+                select(SeriesPlanSegmentVersionRecord).where(
+                    SeriesPlanSegmentVersionRecord.activation_idempotency_key
+                    == command.idempotency_key
+                )
+            )
+            if prior is not None:
+                if prior.id != segment_version_id:
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                return _series_plan_segment_dto(session, prior)
+            selected = session.scalar(
+                select(SeriesPlanSegmentVersionRecord)
+                .join(
+                    SeriesPlanSegmentRecord,
+                    SeriesPlanSegmentRecord.id == SeriesPlanSegmentVersionRecord.segment_id,
+                )
+                .where(
+                    SeriesPlanSegmentVersionRecord.id == segment_version_id,
+                    SeriesPlanSegmentRecord.series_id == series_id,
+                )
+                .with_for_update()
+            )
+            if selected is None:
+                raise StudioNotFoundError("series plan segment version not found")
+            active_plan_id = session.scalar(
+                select(SeriesPlanVersionRecord.id).where(
+                    SeriesPlanVersionRecord.series_id == series_id,
+                    SeriesPlanVersionRecord.active.is_(True),
+                )
+            )
+            if (
+                active_plan_id != command.expected_series_plan_version_id
+                or selected.expected_series_plan_version_id != active_plan_id
+            ):
+                raise StudioConflictError("active series plan changed")
+            previous = session.scalar(
+                select(SeriesPlanSegmentVersionRecord)
+                .join(
+                    SeriesPlanSegmentRecord,
+                    SeriesPlanSegmentRecord.id == SeriesPlanSegmentVersionRecord.segment_id,
+                )
+                .where(
+                    SeriesPlanSegmentRecord.series_id == series_id,
+                    SeriesPlanSegmentVersionRecord.active.is_(True),
+                )
+                .order_by(SeriesPlanSegmentRecord.start_episode_order.desc())
+                .limit(1)
+            )
+            if (
+                previous.id if previous is not None else None
+            ) != command.expected_previous_segment_version_id:
+                raise StudioConflictError("previous series planning segment changed")
+            if selected.status != "candidate" or selected.disposition != "candidate_ready":
+                raise StudioConflictError("series planning segment requires completion")
+            plan = SeriesPlanDraft.model_validate(selected.plan_json)
+            existing_orders = set(
+                session.scalars(
+                    select(SeriesEpisodeRecord.episode_order).where(
+                        SeriesEpisodeRecord.series_id == series_id,
+                        SeriesEpisodeRecord.episode_order.in_(
+                            [item.order for item in plan.episodes]
+                        ),
+                    )
+                ).all()
+            )
+            if existing_orders:
+                raise StudioConflictError("series planning segment overlaps existing episodes")
+            now = datetime.now(UTC)
+            selected.status = "accepted"
+            selected.active = True
+            selected.decided_at = now
+            selected.activation_idempotency_key = command.idempotency_key
+            previous_outline = None
+            previous_episode = session.scalar(
+                select(SeriesEpisodeRecord).where(
+                    SeriesEpisodeRecord.series_id == series_id,
+                    SeriesEpisodeRecord.episode_order == plan.episodes[0].order - 1,
+                )
+            )
+            if previous_episode is not None:
+                previous_outline_record = session.scalar(
+                    select(SeriesEpisodeOutlineVersionRecord).where(
+                        SeriesEpisodeOutlineVersionRecord.episode_id == previous_episode.id,
+                        SeriesEpisodeOutlineVersionRecord.active.is_(True),
+                    )
+                )
+                if previous_outline_record is not None:
+                    previous_outline = SeriesEpisodeOutlineDraft.model_validate(
+                        previous_outline_record.outline_json
+                    )
+            for outline in plan.episodes:
+                episode = SeriesEpisodeRecord(
+                    series_id=series_id,
+                    episode_order=outline.order,
+                    status="outline",
+                )
+                session.add(episode)
+                session.flush()
+                outline_record = SeriesEpisodeOutlineVersionRecord(
+                    episode_id=episode.id,
+                    revision=1,
+                    source_plan_version_id=command.expected_series_plan_version_id,
+                    source_segment_version_id=selected.id,
+                    outline_json=outline.model_dump(mode="json", by_alias=True),
+                    active=True,
+                )
+                session.add(outline_record)
+                session.flush()
+                for source_order, coverage in enumerate(outline.source_coverage, start=1):
+                    binding = session.scalar(
+                        select(SeriesSourceBindingRecord).where(
+                            SeriesSourceBindingRecord.series_id == series_id,
+                            SeriesSourceBindingRecord.binding_order == coverage.source_unit_ordinal,
+                        )
+                    )
+                    if binding is None:
+                        raise StudioConflictError(
+                            f"source beat {coverage.source_unit_ordinal} "
+                            "is not bound to this series"
+                        )
+                    session.add(
+                        SeriesEpisodeOutlineSourceCoverageRecord(
+                            outline_version_id=outline_record.id,
+                            series_source_binding_id=binding.id,
+                            source_order=source_order,
+                            coverage=coverage.coverage,
+                            coverage_note=coverage.coverage_note,
+                        )
+                    )
+                for direction in ("incoming", "outgoing"):
+                    state = planned_continuity_state(
+                        bible=plan.series_bible,
+                        episode=outline,
+                        direction=direction,
+                        previous_episode=previous_outline,
+                    )
+                    session.add(
+                        EpisodeContinuitySnapshotRecord(
+                            episode_id=episode.id,
+                            direction=direction,
+                            source="planned",
+                            snapshot_json=state.model_dump(mode="json", by_alias=True),
+                            decisions_json={},
+                            confirmed=False,
+                            active=True,
+                        )
+                    )
+                previous_outline = outline
+            segment = session.get(SeriesPlanSegmentRecord, selected.segment_id)
+            if segment is not None:
+                segment.updated_at = now
+            series = session.get(StorySeriesRecord, series_id)
+            if series is not None:
+                series.updated_at = now
+            session.flush()
+            return _series_plan_segment_dto(session, selected)
+
+    def reject_series_plan_segment_version(
+        self, series_id: uuid.UUID, segment_version_id: uuid.UUID
+    ) -> SeriesPlanSegmentVersionDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(SeriesPlanSegmentVersionRecord)
+                .join(
+                    SeriesPlanSegmentRecord,
+                    SeriesPlanSegmentRecord.id == SeriesPlanSegmentVersionRecord.segment_id,
+                )
+                .where(
+                    SeriesPlanSegmentVersionRecord.id == segment_version_id,
+                    SeriesPlanSegmentRecord.series_id == series_id,
+                )
+                .with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("series plan segment version not found")
+            if record.active or record.status != "candidate":
+                raise StudioConflictError("only a pending planning segment can be rejected")
+            record.status = "rejected"
+            record.decided_at = datetime.now(UTC)
+            session.flush()
+            return _series_plan_segment_dto(session, record)
 
     def list_series_episodes(self, series_id: uuid.UUID) -> list[SeriesEpisodeDto]:
         with self._sessions() as session:
@@ -833,9 +1210,7 @@ class PostgresStudioRepository:
             session.flush()
             return _project_dto(project)
 
-    def list_episode_continuity(
-        self, episode_id: uuid.UUID
-    ) -> list[EpisodeContinuitySnapshotDto]:
+    def list_episode_continuity(self, episode_id: uuid.UUID) -> list[EpisodeContinuitySnapshotDto]:
         with self._sessions() as session:
             records = session.scalars(
                 select(EpisodeContinuitySnapshotRecord)
@@ -853,8 +1228,7 @@ class PostgresStudioRepository:
         with self._sessions.begin() as session:
             prior = session.scalar(
                 select(EpisodeContinuitySnapshotRecord).where(
-                    EpisodeContinuitySnapshotRecord.idempotency_key
-                    == command.idempotency_key
+                    EpisodeContinuitySnapshotRecord.idempotency_key == command.idempotency_key
                 )
             )
             if prior is not None:
@@ -937,15 +1311,11 @@ class PostgresStudioRepository:
     def series_episode_for_project(self, project_id: uuid.UUID) -> SeriesEpisodeDto | None:
         with self._sessions() as session:
             episode = session.scalar(
-                select(SeriesEpisodeRecord).where(
-                    SeriesEpisodeRecord.project_id == project_id
-                )
+                select(SeriesEpisodeRecord).where(SeriesEpisodeRecord.project_id == project_id)
             )
             return _series_episode_dto(session, episode) if episode is not None else None
 
-    def list_series_asset_bindings(
-        self, series_id: uuid.UUID
-    ) -> list[SeriesAssetBindingDto]:
+    def list_series_asset_bindings(self, series_id: uuid.UUID) -> list[SeriesAssetBindingDto]:
         with self._sessions() as session:
             rows = session.execute(
                 select(SeriesAssetBindingRecord, AssetRecord)
@@ -963,9 +1333,7 @@ class PostgresStudioRepository:
     ) -> list[SeriesAssetBindingDto]:
         with self._sessions.begin() as session:
             series = session.scalar(
-                select(StorySeriesRecord)
-                .where(StorySeriesRecord.id == series_id)
-                .with_for_update()
+                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
             )
             if series is None:
                 raise StudioNotFoundError("story series not found")
@@ -977,12 +1345,8 @@ class PostgresStudioRepository:
                 )
                 .with_for_update()
             ).all()
-            desired = {
-                item.binding_key: (item.role, item.asset_id) for item in command.bindings
-            }
-            existing = {
-                item.binding_key: (item.role, item.asset_id) for item in current
-            }
+            desired = {item.binding_key: (item.role, item.asset_id) for item in command.bindings}
+            existing = {item.binding_key: (item.role, item.asset_id) for item in current}
             if desired == existing:
                 assets = {
                     item.id: item
@@ -1025,17 +1389,6 @@ class PostgresStudioRepository:
                 for record in sorted(created, key=lambda item: item.binding_key)
             ]
 
-    def find_story_source_document(
-        self, *, content_hash: str
-    ) -> StorySourceDocumentDto | None:
-        with self._sessions() as session:
-            record = session.scalar(
-                select(StorySourceDocumentRecord).where(
-                    StorySourceDocumentRecord.content_hash == content_hash
-                )
-            )
-            return _story_source_document_dto(session, record) if record is not None else None
-
     def list_story_source_documents(self) -> list[StorySourceDocumentDto]:
         with self._sessions() as session:
             records = session.scalars(
@@ -1046,9 +1399,7 @@ class PostgresStudioRepository:
             ).all()
             return [_story_source_document_dto(session, record) for record in records]
 
-    def get_story_source_document(
-        self, document_id: uuid.UUID
-    ) -> StorySourceDocumentDto | None:
+    def get_story_source_document(self, document_id: uuid.UUID) -> StorySourceDocumentDto | None:
         with self._sessions() as session:
             record = session.get(StorySourceDocumentRecord, document_id)
             return _story_source_document_dto(session, record) if record is not None else None
@@ -1062,21 +1413,28 @@ class PostgresStudioRepository:
         job: JobDto,
     ) -> StorySourceDocumentDto:
         with self._sessions.begin() as session:
-            existing = session.scalar(
-                select(StorySourceDocumentRecord).where(
-                    StorySourceDocumentRecord.content_hash == content_hash
+            existing_job = _job_by_idempotency(session, job.idempotency_key)
+            if existing_job is not None:
+                _require_same_input(existing_job, job.input_hash)
+                if (
+                    existing_job.kind != "analyze_story_source"
+                    or existing_job.story_source_document_id is None
+                ):
+                    raise StudioIdempotencyInputConflictError(
+                        "idempotency key already belongs to different input"
+                    )
+                existing_document = session.get(
+                    StorySourceDocumentRecord, existing_job.story_source_document_id
                 )
-            )
-            if existing is not None:
-                return _story_source_document_dto(session, existing)
+                if existing_document is None:
+                    raise StudioConflictError("story source document is missing")
+                return _story_source_document_dto(session, existing_document)
             document = StorySourceDocumentRecord(
                 id=document_id,
                 content_hash=content_hash,
                 source_format=command.source_format,
                 file_name=command.file_name,
-                raw_text=command.raw_text.replace("\r\n", "\n")
-                .replace("\r", "\n")
-                .strip(),
+                raw_text=command.raw_text.replace("\r\n", "\n").replace("\r", "\n").strip(),
                 status="analyzing",
             )
             session.add(document)
@@ -1089,9 +1447,7 @@ class PostgresStudioRepository:
             session.flush()
             return _story_source_document_dto(session, document)
 
-    def restart_story_source_analysis(
-        self, document_id: uuid.UUID, job: JobDto
-    ) -> JobDto:
+    def restart_story_source_analysis(self, document_id: uuid.UUID, job: JobDto) -> JobDto:
         with self._sessions.begin() as session:
             existing = _job_by_idempotency(session, job.idempotency_key)
             if existing is not None:
@@ -1147,9 +1503,7 @@ class PostgresStudioRepository:
         self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
     ) -> StorySourceDocumentDto:
         with self._sessions.begin() as session:
-            job = session.scalar(
-                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
-            )
+            job = session.scalar(select(JobRecord).where(JobRecord.id == job_id).with_for_update())
             if (
                 job is None
                 or job.kind != "analyze_story_source"
@@ -1166,9 +1520,9 @@ class PostgresStudioRepository:
             if document.analysis_job_id != job_id:
                 raise StudioConflictError("story source analysis is no longer current")
             existing_unit_count = session.scalar(
-                select(func.count()).select_from(StorySourceUnitRecord).where(
-                    StorySourceUnitRecord.document_id == document.id
-                )
+                select(func.count())
+                .select_from(StorySourceUnitRecord)
+                .where(StorySourceUnitRecord.document_id == document.id)
             )
             if document.status == "analyzed" and existing_unit_count:
                 return _story_source_document_dto(session, document)
@@ -1216,13 +1570,17 @@ class PostgresStudioRepository:
                         relation_type=item.relation_type,
                         suggested_series_id=item.suggested_series_id,
                         unit_ids_json=[
-                            str(units_by_ordinal[ordinal].id)
-                            for ordinal in item.unit_ordinals
+                            str(units_by_ordinal[ordinal].id) for ordinal in item.unit_ordinals
                         ],
                         title=item.title,
                         narrative_mode=item.narrative_mode,
                         confidence=item.confidence,
                         rationale=item.rationale,
+                        episode_count_recommendation_json=(
+                            item.episode_count_recommendation.model_dump(mode="json", by_alias=True)
+                            if item.episode_count_recommendation is not None
+                            else None
+                        ),
                         status="suggested",
                     )
                 )
@@ -1237,16 +1595,28 @@ class PostgresStudioRepository:
         with self._sessions.begin() as session:
             prior = session.scalar(
                 select(StorySourceMaterializationRecord).where(
-                    StorySourceMaterializationRecord.idempotency_key
-                    == command.idempotency_key
+                    StorySourceMaterializationRecord.idempotency_key == command.idempotency_key
                 )
             )
             if prior is not None:
+                prior_series = (
+                    session.get(StorySeriesRecord, prior.series_id)
+                    if prior.series_id is not None
+                    else None
+                )
                 if (
                     prior.suggestion_id != command.suggestion_id
                     or prior.target_type != command.target
                     or prior.target_series_id != command.target_series_id
                     or prior.target_project_id != command.target_project_id
+                    or (
+                        command.target == "new_series"
+                        and (
+                            prior_series is None
+                            or prior_series.length_mode != command.series_length_mode
+                            or prior_series.planned_episode_count != command.planned_episode_count
+                        )
+                    )
                 ):
                     raise StudioIdempotencyInputConflictError(
                         "idempotency key already belongs to different input"
@@ -1276,13 +1646,12 @@ class PostgresStudioRepository:
             series_record: StorySeriesRecord | None = None
             projects: list[ProjectRecord] = []
             if command.target == "new_series":
-                if len(units) < 2:
-                    raise StudioConflictError("a series requires at least two source units")
                 series_record = StorySeriesRecord(
                     title=suggestion.title,
                     premise="\n".join(item.raw_text for item in units),
                     narrative_mode=suggestion.narrative_mode or "continuous",
-                    planned_episode_count=len(units),
+                    length_mode=command.series_length_mode,
+                    planned_episode_count=command.planned_episode_count,
                     default_episode_duration_seconds=12,
                     world_setting="由已导入原文中的地点、时间和环境归纳",
                     emotional_direction="保持原文的情绪变化",
@@ -1312,9 +1681,7 @@ class PostgresStudioRepository:
                     )
                     session.add(project)
                     session.flush()
-                    session.add(
-                        LifePlannerSessionRecord(project_id=project.id, context_revision=1)
-                    )
+                    session.add(LifePlannerSessionRecord(project_id=project.id, context_revision=1))
                     projects.append(project)
             elif command.target_series_id is not None:
                 series_record = session.get(StorySeriesRecord, command.target_series_id)
@@ -1337,6 +1704,40 @@ class PostgresStudioRepository:
                 project_ids_json=[str(item.id) for item in projects],
             )
             session.add(record)
+            session.flush()
+            if series_record is not None and command.target in {"new_series", "append_series"}:
+                existing_unit_ids = set(
+                    session.scalars(
+                        select(SeriesSourceBindingRecord.source_unit_id).where(
+                            SeriesSourceBindingRecord.series_id == series_record.id
+                        )
+                    ).all()
+                )
+                next_order = (
+                    int(
+                        session.scalar(
+                            select(
+                                func.coalesce(func.max(SeriesSourceBindingRecord.binding_order), 0)
+                            ).where(SeriesSourceBindingRecord.series_id == series_record.id)
+                        )
+                        or 0
+                    )
+                    + 1
+                )
+                for unit in units:
+                    if unit.id in existing_unit_ids:
+                        continue
+                    session.add(
+                        SeriesSourceBindingRecord(
+                            series_id=series_record.id,
+                            source_unit_id=unit.id,
+                            source_ordinal=unit.ordinal,
+                            materialization_id=record.id,
+                            binding_order=next_order,
+                        )
+                    )
+                    existing_unit_ids.add(unit.id)
+                    next_order += 1
             remaining = int(
                 session.scalar(
                     select(func.count())
@@ -1360,9 +1761,7 @@ class PostgresStudioRepository:
                 targetSeriesId=command.target_series_id,
                 targetProjectId=command.target_project_id,
                 series=(
-                    _story_series_dto(session, series_record)
-                    if series_record is not None
-                    else None
+                    _story_series_dto(session, series_record) if series_record is not None else None
                 ),
                 projects=[
                     StoryImportProjectDto(
@@ -2010,9 +2409,7 @@ class PostgresStudioRepository:
             for selection, asset in latest_rows:
                 current_by_slot.setdefault(selection.slot, asset)
             result: list[AssetDto] = []
-            for index, slot in enumerate(
-                ("continuity_keyframe_1", "continuity_keyframe_2")
-            ):
+            for index, slot in enumerate(("continuity_keyframe_1", "continuity_keyframe_2")):
                 if index < len(asset_ids):
                     asset = assets[asset_ids[index]]
                     decision = "selected"
@@ -2237,6 +2634,199 @@ class PostgresStudioRepository:
         with self._sessions() as session:
             return int(session.scalar(select(func.coalesce(func.max(JobEventRecord.id), 0))) or 0)
 
+    def create_video_edit_draft(
+        self,
+        draft: VideoEditDraftDto,
+        edit: EditVersionDto,
+    ) -> VideoEditDraftDto:
+        with self._sessions.begin() as session:
+            session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == draft.project_id).with_for_update()
+            )
+            existing = session.scalar(
+                select(VideoEditDraftRecord).where(
+                    VideoEditDraftRecord.idempotency_key == draft.idempotency_key,
+                )
+            )
+            if existing:
+                if existing.input_hash != draft.input_hash:
+                    raise StudioIdempotencyInputConflictError("editing draft input changed")
+                return _edit_draft_dto(existing)
+            record = VideoEditDraftRecord(
+                id=draft.id,
+                project_id=draft.project_id,
+                source_video_asset_id=draft.source_video_asset_id,
+                references_json=draft.references,
+                references_confirmed=draft.references_confirmed,
+                input_hash=draft.input_hash,
+                idempotency_key=draft.idempotency_key,
+                created_at=draft.created_at,
+            )
+            session.add(record)
+            session.flush()
+            revision = (
+                int(
+                    session.scalar(
+                        select(func.coalesce(func.max(EditVersionRecord.revision), 0)).where(
+                            EditVersionRecord.project_id == draft.project_id
+                        )
+                    )
+                    or 0
+                )
+                + 1
+            )
+            session.add(
+                EditVersionRecord(
+                    id=edit.id,
+                    project_id=edit.project_id,
+                    revision=revision,
+                    source_selection_hash=edit.source_selection_hash,
+                    edl_json=edit.edl.model_dump(mode="json", by_alias=True),
+                    status="draft",
+                    parent_edit_version_id=edit.parent_edit_version_id,
+                    format_version=edit.format_version,
+                    active=False,
+                    timeline_hash=edit.timeline_hash,
+                    edit_draft_id=draft.id,
+                )
+            )
+            session.flush()
+            record.head_edit_version_id = edit.id
+            session.flush()
+            return _edit_draft_dto(record)
+
+    def get_video_edit_draft(self, draft_id: uuid.UUID) -> VideoEditDraftDto | None:
+        with self._sessions() as session:
+            record = session.get(VideoEditDraftRecord, draft_id)
+            return _edit_draft_dto(record) if record else None
+
+    def save_video_draft_revision(
+        self,
+        edit: EditVersionDto,
+        expected_hash: str,
+        repair_id: uuid.UUID | None,
+    ) -> EditVersionDto:
+        with self._sessions.begin() as session:
+            session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == edit.project_id).with_for_update()
+            )
+            draft = session.scalar(
+                select(VideoEditDraftRecord)
+                .where(VideoEditDraftRecord.id == edit.edit_draft_id)
+                .with_for_update()
+            )
+            existing = session.get(EditVersionRecord, edit.id)
+            if existing:
+                if existing.save_request_hash != edit.save_request_hash:
+                    raise StudioIdempotencyInputConflictError("draft save input changed")
+                return _edit_dto(existing)
+            parent = session.get(EditVersionRecord, edit.parent_edit_version_id)
+            if (
+                draft is None
+                or draft.project_id != edit.project_id
+                or parent is None
+                or draft.head_edit_version_id != parent.id
+                or parent.timeline_hash != expected_hash
+            ):
+                raise StudioConflictError("editing draft has changed")
+            repair = session.get(VideoRepairRecord, repair_id) if repair_id else None
+            if repair_id and (
+                repair is None
+                or repair.status != "candidate_ready"
+                or repair.base_edit_version_id != parent.id
+            ):
+                raise StudioConflictError("repair candidate has changed")
+            revision = (
+                int(
+                    session.scalar(
+                        select(func.coalesce(func.max(EditVersionRecord.revision), 0)).where(
+                            EditVersionRecord.project_id == edit.project_id
+                        )
+                    )
+                    or 0
+                )
+                + 1
+            )
+            record = EditVersionRecord(
+                id=edit.id,
+                project_id=edit.project_id,
+                revision=revision,
+                source_selection_hash=edit.source_selection_hash,
+                edl_json=edit.edl.model_dump(mode="json", by_alias=True),
+                status="draft",
+                parent_edit_version_id=parent.id,
+                format_version=2,
+                active=False,
+                timeline_hash=edit.timeline_hash,
+                edit_draft_id=draft.id,
+                save_request_hash=edit.save_request_hash,
+            )
+            session.add(record)
+            session.flush()
+            draft.head_edit_version_id = record.id
+            if repair is not None:
+                repair.status = "applied_to_draft"
+                repair.approved_edit_version_id = record.id
+            session.flush()
+            return _edit_dto(record)
+
+    def list_video_edit_drafts(self, project_id: uuid.UUID) -> list[VideoEditDraftDto]:
+        with self._sessions() as session:
+            return [
+                _edit_draft_dto(record)
+                for record in session.scalars(
+                    select(VideoEditDraftRecord)
+                    .where(VideoEditDraftRecord.project_id == project_id)
+                    .order_by(
+                        VideoEditDraftRecord.created_at.desc(), VideoEditDraftRecord.id.desc()
+                    )
+                )
+            ]
+
+    def create_video_review(self, review: VideoReviewDto) -> VideoReviewDto:
+        with self._sessions.begin() as session:
+            session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == review.project_id).with_for_update()
+            )
+            existing = session.scalar(
+                select(VideoReviewRecord).where(
+                    VideoReviewRecord.idempotency_key == review.idempotency_key,
+                )
+            )
+            if existing:
+                if existing.input_hash != review.input_hash:
+                    raise StudioIdempotencyInputConflictError("video review input changed")
+                return VideoReviewDto.model_validate(existing.document_json)
+            session.add(
+                VideoReviewRecord(
+                    id=review.id,
+                    project_id=review.project_id,
+                    asset_id=review.asset_id,
+                    edit_version_id=review.edit_version_id,
+                    document_json=review.model_dump(mode="json", by_alias=True),
+                    input_hash=review.input_hash,
+                    idempotency_key=review.idempotency_key,
+                    created_at=review.created_at,
+                )
+            )
+            return review
+
+    def list_video_reviews(
+        self, project_id: uuid.UUID, asset_id: uuid.UUID
+    ) -> list[VideoReviewDto]:
+        with self._sessions() as session:
+            return [
+                VideoReviewDto.model_validate(record.document_json)
+                for record in session.scalars(
+                    select(VideoReviewRecord)
+                    .where(
+                        VideoReviewRecord.project_id == project_id,
+                        VideoReviewRecord.asset_id == asset_id,
+                    )
+                    .order_by(VideoReviewRecord.created_at.desc(), VideoReviewRecord.id.desc())
+                )
+            ]
+
     def create_edit(
         self,
         project_id: uuid.UUID,
@@ -2309,10 +2899,32 @@ class PostgresStudioRepository:
 
     def create_video_repair_job(self, repair: VideoRepairDto, job: JobDto) -> JobDto:
         with self._sessions.begin() as session:
+            session.scalar(
+                select(ProjectRecord).where(ProjectRecord.id == repair.project_id).with_for_update()
+            )
             existing = _job_by_idempotency(session, job.idempotency_key)
             if existing is not None:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
+            running = session.scalar(
+                select(JobRecord.id).where(
+                    JobRecord.project_id == repair.project_id,
+                    JobRecord.kind == "regenerate_video_segment",
+                    JobRecord.status.not_in(("succeeded", "failed", "cancelled")),
+                )
+            )
+            if running is not None:
+                raise StudioConflictError("已有局部修改任务正在处理，请勿重复提交。")
+            if repair.preview.edit_draft_id is not None:
+                draft = session.get(VideoEditDraftRecord, repair.preview.edit_draft_id)
+                base = session.get(EditVersionRecord, repair.base_edit_version_id)
+                if (
+                    draft is None
+                    or base is None
+                    or draft.head_edit_version_id != base.id
+                    or base.timeline_hash != repair.base_timeline_hash
+                ):
+                    raise StudioConflictError("editing draft changed before submission")
             repair_record = _new_video_repair_record(repair)
             job_record = _new_job_record(job)
             session.add(repair_record)
@@ -2523,6 +3135,7 @@ def _story_series_dto(session: Session, record: StorySeriesRecord) -> StorySerie
         title=record.title,
         premise=record.premise,
         narrativeMode=record.narrative_mode,
+        lengthMode=record.length_mode,
         plannedEpisodeCount=record.planned_episode_count,
         defaultEpisodeDurationSeconds=record.default_episode_duration_seconds,
         worldSetting=record.world_setting,
@@ -2556,6 +3169,34 @@ def _series_plan_dto(record: SeriesPlanVersionRecord) -> SeriesPlanVersionDto:
         producingJobId=record.producing_job_id,
         basePlanVersionId=record.base_plan_version_id,
         issues=[SeriesValidationIssueDto.model_validate(item) for item in record.issues_json],
+        decidedAt=record.decided_at,
+        createdAt=record.created_at,
+    )
+
+
+def _series_plan_segment_dto(
+    session: Session, record: SeriesPlanSegmentVersionRecord
+) -> SeriesPlanSegmentVersionDto:
+    segment = session.get(SeriesPlanSegmentRecord, record.segment_id)
+    if segment is None:
+        raise StudioConflictError("series planning segment is missing")
+    return SeriesPlanSegmentVersionDto(
+        id=record.id,
+        segmentId=segment.id,
+        seriesId=segment.series_id,
+        startEpisodeOrder=segment.start_episode_order,
+        requestedEpisodeCount=segment.requested_episode_count,
+        revision=record.revision,
+        status=record.status,
+        active=record.active,
+        disposition=record.disposition,
+        plan=SeriesPlanDraft.model_validate(record.plan_json),
+        issues=[SeriesValidationIssueDto.model_validate(item) for item in record.issues_json],
+        producingJobId=record.producing_job_id,
+        expectedSeriesPlanVersionId=record.expected_series_plan_version_id,
+        previousSegmentVersionId=record.previous_segment_version_id,
+        inputHash=record.input_hash,
+        promptRevision=record.prompt_revision,
         decidedAt=record.decided_at,
         createdAt=record.created_at,
     )
@@ -2672,6 +3313,10 @@ def _story_source_document_dto(
                 suggestedSeriesId=item.suggested_series_id,
                 confidence=item.confidence,
                 rationale=item.rationale,
+                episodeCountRecommendation=(
+                    item.episode_count_recommendation_json
+                    or recommended_episode_count(len(item.unit_ids_json))
+                ),
                 status=item.status,
                 createdAt=item.created_at,
             )
@@ -2689,9 +3334,7 @@ def _story_source_materialization_dto(
     if suggestion is None:
         raise StudioConflictError("story source materialization suggestion is missing")
     series = (
-        session.get(StorySeriesRecord, record.series_id)
-        if record.series_id is not None
-        else None
+        session.get(StorySeriesRecord, record.series_id) if record.series_id is not None else None
     )
     project_ids = [uuid.UUID(str(value)) for value in record.project_ids_json]
     projects = (
@@ -2974,6 +3617,22 @@ def _edit_dto(record: EditVersionRecord) -> EditVersionDto:
         formatVersion=record.format_version,
         active=record.active,
         timelineHash=record.timeline_hash,
+        createdAt=record.created_at,
+        editDraftId=record.edit_draft_id,
+        saveRequestHash=record.save_request_hash,
+    )
+
+
+def _edit_draft_dto(record: VideoEditDraftRecord) -> VideoEditDraftDto:
+    return VideoEditDraftDto(
+        id=record.id,
+        projectId=record.project_id,
+        sourceVideoAssetId=record.source_video_asset_id,
+        headEditVersionId=record.head_edit_version_id,
+        references=record.references_json,
+        referencesConfirmed=record.references_confirmed,
+        inputHash=record.input_hash,
+        idempotencyKey=record.idempotency_key,
         createdAt=record.created_at,
     )
 

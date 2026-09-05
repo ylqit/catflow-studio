@@ -21,6 +21,7 @@ docs/LibTV
 /docs/*
 /docs.zip
 !/docs/CURRENT_ARCHITECTURE_AND_HANDOFF.md
+!/docs/VIDEO_EDIT_DRAFTS.md
 !/docs/checklists/
 /docs/checklists/*
 !/docs/checklists/shot-queue-production-core.md

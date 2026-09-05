@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import { api } from "../../api/client";
 import type { AssetDto, EditDecisionListDto, EditVersionDto, JobDto, WorkspaceDto } from "../../api/types";
@@ -11,8 +12,11 @@ import VideoRepairWorkspace from "./VideoRepairWorkspace.vue";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
+const route = useRoute();
+const editingDraft = computed(() => typeof route?.query.draftId === "string");
 const edits = ref<EditVersionDto[]>([]);
 const finalAssets = ref<AssetDto[]>([]);
+const compositePreview = ref<AssetDto | null>(null);
 const savedEdit = ref<EditVersionDto | null>(null);
 const exportJob = ref<JobDto | null>(null);
 const saving = ref(false);
@@ -40,10 +44,11 @@ function edl(): EditDecisionListDto | null {
 }
 
 async function load() {
-  edits.value = await api.edits(props.projectId);
+  edits.value = (await api.edits(props.projectId)).filter(edit => !edit.editDraftId);
   const assets = await api.assets(props.projectId);
   finalAssets.value = assets.filter((asset) => asset.role === "final");
   savedEdit.value = edits.value.find((edit) => edit.active) ?? edits.value[0] ?? null;
+  compositePreview.value = assets.find(asset => asset.role === "edit_preview" && asset.metadata.editVersionId === savedEdit.value?.id && !asset.metadata.repairId) ?? null;
 }
 
 async function handleRepairChanged() {
@@ -66,6 +71,10 @@ function metadataNumber(asset: AssetDto, key: string): number | null {
 }
 
 async function saveEdit() {
+  if (savedEdit.value?.formatVersion === 2) {
+    error.value = "当前视频包含局部修改。请进入编辑草稿保存后续版本，不能用原片裁切覆盖。";
+    return;
+  }
   const decision = edl();
   if (!decision) return;
   saving.value = true;
@@ -115,6 +124,13 @@ async function startWebAv() {
     webavReady.value = false;
   }
 }
+async function prepareSavedPreview() {
+  if (!savedEdit.value || saving.value) return;
+  saving.value = true;
+  try { await api.renderEditPreview(props.projectId, savedEdit.value.id, `edit-preview:${savedEdit.value.id}`); }
+  catch (reason) { error.value = errorPresentation(reason, "完整剪辑预览暂时无法准备").message; }
+  finally { saving.value = false; }
+}
 
 onMounted(load);
 watch(() => props.workspace.eventCursor, () => void syncFromWorkspaceEvent());
@@ -122,12 +138,17 @@ onBeforeUnmount(() => webavController.value?.destroy());
 </script>
 
 <template>
-  <section v-if="!workspace.selections.video" class="card empty missing-video"><div>▶</div><h2>先选择一个视频</h2><p>选择后即可裁切、预览并导出成片。</p><RouterLink class="primary" :to="`/projects/${projectId}/generation`">前往选择视频</RouterLink></section>
-  <section v-else class="delivery-layout">
+  <section v-if="!workspace.selections.video && !editingDraft" class="card empty missing-video"><div>▶</div><h2>打开一个视频开始编辑</h2><p>问题视频可以直接进入编辑草稿，无需虚假勾选全部通过。</p><RouterLink class="primary" :to="`/projects/${projectId}/generation`">前往视频候选</RouterLink></section>
+  <section v-else-if="workspace.selections.video && !editingDraft" class="delivery-layout">
     <div class="editor card">
       <header><div><p class="eyebrow">剪辑</p><h2>裁切与转场</h2></div><span class="pill">720 × 1280</span></header>
-      <div class="edit-stage"><div v-show="webavReady" ref="webavHost" class="webav-host" /><video v-show="!webavReady" controls :src="`/api/v1/assets/${workspace.selections.video.id}/content`" /><button class="webav-button" @click="startWebAv">{{ webavReady ? "重新加载预览" : "打开剪辑预览" }}</button></div>
-      <div class="timeline">
+      <div v-if="savedEdit" class="edit-stage">
+        <video v-if="compositePreview" controls :src="`/api/v1/assets/${compositePreview.id}/content`" />
+        <p v-else class="notice">当前已有剪辑版本。请准备完整合成预览，不以原片代替剪辑结果。</p>
+        <button class="webav-button" :disabled="saving" @click="prepareSavedPreview">准备完整剪辑预览（免费）</button>
+      </div>
+            <div v-else class="edit-stage"><div v-show="webavReady" ref="webavHost" class="webav-host" /><video v-show="!webavReady" controls :src="`/api/v1/assets/${workspace.selections.video.id}/content`" /><button class="webav-button" @click="startWebAv">{{ webavReady ? "重新加载预览" : "打开剪辑预览" }}</button></div>
+      <div v-if="savedEdit?.formatVersion !== 2" class="timeline">
         <div class="clip-track"><span class="clip-block">当前视频 · {{ ((controls.endMs - controls.startMs) / 1000).toFixed(1) }}s</span></div>
         <div class="trim-controls">
           <div class="field"><label>起点（毫秒）</label><input v-model.number="controls.startMs" type="number" min="0" :max="controls.endMs - 100" /></div>
@@ -145,7 +166,7 @@ onBeforeUnmount(() => webavController.value?.destroy());
       <div class="card export-card"><p class="eyebrow">导出结果</p><h2>正式成片</h2><p v-if="exportJob && exportJobPresentation" class="notice" :class="{ error: ['warn', 'danger'].includes(exportJobPresentation.tone) }">导出进度：{{ exportJobPresentation.label }}。{{ exportJob.error?.message || exportJobPresentation.description }}</p><div v-if="!finalAssets.length" class="empty">还没有导出成片。</div><article v-for="asset in finalAssets" :key="asset.id"><video controls :src="`/api/v1/assets/${asset.id}/content`" /><details><summary>查看技术信息</summary><dl class="technical-proof"><div><dt>文件校验值</dt><dd><code>{{ asset.sha256 }}</code></dd></div><div><dt>画幅</dt><dd>{{ metadataNumber(asset, "width") }} × {{ metadataNumber(asset, "height") }}</dd></div><div><dt>帧与时长</dt><dd>{{ metadataNumber(asset, "durationFrames") }} 帧 · {{ ((metadataNumber(asset, "durationMs") ?? 0) / 1000).toFixed(3) }} 秒</dd></div><div><dt>视频编码</dt><dd>{{ asset.metadata.codec ?? "未知" }}</dd></div><div><dt>音轨</dt><dd>{{ asset.metadata.audioPolicy === "preserve_original" && asset.metadata.candidateAudioUsed === false ? "根视频原音轨" : "按剪辑设置输出" }}<span v-if="asset.metadata.audioCodec"> · {{ asset.metadata.audioCodec }}</span></dd></div></dl></details><button v-if="workspace.selections.final?.id !== asset.id" class="primary" @click="approve(asset.id)">设为最终成片</button><span v-else class="pill good">最终成片</span></article></div>
     </aside>
   </section>
-  <VideoRepairWorkspace v-if="workspace.selections.video" :project-id="projectId" :workspace="workspace" @changed="handleRepairChanged" />
+  <VideoRepairWorkspace :project-id="projectId" :workspace="workspace" @changed="handleRepairChanged" />
 </template>
 
 <style scoped>

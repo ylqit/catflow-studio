@@ -140,6 +140,42 @@ describe("StoryboardStep", () => {
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
   });
 
+  it("does not describe an already adopted generated plan as waiting for confirmation", async () => {
+    const adopted = {
+      id: "plan-generated", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {}, shots: [professionalShot], totalDurationSeconds: 12,
+      reviewStatus: "accepted" as const, producingJobId: "director-job-succeeded", active: true, outdated: false,
+      createdAt: "2026-09-05T00:00:00Z",
+    };
+    const finishedWorkspace = workspace(adopted);
+    finishedWorkspace.latestDirectorJob = {
+      id: "director-job-succeeded", projectId: "project-1", kind: "plan_shots", status: "succeeded",
+      inputHash: "f".repeat(64), frozenInput: { storyVersionId: "story-1" }, resultAssetIds: [],
+      createdAt: "2026-09-05T00:00:00Z", updatedAt: "2026-09-05T00:01:00Z",
+    };
+    client.shotPlans.mockResolvedValue([adopted]);
+    client.shotPlanGenerationAttempts.mockResolvedValue([{
+      jobId: "director-job-succeeded", status: "succeeded", storyVersionId: "story-1",
+      resultShotPlanVersionId: "plan-generated", createdAt: "2026-09-05T00:00:00Z", updatedAt: "2026-09-05T00:01:00Z",
+      billingStatus: "usage_reported", result: {
+        disposition: "candidate_ready", resultShotPlanVersionId: "plan-generated", recoverable: false, issues: [],
+      },
+    }]);
+
+    const wrapper = mount(StoryboardStep, {
+      props: {
+        projectId: "project-1",
+        workspace: finishedWorkspace,
+        runtime: { provider: { apiKeyConfigured: true, paidCallsEnabled: true } },
+      },
+      global: { stubs: { RouterLink: true } },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("分镜版本 1 已采用，包含 0 项制作提示");
+    expect(wrapper.text()).not.toContain("等待确认");
+  });
+
   it("keeps the request key when the request outcome is unknown", async () => {
     client.generateShotPlan.mockRejectedValue(new TypeError("Failed to fetch"));
     const wrapper = mountStoryboard(null);

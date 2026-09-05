@@ -105,7 +105,10 @@ class DurableJobWorker:
         try:
             if status == "cancel_requested":
                 self._cancel(job_id, provider_task_id)
-            elif status == "storing" or (kind == "render_export" and status == "submitting"):
+            elif status == "storing" or (
+                kind in {"render_export", "render_edit_preview", "extract_continuity_frames"}
+                and status == "submitting"
+            ):
                 self._store_local_result(job_id)
             elif status == "submitting" and provider_task_id is not None:
                 self._mark_submitted(job_id)

@@ -105,6 +105,7 @@ def test_postgres_recovers_repair_job_and_approves_one_active_edit_version() -> 
             assert job_record is not None
             legacy_frozen_input = dict(job_record.frozen_input_json)
             legacy_frozen_input.pop("inputSnapshot", None)
+            legacy_frozen_input.pop("promptCompilerRevision", None)
             job_record.frozen_input_json = legacy_frozen_input
 
         recovered_legacy = StudioService(PostgresStudioRepository(sessions)).get_video_repair(

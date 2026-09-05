@@ -52,7 +52,13 @@ from catflow.application.series import (
     SeriesPlanGenerationCommand,
     SeriesPlanMaterializeCommand,
     SeriesPlanPreviewDto,
+    SeriesPlanSegmentActivationCommand,
+    SeriesPlanSegmentCommand,
+    SeriesPlanSegmentGenerationCommand,
+    SeriesPlanSegmentPreviewDto,
+    SeriesPlanSegmentVersionDto,
     SeriesPlanVersionDto,
+    SeriesSourceBeatDto,
     StorySeriesDto,
 )
 from catflow.application.service import (
@@ -103,7 +109,13 @@ from catflow.application.service import (
     StudioValidationError,
     ValidationRunDto,
     VideoDiagnosisCommand,
+    VideoDraftPreviewCommand,
+    VideoDraftSaveCommand,
+    VideoEditDraftCreateCommand,
+    VideoEditDraftDto,
     VideoRepairDto,
+    VideoReviewCreateCommand,
+    VideoReviewDto,
 )
 from catflow.application.story_imports import (
     StoryImportConfirmCommand,
@@ -144,6 +156,7 @@ class AppSettings:
 class SelectionCommand(ContractModel):
     slot: str = Field(min_length=1, max_length=32)
     asset_id: uuid.UUID = Field(alias="assetId")
+    review_id: uuid.UUID | None = Field(alias="reviewId", default=None)
 
 
 def create_app(
@@ -285,8 +298,7 @@ def create_app(
                     "maximumImageReferences": provider.maximum_video_references,
                     "maximumVideoReferences": provider.maximum_video_input_references,
                     "previousEpisodeVideoSupported": (
-                        provider.maximum_video_input_references >= 1
-                        and publisher_status.ready
+                        provider.maximum_video_input_references >= 1 and publisher_status.ready
                     ),
                 },
                 "segmentRepair": {
@@ -508,6 +520,13 @@ def create_app(
     def patch_story_series(series_id: uuid.UUID, command: SeriesPatchCommand) -> StorySeriesDto:
         return service.update_story_series(series_id, command)
 
+    @app.get(
+        "/api/v1/story-series/{series_id}/source-beats",
+        response_model=list[SeriesSourceBeatDto],
+    )
+    def series_source_beats(series_id: uuid.UUID) -> list[SeriesSourceBeatDto]:
+        return service.list_series_source_beats(series_id)
+
     @app.post(
         "/api/v1/story-series/{series_id}/plans/preview",
         response_model=SeriesPlanPreviewDto,
@@ -565,6 +584,57 @@ def create_app(
         _payload: dict[str, Any] = Body(default={}),
     ) -> SeriesPlanVersionDto:
         return service.reject_series_plan(series_id, plan_version_id)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plan-segments/preview",
+        response_model=SeriesPlanSegmentPreviewDto,
+    )
+    def preview_series_plan_segment(
+        series_id: uuid.UUID, command: SeriesPlanSegmentCommand
+    ) -> SeriesPlanSegmentPreviewDto:
+        return service.preview_series_plan_segment(series_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plan-segments/generations",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def generate_series_plan_segment(
+        series_id: uuid.UUID, command: SeriesPlanSegmentGenerationCommand
+    ) -> JobDto:
+        return service.create_series_plan_segment_job(series_id, command)
+
+    @app.get(
+        "/api/v1/story-series/{series_id}/plan-segments",
+        response_model=list[SeriesPlanSegmentVersionDto],
+    )
+    def series_plan_segments(
+        series_id: uuid.UUID,
+    ) -> list[SeriesPlanSegmentVersionDto]:
+        return service.list_series_plan_segment_versions(series_id)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plan-segments/{segment_version_id}/activate",
+        response_model=SeriesPlanSegmentVersionDto,
+    )
+    def activate_series_plan_segment(
+        series_id: uuid.UUID,
+        segment_version_id: uuid.UUID,
+        command: SeriesPlanSegmentActivationCommand,
+    ) -> SeriesPlanSegmentVersionDto:
+        return service.activate_series_plan_segment(series_id, segment_version_id, command)
+
+    @app.post(
+        "/api/v1/story-series/{series_id}/plan-segments/{segment_version_id}/reject",
+        response_model=SeriesPlanSegmentVersionDto,
+    )
+    def reject_series_plan_segment(
+        series_id: uuid.UUID,
+        segment_version_id: uuid.UUID,
+        _payload: dict[str, Any] = Body(default={}),
+    ) -> SeriesPlanSegmentVersionDto:
+        return service.reject_series_plan_segment(series_id, segment_version_id)
 
     @app.get(
         "/api/v1/story-series/{series_id}/episodes",
@@ -702,26 +772,16 @@ def create_app(
         "/api/v1/story-imports",
         response_model=StoryImportCreateResultDto,
         status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
     )
     def create_story_import(command: StoryImportCreateCommand) -> StoryImportCreateResultDto:
-        preview = service.preview_story_import(
-            StoryImportPreviewCommand(
-                rawText=command.raw_text,
-                sourceFormat=command.source_format,
-                fileName=command.file_name,
-            )
-        )
-        if preview.duplicate_document_id is None:
-            require_worker_available()
         return service.create_story_import(command)
 
     @app.get("/api/v1/story-imports", response_model=list[StorySourceDocumentDto])
     def story_imports() -> list[StorySourceDocumentDto]:
         return service.list_story_imports()
 
-    @app.get(
-        "/api/v1/story-imports/{document_id}", response_model=StorySourceDocumentDto
-    )
+    @app.get("/api/v1/story-imports/{document_id}", response_model=StorySourceDocumentDto)
     def get_story_import(document_id: uuid.UUID) -> StorySourceDocumentDto:
         return service.get_story_import(document_id)
 
@@ -940,6 +1000,8 @@ def create_app(
         status_code=status.HTTP_201_CREATED,
     )
     def select_asset(project_id: uuid.UUID, command: SelectionCommand) -> ProjectSelectionDto:
+        if command.slot == "video":
+            service.require_video_review(project_id, command.asset_id, command.review_id)
         return service.select_asset(project_id, slot=command.slot, asset_id=command.asset_id)
 
     @app.post(
@@ -1047,6 +1109,80 @@ def create_app(
         _payload: dict[str, Any] = Body(default={}),
     ) -> VideoRepairDto:
         return service.reject_video_repair(project_id, edit_id)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edit-drafts",
+        response_model=VideoEditDraftDto,
+        status_code=201,
+    )
+    def create_video_edit_draft(
+        project_id: uuid.UUID, command: VideoEditDraftCreateCommand
+    ) -> VideoEditDraftDto:
+        return service.create_video_edit_draft(project_id, command)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-edit-drafts", response_model=list[VideoEditDraftDto]
+    )
+    def video_edit_drafts(project_id: uuid.UUID) -> list[VideoEditDraftDto]:
+        return service.list_video_edit_drafts(project_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}",
+        response_model=VideoEditDraftDto,
+    )
+    def video_edit_draft(project_id: uuid.UUID, draft_id: uuid.UUID) -> VideoEditDraftDto:
+        return service.get_video_edit_draft(project_id, draft_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/jobs",
+        response_model=list[JobDto],
+    )
+    def video_draft_jobs(project_id: uuid.UUID, draft_id: uuid.UUID) -> list[JobDto]:
+        return service.list_video_draft_jobs(project_id, draft_id)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/versions",
+        response_model=EditVersionDto,
+        status_code=201,
+    )
+    def save_video_draft(
+        project_id: uuid.UUID, draft_id: uuid.UUID, command: VideoDraftSaveCommand
+    ) -> EditVersionDto:
+        return service.save_video_draft(project_id, draft_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/previews",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def render_draft_preview(
+        project_id: uuid.UUID, draft_id: uuid.UUID, command: VideoDraftPreviewCommand
+    ) -> JobDto:
+        return service.create_draft_preview(project_id, draft_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/edit-previews",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def render_edit_preview(project_id: uuid.UUID, command: ExportCommand) -> JobDto:
+        return service.create_edit_preview(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-reviews",
+        response_model=VideoReviewDto,
+        status_code=201,
+    )
+    def create_video_review(
+        project_id: uuid.UUID, command: VideoReviewCreateCommand
+    ) -> VideoReviewDto:
+        return service.create_video_review(project_id, command)
+
+    @app.get("/api/v1/projects/{project_id}/video-reviews", response_model=list[VideoReviewDto])
+    def video_reviews(project_id: uuid.UUID, assetId: uuid.UUID) -> list[VideoReviewDto]:  # noqa: N803
+        return service.list_video_reviews(project_id, assetId)
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobDto)
     def job(job_id: uuid.UUID) -> JobDto:

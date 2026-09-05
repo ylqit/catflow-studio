@@ -4,7 +4,6 @@ import json
 import uuid
 
 import pytest
-from pydantic import ValidationError
 
 from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
@@ -76,7 +75,7 @@ def test_preview_is_untyped_and_does_not_persist_a_repair() -> None:
 
     assert service.list_video_repairs(project_id) == []
     assert "editIntent" not in preview.model_dump(mode="json", by_alias=True)
-    assert "本区间修改目标" in preview.prompt
+    assert "【修改目标】" in preview.prompt
     assert preview.input_snapshot is not None
     assert preview.input_snapshot.state == "preview"
     assert preview.input_snapshot.segment_edit is not None
@@ -90,18 +89,20 @@ def test_preview_is_untyped_and_does_not_persist_a_repair() -> None:
     assert "accesskey" not in public_snapshot
 
 
-def test_preview_rejects_a_problem_range_shorter_than_four_seconds() -> None:
+def test_preview_accepts_one_frame_and_expands_only_provider_context() -> None:
     service, project_id, video_id = _prepared_project()
 
-    with pytest.raises(ValidationError, match="at least 4 seconds"):
-        service.preview_video_repair(
-            project_id,
-            SegmentRepairPreviewCommand(
-                baseVideoAssetId=video_id,
-                issueRange={"startFrame": 0, "endFrame": 95},
-                instruction="修正动作。",
-            ),
-        )
+    preview = service.preview_video_repair(
+        project_id,
+        SegmentRepairPreviewCommand(
+            baseVideoAssetId=video_id,
+            issueRange={"startFrame": 80, "endFrame": 81},
+            instruction="修正动作。",
+        ),
+    )
+    assert preview.issue_range.duration_frames == 1
+    assert preview.candidate_core_range.duration_frames == 1
+    assert preview.provider_duration_seconds == 4
 
     assert service.list_video_repairs(project_id) == []
 

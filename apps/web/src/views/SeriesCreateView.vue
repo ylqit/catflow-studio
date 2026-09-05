@@ -12,6 +12,7 @@ const form = reactive<SeriesCreateCommand>({
   title: "",
   premise: "",
   narrativeMode: "continuous",
+  lengthMode: "fixed",
   plannedEpisodeCount: 6,
   defaultEpisodeDurationSeconds: 12,
   worldSetting: "",
@@ -36,6 +37,7 @@ async function create() {
   try {
     const created = await api.createStorySeries({
       ...form,
+      plannedEpisodeCount: form.lengthMode === "fixed" ? form.plannedEpisodeCount : null,
       recurringElements: lines(recurringText.value),
       mustKeep: lines(keepText.value),
       mustAvoid: lines(avoidText.value),
@@ -57,13 +59,15 @@ async function create() {
     <form class="card series-form" @submit.prevent="create">
       <header><div><h1>新建系列</h1><p>填写系列方向。本步骤只保存构想，不调用模型。</p></div><RouterLink to="/series">返回系列</RouterLink></header>
       <div class="form-grid">
-        <label class="field"><span>系列名称</span><input v-model="form.title" required maxlength="160" placeholder="森林野餐" /></label>
+        <label class="field"><span>系列名称</span><input v-model="form.title" aria-label="系列名称" required maxlength="160" placeholder="森林野餐" /></label>
         <label class="field"><span>叙事方式</span><select v-model="form.narrativeMode"><option value="continuous">连续剧情</option><option value="lightly_serialized">轻连续</option><option value="anthology">单元故事</option></select></label>
-        <label class="field wide"><span>核心故事</span><textarea v-model="form.premise" required maxlength="4000" placeholder="孩子和猫咪从准备野餐到返程的连续一天…" /></label>
-        <label class="field"><span>计划集数：{{ form.plannedEpisodeCount }} 集</span><input v-model.number="form.plannedEpisodeCount" type="range" min="2" max="30" /></label>
+        <label class="field wide"><span>核心故事</span><textarea v-model="form.premise" aria-label="核心故事" required maxlength="4000" placeholder="孩子和猫咪从准备野餐到返程的连续一天…" /></label>
+        <fieldset class="field length-mode"><legend>系列长度</legend><label><input v-model="form.lengthMode" type="radio" value="fixed" /> 固定集数</label><label><input v-model="form.lengthMode" type="radio" value="ongoing" /> 持续连载</label></fieldset>
+        <label v-if="form.lengthMode === 'fixed'" class="field"><span>计划集数</span><input v-model.number="form.plannedEpisodeCount" aria-label="计划集数" type="number" min="2" required /></label>
+        <p v-else class="field ongoing-copy">持续连载不设置总集数。每次规划只处理一段，单次最多 30 集。</p>
         <label class="field"><span>每集时长：{{ form.defaultEpisodeDurationSeconds }} 秒</span><input v-model.number="form.defaultEpisodeDurationSeconds" type="range" min="8" max="15" /></label>
-        <label class="field wide"><span>世界与环境</span><textarea v-model="form.worldSetting" required maxlength="2000" placeholder="故事发生在哪里，时间、季节和环境有哪些稳定规则" /></label>
-        <label class="field"><span>情绪方向</span><textarea v-model="form.emotionalDirection" required maxlength="1000" placeholder="从期待到满足，再温暖返程" /></label>
+        <label class="field wide"><span>世界与环境</span><textarea v-model="form.worldSetting" aria-label="世界与环境" required maxlength="2000" placeholder="故事发生在哪里，时间、季节和环境有哪些稳定规则" /></label>
+        <label class="field"><span>情绪方向</span><textarea v-model="form.emotionalDirection" aria-label="情绪方向" required maxlength="1000" placeholder="从期待到满足，再温暖返程" /></label>
         <label class="field"><span>最终目标（可选）</span><textarea v-model="form.endingGoal" maxlength="1000" placeholder="最后一集希望抵达什么状态" /></label>
         <label class="field"><span>贯穿元素</span><textarea v-model="recurringText" placeholder="野餐篮，毛线球" /></label>
         <label class="field"><span>必须保留</span><textarea v-model="keepText" placeholder="每行一项" /></label>
@@ -78,4 +82,5 @@ async function create() {
 
 <style scoped>
 .wizard-steps { margin-bottom: 18px; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fffaf4; }.wizard-steps > * { padding: 13px; text-align: center; color: var(--muted); font-size: 12px; border-right: 1px solid var(--line); }.wizard-steps > *:last-child { border-right: 0; }.wizard-steps b { color: var(--accent-dark); background: #fae8df; }.series-form { padding: 30px; }.series-form > header, .series-form > footer { display: flex; justify-content: space-between; align-items: start; gap: 30px; }.series-form header p, .series-form footer p { color: var(--muted); }.form-grid { margin: 24px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.wide { grid-column: 1 / -1; }.series-form footer { align-items: center; }.series-form footer p { margin: 0; }.series-form footer button { min-width: 210px; }
+.length-mode { display: flex; align-items: center; gap: 18px; border: 0; padding: 0; }.length-mode legend { margin-bottom: 8px; font-weight: 700; }.length-mode label { display: inline-flex; align-items: center; gap: 6px; }.ongoing-copy { margin: 0; align-self: end; color: var(--muted); }
 </style>

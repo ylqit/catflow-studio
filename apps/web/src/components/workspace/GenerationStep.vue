@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
 import { api } from "../../api/client";
 import type { AssetDto, GenerationPreviewDto, JobDto, ProjectUsageSummaryDto, WorkspaceDto } from "../../api/types";
@@ -11,6 +12,9 @@ import { useUiStore } from "../../stores/ui";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
 const emit = defineEmits<{ changed: [] }>();
+const router = useRouter();
+const savingReview = ref(false);
+const confirmEditReferences = ref(false);
 const store = useUiStore();
 const preview = ref<GenerationPreviewDto | null>(null);
 const currentJob = ref<JobDto | null>(props.workspace.latestVideoJob ?? null);
@@ -287,6 +291,11 @@ async function startReview(asset: AssetDto) {
   ]);
   reviewVideoJob.value = videoJob;
   diagnosisJob.value = persistedDiagnosisJob;
+  const reviews = await api.videoReviews(props.projectId, asset.id);
+  if (reviewAssetId.value === asset.id && reviews[0]) {
+    reviewNotes.value = reviews[0].notes;
+    for (const [key] of qualityItems) quality[key] = reviews[0].checks[key] ?? "";
+  }
 }
 
 function jumpTo(seconds: number) {
@@ -343,9 +352,44 @@ async function diagnoseVideo() {
 }
 
 async function chooseVideo() {
-  if (!reviewAssetId.value || !allPass.value) return;
-  await api.selectAsset(props.projectId, "video", reviewAssetId.value);
-  emit("changed");
+  if (!reviewAssetId.value || !allPass.value || savingReview.value) return;
+  savingReview.value = true;
+  try {
+    const review = await persistReview();
+    await api.selectAsset(props.projectId, "video", reviewAssetId.value, review.id);
+    emit("changed");
+  } catch (reason) { error.value = errorPresentation(reason, "视频尚未选择").message; }
+  finally { savingReview.value = false; }
+}
+
+function persistReview() {
+  const frame = Math.max(0, Math.floor(currentTime.value * 24));
+  const frames = Number(activeAsset.value?.metadata.durationFrames ?? 0);
+  return api.createVideoReview(props.projectId, {
+    assetId: reviewAssetId.value!, notes: reviewNotes.value,
+    checks: Object.fromEntries(Object.entries(quality).filter(([, value]) => value !== "")) as Record<string, "pass" | "warning" | "fail">,
+    issues: reviewNotes.value.trim() && frames > 0 ? [{ range: { startFrame: Math.min(frame, frames - 1), endFrame: frames }, note: reviewNotes.value }] : [],
+    idempotencyKey: crypto.randomUUID(),
+  });
+}
+async function saveReviewOnly() {
+  if (!reviewAssetId.value || savingReview.value) return;
+  savingReview.value = true;
+  try { await persistReview(); } catch (reason) { error.value = errorPresentation(reason, "问题记录未能保存").message; }
+  finally { savingReview.value = false; }
+}
+async function enterEditing() {
+  if (!reviewAssetId.value || savingReview.value) return;
+  savingReview.value = true;
+  const scope = `edit-draft:${props.projectId}`;
+  const fingerprint = `${reviewAssetId.value}:${confirmEditReferences.value}`;
+  try {
+    await persistReview();
+    const draft = await api.createVideoEditDraft(props.projectId, { sourceVideoAssetId: reviewAssetId.value, confirmCurrentReferences: confirmEditReferences.value, idempotencyKey: pendingIdempotencyKey(scope, fingerprint) });
+    settleIdempotencyKey(scope, fingerprint);
+    await router.push({ path: `/projects/${props.projectId}/delivery`, query: { draftId: draft.id } });
+  } catch (reason) { error.value = errorPresentation(reason, "编辑草稿没有成功创建").message; }
+  finally { savingReview.value = false; }
 }
 
 function evidenceDocument() {
@@ -460,7 +504,8 @@ watch(
         <section class="submitted-prompt"><b>该候选使用的生成指令 · {{ candidateInputState(reviewVideoJob ?? undefined) }}</b><div v-if="activeInputSnapshot?.promptSections?.length" class="prompt-sections"><section v-for="section in activeInputSnapshot.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><template v-else-if="activeInputSnapshot"><p>{{ activeInputSnapshot.prompt }}</p><small>旧任务未记录分段展示，以上为当时实际提交的完整指令。</small></template><p v-else>旧任务未记录完整生成指令，系统不会用当前内容推测。</p><details v-if="activeInputSnapshot"><summary>查看需要避免的问题与技术信息</summary><p>{{ activeInputSnapshot.negativePrompt }}</p><code>{{ activeInputSnapshot.inputHash }}</code></details></section>
         <div class="quality-grid"><fieldset v-for="[key, label] in qualityItems" :key="key"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="quality[key]" type="radio" :name="key" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
         <label class="notes"><span>验收备注</span><textarea v-model="reviewNotes" rows="4" placeholder="记录失败时间点、角色漂移、结构或主动结尾情况。" /></label>
-        <div class="review-actions"><button v-if="workspace.project.theme === '雨天擦爪'" class="secondary" @click="diagnoseVideo">Ark 抽帧诊断（仅雨天擦爪使用）</button><button class="secondary" @click="exportJson">导出 JSON</button><button class="secondary" @click="exportMarkdown">导出 Markdown</button><button class="primary" :disabled="!allPass" @click="chooseVideo">七项全部通过后选择此视频</button></div>
+        <label class="edit-reference-consent"><input v-model="confirmEditReferences" type="checkbox" />仅在历史视频缺少参考时，确认使用当前五张参考建立新的编辑绑定。</label>
+        <div class="review-actions"><button class="secondary" :disabled="savingReview" @click="saveReviewOnly">保存问题与验收记录</button><button class="primary" :disabled="savingReview" @click="enterEditing">进入编辑草稿</button><button class="secondary" @click="exportJson">导出 JSON</button><button class="secondary" @click="exportMarkdown">导出 Markdown</button><button class="primary" :disabled="!allPass || savingReview" @click="chooseVideo">验收通过并选择此视频</button></div>
       </section>
     </div>
     <aside v-if="usageSummary" class="generation-aside"><section class="usage-card card"><p class="eyebrow">本项目费用</p><h2>用量概览</h2><dl><div v-for="(value, metric) in usageSummary.totals" :key="metric"><dt>{{ usageLabels[String(metric)] ?? metric }}</dt><dd>{{ value }}</dd></div><div><dt>{{ hasCalculatedCost ? "已计算费用" : "费用状态" }}</dt><dd>{{ projectCostSummary }}</dd></div><div><dt>待处理计费任务</dt><dd>{{ unresolvedCostJobs.length }}</dd></div></dl><details><summary>费用说明</summary><small>本地剪辑不计入模型费用；只有已完成核价的任务才会计入金额，最终账单可能由模型服务调整。</small></details></section></aside>

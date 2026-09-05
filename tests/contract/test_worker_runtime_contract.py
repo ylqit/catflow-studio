@@ -141,6 +141,29 @@ def test_worker_offline_blocks_job_creation_before_a_job_is_written() -> None:
             {"idempotencyKey": "offline-shot-plan"},
         ),
         (
+            "/api/v1/story-imports",
+            {
+                "rawText": "主题：森林野餐\n孩子和猫咪准备野餐篮。",
+                "sourceFormat": "paste",
+                "expectedInputHash": "d" * 64,
+                "idempotencyKey": "offline-story-import",
+            },
+        ),
+        (
+            "/api/v1/story-series/{project_id}/plans/generations",
+            {
+                "expectedInputHash": "e" * 64,
+                "idempotencyKey": "offline-series-plan",
+            },
+        ),
+        (
+            "/api/v1/story-series/{project_id}/episodes/{resource_id}/story-generations",
+            {
+                "expectedInputHash": "f" * 64,
+                "idempotencyKey": "offline-series-episode-story",
+            },
+        ),
+        (
             "/api/v1/projects/{project_id}/assets/{resource_id}/diagnose",
             {"assetId": "{resource_id}", "idempotencyKey": "offline-image-diagnosis"},
         ),

@@ -367,6 +367,23 @@ export interface paths {
         patch: operations["patch_story_series_api_v1_story_series__series_id__patch"];
         trace?: never;
     };
+    "/api/v1/story-series/{series_id}/source-beats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Source Beats */
+        get: operations["series_source_beats_api_v1_story_series__series_id__source_beats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/story-series/{series_id}/plans/preview": {
         parameters: {
             query?: never;
@@ -463,6 +480,91 @@ export interface paths {
         put?: never;
         /** Reject Series Plan */
         post: operations["reject_series_plan_api_v1_story_series__series_id__plans__plan_version_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plan-segments/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Series Plan Segment */
+        post: operations["preview_series_plan_segment_api_v1_story_series__series_id__plan_segments_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plan-segments/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Series Plan Segment */
+        post: operations["generate_series_plan_segment_api_v1_story_series__series_id__plan_segments_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plan-segments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Plan Segments */
+        get: operations["series_plan_segments_api_v1_story_series__series_id__plan_segments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plan-segments/{segment_version_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Series Plan Segment */
+        post: operations["activate_series_plan_segment_api_v1_story_series__series_id__plan_segments__segment_version_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/plan-segments/{segment_version_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Series Plan Segment */
+        post: operations["reject_series_plan_segment_api_v1_story_series__series_id__plan_segments__segment_version_id__reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1241,6 +1343,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-edit-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Edit Drafts */
+        get: operations["video_edit_drafts_api_v1_projects__project_id__video_edit_drafts_get"];
+        put?: never;
+        /** Create Video Edit Draft */
+        post: operations["create_video_edit_draft_api_v1_projects__project_id__video_edit_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Edit Draft */
+        get: operations["video_edit_draft_api_v1_projects__project_id__video_edit_drafts__draft_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Draft Jobs */
+        get: operations["video_draft_jobs_api_v1_projects__project_id__video_edit_drafts__draft_id__jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Video Draft */
+        post: operations["save_video_draft_api_v1_projects__project_id__video_edit_drafts__draft_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Render Draft Preview */
+        post: operations["render_draft_preview_api_v1_projects__project_id__video_edit_drafts__draft_id__previews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/edit-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Render Edit Preview */
+        post: operations["render_edit_preview_api_v1_projects__project_id__edit_previews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Video Reviews */
+        get: operations["video_reviews_api_v1_projects__project_id__video_reviews_get"];
+        put?: never;
+        /** Create Video Review */
+        post: operations["create_video_review_api_v1_projects__project_id__video_reviews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -1894,6 +2117,10 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+            /** Editdraftid */
+            editDraftId?: string | null;
+            /** Saverequesthash */
+            saveRequestHash?: string | null;
         };
         /** EditVideoSegment */
         EditVideoSegment: {
@@ -2054,6 +2281,29 @@ export interface components {
             /** Endingimage */
             endingImage: string;
         };
+        /** EpisodeCountRecommendationDto */
+        EpisodeCountRecommendationDto: {
+            /** Minimumrecommended */
+            minimumRecommended: number;
+            /** Preferred */
+            preferred: number;
+            /** Maximumrecommended */
+            maximumRecommended: number;
+            /** Rationale */
+            rationale: string;
+        };
+        /** EpisodeSourceCoverageDto */
+        EpisodeSourceCoverageDto: {
+            /** Sourceunitordinal */
+            sourceUnitOrdinal: number;
+            /**
+             * Coverage
+             * @enum {string}
+             */
+            coverage: "whole" | "partial" | "continuation";
+            /** Coveragenote */
+            coverageNote: string;
+        };
         /** ExportCommand */
         ExportCommand: {
             /**
@@ -2164,6 +2414,10 @@ export interface components {
         };
         /** GenerationInputSourceDto */
         GenerationInputSourceDto: {
+            /** Editdraftid */
+            editDraftId?: string | null;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
             /** Storyversionid */
             storyVersionId?: string | null;
             /** Shotplanversionid */
@@ -2383,7 +2637,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export";
+            kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_segment" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export" | "render_edit_preview";
             /**
              * Status
              * @enum {string}
@@ -3163,6 +3417,18 @@ export interface components {
         };
         /** SegmentEditInputDto */
         SegmentEditInputDto: {
+            baseEdl?: components["schemas"]["EditDecisionListV2"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
             /** Instruction */
             instruction: string;
             issueRange: components["schemas"]["FrameRange"];
@@ -3203,6 +3469,19 @@ export interface components {
             issueRange: components["schemas"]["FrameRange"];
             /** Instruction */
             instruction: string;
+            /** Editdraftid */
+            editDraftId?: string | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
@@ -3239,6 +3518,19 @@ export interface components {
             issueRange: components["schemas"]["FrameRange"];
             /** Instruction */
             instruction: string;
+            /** Editdraftid */
+            editDraftId?: string | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
         };
         /** SegmentRepairPreviewDto */
         SegmentRepairPreviewDto: {
@@ -3287,6 +3579,20 @@ export interface components {
             /** Inputhash */
             inputHash: string;
             inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
+            /** Editdraftid */
+            editDraftId?: string | null;
+            baseEdl?: components["schemas"]["EditDecisionListV2"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
         };
         /** SegmentRepairTransitionCommand */
         SegmentRepairTransitionCommand: {
@@ -3326,6 +3632,8 @@ export interface components {
              * Format: uuid
              */
             assetId: string;
+            /** Reviewid */
+            reviewId?: string | null;
         };
         /** SeriesAssetBindingCommand */
         SeriesAssetBindingCommand: {
@@ -3418,8 +3726,14 @@ export interface components {
              * @enum {string}
              */
             narrativeMode: "continuous" | "lightly_serialized" | "anthology";
+            /**
+             * Lengthmode
+             * @default fixed
+             * @enum {string}
+             */
+            lengthMode: "fixed" | "ongoing";
             /** Plannedepisodecount */
-            plannedEpisodeCount: number;
+            plannedEpisodeCount?: number | null;
             /** Defaultepisodedurationseconds */
             defaultEpisodeDurationSeconds: number;
             /** Worldsetting */
@@ -3572,6 +3886,8 @@ export interface components {
             recurringPropKeys?: string[];
             /** Productionwarnings */
             productionWarnings?: string[];
+            /** Sourcecoverage */
+            sourceCoverage?: components["schemas"]["EpisodeSourceCoverageDto"][];
         };
         /** SeriesEpisodeStoryGenerationCommand */
         SeriesEpisodeStoryGenerationCommand: {
@@ -3702,10 +4018,159 @@ export interface components {
             };
             /** Plannedepisodecount */
             plannedEpisodeCount: number;
+            /** Totalplannedepisodecount */
+            totalPlannedEpisodeCount?: number | null;
+            /** Remainingepisodecount */
+            remainingEpisodeCount?: number | null;
+            /**
+             * Lengthmode
+             * @enum {string}
+             */
+            lengthMode: "fixed" | "ongoing";
             /** Defaultepisodedurationseconds */
             defaultEpisodeDurationSeconds: number;
             /** Promptrevision */
             promptRevision: string;
+        };
+        /** SeriesPlanSegmentActivationCommand */
+        SeriesPlanSegmentActivationCommand: {
+            /**
+             * Expectedseriesplanversionid
+             * Format: uuid
+             */
+            expectedSeriesPlanVersionId: string;
+            /** Expectedprevioussegmentversionid */
+            expectedPreviousSegmentVersionId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesPlanSegmentCommand */
+        SeriesPlanSegmentCommand: {
+            /** Startepisodeorder */
+            startEpisodeOrder: number;
+            /** Requestedepisodecount */
+            requestedEpisodeCount: number;
+            /**
+             * Expectedseriesplanversionid
+             * Format: uuid
+             */
+            expectedSeriesPlanVersionId: string;
+            /** Expectedprevioussegmentversionid */
+            expectedPreviousSegmentVersionId?: string | null;
+        };
+        /** SeriesPlanSegmentGenerationCommand */
+        SeriesPlanSegmentGenerationCommand: {
+            /** Startepisodeorder */
+            startEpisodeOrder: number;
+            /** Requestedepisodecount */
+            requestedEpisodeCount: number;
+            /**
+             * Expectedseriesplanversionid
+             * Format: uuid
+             */
+            expectedSeriesPlanVersionId: string;
+            /** Expectedprevioussegmentversionid */
+            expectedPreviousSegmentVersionId?: string | null;
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** SeriesPlanSegmentPreviewDto */
+        SeriesPlanSegmentPreviewDto: {
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Startepisodeorder */
+            startEpisodeOrder: number;
+            /** Requestedepisodecount */
+            requestedEpisodeCount: number;
+            /** Remainingepisodecount */
+            remainingEpisodeCount?: number | null;
+            /**
+             * Expectedseriesplanversionid
+             * Format: uuid
+             */
+            expectedSeriesPlanVersionId: string;
+            /** Expectedprevioussegmentversionid */
+            expectedPreviousSegmentVersionId?: string | null;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Capabilityrevision */
+            capabilityRevision: string;
+            /** Inputhash */
+            inputHash: string;
+            /** Prompt */
+            prompt: string;
+            /** Outputschema */
+            outputSchema: {
+                [key: string]: unknown;
+            };
+            /** Promptrevision */
+            promptRevision: string;
+        };
+        /** SeriesPlanSegmentVersionDto */
+        SeriesPlanSegmentVersionDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Segmentid
+             * Format: uuid
+             */
+            segmentId: string;
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /** Startepisodeorder */
+            startEpisodeOrder: number;
+            /** Requestedepisodecount */
+            requestedEpisodeCount: number;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "accepted" | "rejected" | "superseded";
+            /** Active */
+            active: boolean;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "candidate_ready" | "needs_input" | "invalid";
+            plan: components["schemas"]["SeriesPlanDraft"];
+            /** Issues */
+            issues?: components["schemas"]["SeriesValidationIssueDto"][];
+            /** Producingjobid */
+            producingJobId?: string | null;
+            /**
+             * Expectedseriesplanversionid
+             * Format: uuid
+             */
+            expectedSeriesPlanVersionId: string;
+            /** Previoussegmentversionid */
+            previousSegmentVersionId?: string | null;
+            /** Inputhash */
+            inputHash: string;
+            /** Promptrevision */
+            promptRevision: string;
+            /** Decidedat */
+            decidedAt?: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
         };
         /** SeriesPlanVersionDto */
         SeriesPlanVersionDto: {
@@ -3746,6 +4211,39 @@ export interface components {
             issues?: components["schemas"]["SeriesValidationIssueDto"][];
             /** Decidedat */
             decidedAt?: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** SeriesSourceBeatDto */
+        SeriesSourceBeatDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Seriesid
+             * Format: uuid
+             */
+            seriesId: string;
+            /**
+             * Sourceunitid
+             * Format: uuid
+             */
+            sourceUnitId: string;
+            /** Sourceunitordinal */
+            sourceUnitOrdinal: number;
+            /** Bindingorder */
+            bindingOrder: number;
+            /** Title */
+            title: string;
+            /** Theme */
+            theme?: string | null;
+            /** Rawtext */
+            rawText: string;
             /**
              * Createdat
              * Format: date-time
@@ -4087,6 +4585,10 @@ export interface components {
             targetSeriesId?: string | null;
             /** Targetprojectid */
             targetProjectId?: string | null;
+            /** Serieslengthmode */
+            seriesLengthMode?: ("fixed" | "ongoing") | null;
+            /** Plannedepisodecount */
+            plannedEpisodeCount?: number | null;
             /** Idempotencykey */
             idempotencyKey: string;
         };
@@ -4110,8 +4612,8 @@ export interface components {
         StoryImportCreateResultDto: {
             document: components["schemas"]["StorySourceDocumentDto"];
             analysisJob?: components["schemas"]["StoryImportAnalysisJobDto"] | null;
-            /** Reused */
-            reused: boolean;
+            /** Idempotencyreplayed */
+            idempotencyReplayed: boolean;
         };
         /** StoryImportMaterializationDto */
         StoryImportMaterializationDto: {
@@ -4163,8 +4665,6 @@ export interface components {
             inputHash: string;
             /** Charactercount */
             characterCount: number;
-            /** Duplicatedocumentid */
-            duplicateDocumentId?: string | null;
             /** Prompt */
             prompt: string;
             /** Outputschema */
@@ -4206,8 +4706,14 @@ export interface components {
              * @enum {string}
              */
             narrativeMode: "continuous" | "lightly_serialized" | "anthology";
+            /**
+             * Lengthmode
+             * @default fixed
+             * @enum {string}
+             */
+            lengthMode: "fixed" | "ongoing";
             /** Plannedepisodecount */
-            plannedEpisodeCount: number;
+            plannedEpisodeCount?: number | null;
             /** Defaultepisodedurationseconds */
             defaultEpisodeDurationSeconds: number;
             /** Worldsetting */
@@ -4331,6 +4837,7 @@ export interface components {
             confidence: number;
             /** Rationale */
             rationale: string;
+            episodeCountRecommendation?: components["schemas"]["EpisodeCountRecommendationDto"] | null;
             /**
              * Status
              * @enum {string}
@@ -4552,6 +5059,99 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
+        /** VideoDraftPreviewCommand */
+        VideoDraftPreviewCommand: {
+            /**
+             * Expectededitversionid
+             * Format: uuid
+             */
+            expectedEditVersionId: string;
+            /** Expectedtimelinehash */
+            expectedTimelineHash: string;
+            /** Repairid */
+            repairId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** VideoDraftSaveCommand */
+        VideoDraftSaveCommand: {
+            /**
+             * Expectededitversionid
+             * Format: uuid
+             */
+            expectedEditVersionId: string;
+            /** Expectedtimelinehash */
+            expectedTimelineHash: string;
+            /** Repairid */
+            repairId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            edl: components["schemas"]["EditDecisionListV2"];
+        };
+        /** VideoEditDraftCreateCommand */
+        VideoEditDraftCreateCommand: {
+            /**
+             * Sourcevideoassetid
+             * Format: uuid
+             */
+            sourceVideoAssetId: string;
+            /** Sourceeditversionid */
+            sourceEditVersionId?: string | null;
+            /**
+             * Confirmcurrentreferences
+             * @default false
+             */
+            confirmCurrentReferences: boolean;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** VideoEditDraftDto */
+        VideoEditDraftDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /**
+             * Sourcevideoassetid
+             * Format: uuid
+             */
+            sourceVideoAssetId: string;
+            /**
+             * Headeditversionid
+             * Format: uuid
+             */
+            headEditVersionId: string;
+            /** References */
+            references?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Referencesconfirmed
+             * @default false
+             */
+            referencesConfirmed: boolean;
+            /** Inputhash */
+            inputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** VideoIssueDto */
+        VideoIssueDto: {
+            range: components["schemas"]["FrameRange"];
+            /** Note */
+            note: string;
+        };
         /** VideoRepairDto */
         VideoRepairDto: {
             /**
@@ -4598,7 +5198,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "draft" | "generating" | "candidate_ready" | "failed" | "approved" | "rejected" | "outdated" | "cancelled";
+            status: "draft" | "generating" | "candidate_ready" | "failed" | "approved" | "rejected" | "outdated" | "cancelled" | "applied_to_draft";
             /** Candidateassetid */
             candidateAssetId?: string | null;
             /** Approvedcandidateassetid */
@@ -4615,6 +5215,73 @@ export interface components {
             createdAt: string;
             /** Approvedat */
             approvedAt?: string | null;
+        };
+        /** VideoReviewCreateCommand */
+        VideoReviewCreateCommand: {
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Editversionid */
+            editVersionId?: string | null;
+            /** Timelinehash */
+            timelineHash?: string | null;
+            /** Checks */
+            checks: {
+                [key: string]: "pass" | "warning" | "fail";
+            };
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /** Issues */
+            issues?: components["schemas"]["VideoIssueDto"][];
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** VideoReviewDto */
+        VideoReviewDto: {
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Editversionid */
+            editVersionId?: string | null;
+            /** Timelinehash */
+            timelineHash?: string | null;
+            /** Checks */
+            checks: {
+                [key: string]: "pass" | "warning" | "fail";
+            };
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /** Issues */
+            issues?: components["schemas"]["VideoIssueDto"][];
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /** Inputhash */
+            inputHash: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
         };
     };
     responses: never;
@@ -5418,6 +6085,37 @@ export interface operations {
             };
         };
     };
+    series_source_beats_api_v1_story_series__series_id__source_beats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesSourceBeatDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     preview_series_plan_api_v1_story_series__series_id__plans_preview_post: {
         parameters: {
             query?: never;
@@ -5618,6 +6316,181 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SeriesPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_series_plan_segment_api_v1_story_series__series_id__plan_segments_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPlanSegmentCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanSegmentPreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_series_plan_segment_api_v1_story_series__series_id__plan_segments_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPlanSegmentGenerationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_plan_segments_api_v1_story_series__series_id__plan_segments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanSegmentVersionDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_series_plan_segment_api_v1_story_series__series_id__plan_segments__segment_version_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                segment_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesPlanSegmentActivationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanSegmentVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_series_plan_segment_api_v1_story_series__series_id__plan_segments__segment_version_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+                segment_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesPlanSegmentVersionDto"];
                 };
             };
             /** @description Validation Error */
@@ -7383,6 +8256,311 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VideoRepairDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_edit_drafts_api_v1_projects__project_id__video_edit_drafts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditDraftDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_video_edit_draft_api_v1_projects__project_id__video_edit_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoEditDraftCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditDraftDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_edit_draft_api_v1_projects__project_id__video_edit_drafts__draft_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditDraftDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_draft_jobs_api_v1_projects__project_id__video_edit_drafts__draft_id__jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_video_draft_api_v1_projects__project_id__video_edit_drafts__draft_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoDraftSaveCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_draft_preview_api_v1_projects__project_id__video_edit_drafts__draft_id__previews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoDraftPreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_edit_preview_api_v1_projects__project_id__edit_previews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    video_reviews_api_v1_projects__project_id__video_reviews_get: {
+        parameters: {
+            query: {
+                assetId: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoReviewDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_video_review_api_v1_projects__project_id__video_reviews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoReviewCreateCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoReviewDto"];
                 };
             };
             /** @description Validation Error */

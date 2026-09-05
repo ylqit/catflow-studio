@@ -53,3 +53,36 @@ def test_story_source_and_continuity_migrations_form_a_linear_chain() -> None:
     assert "CREATE TABLE catflow.episode_continuity_snapshots" in continuity_sql
     assert "CREATE TABLE catflow.series_asset_bindings" in continuity_sql
     assert "CREATE TABLE catflow.episode_reference_manifests" in continuity_sql
+
+
+def test_story_source_creation_semantics_keep_hash_as_a_non_unique_index() -> None:
+    migration, sql = _render_migration("0024_story_source_creation_semantics.py")
+
+    assert migration.down_revision == "0023_series_continuity_assets"
+    assert "DROP CONSTRAINT uq_story_source_content_hash" in sql
+    assert "CREATE INDEX ix_story_source_documents_content_hash" in sql
+    assert "CREATE UNIQUE INDEX ix_story_source_documents_content_hash" not in sql
+
+
+def test_flexible_series_planning_separates_beats_episode_targets_and_segments() -> None:
+    migration, sql = _render_migration("0025_flexible_series_planning.py")
+
+    assert migration.down_revision == "0024_story_source_new_records"
+    assert "ADD COLUMN length_mode" in sql
+    assert "ALTER COLUMN planned_episode_count DROP NOT NULL" in sql
+    assert "TYPE BIGINT" in sql
+    assert "CREATE TABLE catflow.series_source_bindings" in sql
+    assert "CREATE TABLE catflow.series_episode_outline_source_coverage" in sql
+    assert "CREATE TABLE catflow.series_plan_segments" in sql
+    assert "CREATE TABLE catflow.series_plan_segment_versions" in sql
+    assert "plan_series_segment" in sql
+    assert "DROP TABLE catflow.story_series" not in sql
+
+
+def test_repeat_source_materializations_keep_each_explicit_creation_independent() -> None:
+    migration, sql = _render_migration("0026_repeat_source_materializations.py")
+
+    assert migration.down_revision == "0025_flexible_series_planning"
+    assert "DROP CONSTRAINT uq_story_source_materialization_suggestion" in sql
+    assert "CREATE INDEX ix_story_source_materializations_suggestion_id" in sql
+    assert "CREATE UNIQUE INDEX ix_story_source_materializations_suggestion_id" not in sql

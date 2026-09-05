@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api } from "../api/client";
-import type { ProjectDto, StoryImportPreviewDto, StorySeriesDto, StorySourceDocumentDto } from "../api/types";
+import { pendingIdempotencyKey, settleIdempotencyKey } from "../idempotency";
+import type { ProjectDto, SeriesLengthMode, StoryImportPreviewDto, StorySeriesDto, StorySourceDocumentDto } from "../api/types";
 
 const route = useRoute();
 const router = useRouter();
@@ -14,12 +15,15 @@ const preview = ref<StoryImportPreviewDto | null>(null);
 const document = ref<StorySourceDocumentDto | null>(null);
 const series = ref<StorySeriesDto[]>([]);
 const projects = ref<ProjectDto[]>([]);
+const importHistory = ref<StorySourceDocumentDto[]>([]);
 const busy = ref(false);
 const error = ref("");
 type ImportTarget = "new_series" | "append_series" | "independent" | "revision" | "reference";
 const targetBySuggestion = ref<Record<string, ImportTarget>>({});
 const targetSeriesBySuggestion = ref<Record<string, string>>({});
 const targetProjectBySuggestion = ref<Record<string, string>>({});
+const lengthModeBySuggestion = ref<Record<string, SeriesLengthMode>>({});
+const episodeCountBySuggestion = ref<Record<string, number>>({});
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -49,6 +53,14 @@ function initializeSuggestion(suggestion: StorySourceDocumentDto["relationSugges
   if (suggestion.suggestedSeriesId && !targetSeriesBySuggestion.value[suggestion.id]) {
     targetSeriesBySuggestion.value[suggestion.id] = suggestion.suggestedSeriesId;
   }
+  if (!lengthModeBySuggestion.value[suggestion.id]) {
+    lengthModeBySuggestion.value[suggestion.id] = "fixed";
+  }
+  if (!episodeCountBySuggestion.value[suggestion.id]) {
+    episodeCountBySuggestion.value[suggestion.id] =
+      suggestion.episodeCountRecommendation?.preferred
+      ?? Math.max(2, Math.ceil(suggestion.unitIds.length * 2 / 3));
+  }
 }
 
 async function updatePreview() {
@@ -69,14 +81,22 @@ async function chooseFile(event: Event) {
 function usePaste() { sourceFormat.value = "paste"; fileName.value = null; }
 
 async function analyze() {
-  if (!preview.value) return;
+  if (!preview.value || busy.value) return;
   busy.value = true; error.value = "";
+  const scope = "story-import:create";
+  const fingerprint = `${preview.value.inputHash}:${sourceFormat.value}:${fileName.value ?? ""}`;
   try {
-    const result = await api.createStoryImport({ rawText: rawText.value, sourceFormat: sourceFormat.value, fileName: fileName.value, expectedInputHash: preview.value.inputHash, idempotencyKey: crypto.randomUUID() });
+    const result = await api.createStoryImport({
+      rawText: rawText.value,
+      sourceFormat: sourceFormat.value,
+      fileName: fileName.value,
+      expectedInputHash: preview.value.inputHash,
+      idempotencyKey: pendingIdempotencyKey(scope, fingerprint),
+    });
+    settleIdempotencyKey(scope, fingerprint);
     document.value = result.document;
     await router.replace(`/story-imports/${result.document.id}`);
     for (const suggestion of result.document.relationSuggestions) initializeSuggestion(suggestion);
-    if (result.reused && result.document.status === "analyzed") error.value = "相同内容已经分析过，已直接打开原结果，没有产生新费用。";
   } catch (reason) { error.value = reason instanceof Error ? reason.message : "故事分析没有开始。"; }
   finally { busy.value = false; }
 }
@@ -88,6 +108,23 @@ async function refreshDocument() {
     for (const suggestion of document.value.relationSuggestions) initializeSuggestion(suggestion);
   }
   catch { /* the persisted analysis remains recoverable */ }
+}
+
+async function loadDocument(documentId: unknown) {
+  if (typeof documentId !== "string" || !documentId) {
+    document.value = null;
+    return;
+  }
+  try {
+    const restored = await api.storyImport(documentId);
+    document.value = restored;
+    rawText.value = restored.rawText;
+    sourceFormat.value = restored.sourceFormat;
+    fileName.value = restored.fileName ?? null;
+    for (const suggestion of restored.relationSuggestions) initializeSuggestion(suggestion);
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : "导入记录暂时无法读取。";
+  }
 }
 
 async function reanalyze() {
@@ -121,6 +158,9 @@ function suggestionTarget(id: string): ImportTarget {
 
 async function confirm(suggestionId: string) {
   const target = suggestionTarget(suggestionId);
+  const seriesLengthMode = target === "new_series"
+    ? (lengthModeBySuggestion.value[suggestionId] ?? "fixed")
+    : null;
   busy.value = true; error.value = "";
   try {
     const result = await api.confirmStoryImport(document.value!.id, {
@@ -128,6 +168,10 @@ async function confirm(suggestionId: string) {
       target,
       targetSeriesId: ["append_series", "revision", "reference"].includes(target) && !targetProjectBySuggestion.value[suggestionId] ? targetSeriesBySuggestion.value[suggestionId] || null : null,
       targetProjectId: ["revision", "reference"].includes(target) ? targetProjectBySuggestion.value[suggestionId] || null : null,
+      seriesLengthMode,
+      plannedEpisodeCount: seriesLengthMode === "fixed"
+        ? episodeCountBySuggestion.value[suggestionId]
+        : null,
       idempotencyKey: crypto.randomUUID(),
     });
     if (result.series) await router.push(`/series/${result.series.id}`);
@@ -138,23 +182,17 @@ async function confirm(suggestionId: string) {
 
 watch(rawText, () => { if (previewTimer) clearTimeout(previewTimer); previewTimer = setTimeout(updatePreview, 400); });
 watch([sourceFormat, fileName], updatePreview);
+watch(() => route.params.documentId, async (documentId, previousDocumentId) => {
+  if (documentId === previousDocumentId) return;
+  await loadDocument(documentId);
+});
 onMounted(async () => {
-  [series.value, projects.value] = await Promise.all([
+  [series.value, projects.value, importHistory.value] = await Promise.all([
     api.storySeries().catch(() => []),
     api.projects().catch(() => []),
+    api.storyImports().catch(() => []),
   ]);
-  const documentId = typeof route.params.documentId === "string" ? route.params.documentId : null;
-  if (documentId) {
-    try {
-      document.value = await api.storyImport(documentId);
-      rawText.value = document.value.rawText;
-      sourceFormat.value = document.value.sourceFormat;
-      fileName.value = document.value.fileName ?? null;
-      for (const suggestion of document.value.relationSuggestions) initializeSuggestion(suggestion);
-    } catch (reason) {
-      error.value = reason instanceof Error ? reason.message : "导入记录暂时无法读取。";
-    }
-  }
+  await loadDocument(route.params.documentId);
   pollTimer = setInterval(refreshDocument, 3000);
 });
 onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); if (pollTimer) clearInterval(pollTimer); });
@@ -164,14 +202,18 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); if (pollTi
   <main class="page import-page">
     <header class="page-heading"><div><h1>导入故事</h1><p class="subtitle">可以一次粘贴一个故事、多个主题，也可以分多次补充。关系建议由你确认。</p></div><RouterLink class="ghost back-link" to="/projects">返回项目库</RouterLink></header>
     <p v-if="error" :class="['notice', { error: !error.includes('没有产生新费用') }]">{{ error }}</p>
+    <section v-if="!document && importHistory.length" class="card import-history">
+      <header><div><h2>已有来源记录</h2><p>打开已保存的分析结果不会调用模型，也不会产生费用。</p></div></header>
+      <div><RouterLink v-for="item in importHistory" :key="item.id" :to="`/story-imports/${item.id}`"><b>{{ item.relationSuggestions[0]?.title ?? item.fileName ?? item.rawText.split('\n')[0] ?? '未命名来源' }}</b><span>{{ item.units.length }} 个剧情节拍 · {{ item.status === 'analyzed' || item.status === 'confirmed' ? '分析已保存' : item.status === 'failed' ? '需要检查' : '分析中' }}</span><time>{{ new Date(item.createdAt).toLocaleString('zh-CN') }}</time></RouterLink></div>
+    </section>
     <div class="import-layout">
       <section class="card import-editor">
         <header><h2>来源文本</h2><div><button :class="sourceFormat === 'paste' ? 'secondary' : 'ghost'" @click="usePaste">粘贴文字</button><label class="ghost file-button">上传 TXT / MD<input type="file" accept=".txt,.md,text/plain,text/markdown" @change="chooseFile" /></label></div></header>
         <p v-if="fileName" class="file-name">{{ fileName }}</p>
         <textarea v-model="rawText" aria-label="故事来源文本" placeholder="粘贴单个故事、系列剧本、主题合集或后续修订稿…" />
-        <div v-if="preview" class="preview-summary"><span>{{ preview.characterCount }} 个字符</span><span v-if="preview.duplicateDocumentId" class="pill good">已有相同内容</span><span v-else>分析会产生一次模型费用</span></div>
+        <div v-if="preview" class="preview-summary"><span>{{ preview.characterCount }} 个字符</span><span>每次导入都会新建来源记录，并产生一次故事分析费用</span></div>
         <details v-if="preview"><summary>查看本次分析内容</summary><pre>{{ preview.prompt }}</pre></details>
-        <button class="primary analyze-button" :disabled="!canAnalyze" @click="analyze">{{ busy ? "正在提交" : analysisInProgress ? "分析任务进行中" : preview?.duplicateDocumentId ? "打开已有分析" : "导入并分析（付费）" }}</button>
+        <button class="primary analyze-button" :disabled="!canAnalyze" @click="analyze">{{ busy ? "正在提交" : analysisInProgress ? "分析任务进行中" : "导入并分析（付费）" }}</button>
       </section>
 
       <section class="card import-result">
@@ -183,11 +225,11 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); if (pollTi
           <button class="primary" :disabled="busy" @click="reanalyze">{{ busy ? "正在提交" : "重新分析（付费）" }}</button>
         </template>
         <template v-else>
-          <header><div><h2>识别到 {{ document.units.length }} 个故事单元</h2><p>系统不会自动创建系列、项目或修订稿。</p></div><button class="secondary reanalyze-button" :disabled="!canReanalyze" @click="reanalyze">{{ busy ? "正在提交" : "重新分析并拆分（付费）" }}</button></header>
+          <header><div><h2>识别到 {{ document.units.length }} 个剧情节拍</h2><p>剧情节拍忠实记录原文事件，不直接等同于最终剧集。</p></div><button class="secondary reanalyze-button" :disabled="!canReanalyze" @click="reanalyze">{{ busy ? "正在提交" : "重新分析并拆分（付费）" }}</button></header>
           <details v-for="unit in document.units" :key="unit.id" class="source-unit"><summary>{{ unit.ordinal }} · {{ unit.title }} <small>{{ unit.theme }}</small></summary><p>{{ unit.rawText }}</p></details>
           <article v-for="suggestion in document.relationSuggestions" :key="suggestion.id" class="relation-card">
             <div><span class="pill">关系建议</span><h3>{{ suggestion.title }}</h3><p>{{ suggestion.rationale }}</p></div>
-            <div class="relation-action"><select v-model="targetBySuggestion[suggestion.id]" :aria-label="`${suggestion.title}的处理方式`"><option value="new_series">创建新系列</option><option value="append_series">追加到现有系列</option><option value="independent">创建独立短片</option><option value="revision">作为修订稿</option><option value="reference">作为参考资料</option></select><select v-if="suggestionTarget(suggestion.id) === 'append_series'" v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">选择系列</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select><template v-if="['revision', 'reference'].includes(suggestionTarget(suggestion.id))"><select v-model="targetProjectBySuggestion[suggestion.id]" aria-label="选择目标短片"><option value="">关联到短片（可选）</option><option v-for="item in projects" :key="item.id" :value="item.id">{{ item.title }}</option></select><select v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">关联到系列（可选）</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select></template><button class="secondary" :disabled="busy || suggestion.status !== 'suggested' || (suggestionTarget(suggestion.id) === 'append_series' && !targetSeriesBySuggestion[suggestion.id]) || (['revision', 'reference'].includes(suggestionTarget(suggestion.id)) && !targetSeriesBySuggestion[suggestion.id] && !targetProjectBySuggestion[suggestion.id])" @click="confirm(suggestion.id)">{{ suggestion.status === "suggested" ? "确认关系" : "已确认" }}</button></div>
+            <div class="relation-action"><select v-model="targetBySuggestion[suggestion.id]" :aria-label="`${suggestion.title}的处理方式`"><option value="new_series">创建新系列</option><option value="append_series">追加到现有系列</option><option value="independent">创建独立短片</option><option value="revision">作为修订稿</option><option value="reference">作为参考资料</option></select><section v-if="suggestionTarget(suggestion.id) === 'new_series'" class="series-length"><b>系列长度</b><label><input v-model="lengthModeBySuggestion[suggestion.id]" type="radio" :name="`length-${suggestion.id}`" value="fixed" /> 固定集数</label><label><input v-model="lengthModeBySuggestion[suggestion.id]" type="radio" :name="`length-${suggestion.id}`" value="ongoing" /> 持续连载</label><template v-if="lengthModeBySuggestion[suggestion.id] !== 'ongoing'"><p v-if="suggestion.episodeCountRecommendation">剧情节拍：{{ suggestion.unitIds.length }}<br />建议范围：{{ suggestion.episodeCountRecommendation.minimumRecommended }}–{{ suggestion.episodeCountRecommendation.maximumRecommended }} 集<br />推荐：{{ suggestion.episodeCountRecommendation.preferred }} 集</p><label><span>计划集数</span><input v-model.number="episodeCountBySuggestion[suggestion.id]" type="number" min="2" :aria-label="`${suggestion.title}计划集数`" /></label><small v-if="suggestion.episodeCountRecommendation && (episodeCountBySuggestion[suggestion.id] < suggestion.episodeCountRecommendation.minimumRecommended || episodeCountBySuggestion[suggestion.id] > suggestion.episodeCountRecommendation.maximumRecommended)">当前集数在建议范围外，后续规划会检查节奏与来源覆盖，但不会阻止创建。</small></template><p v-else>不设置系列总集数，后续按规划段逐次确认。</p><p>预计首轮规划调用：1 次</p></section><select v-if="suggestionTarget(suggestion.id) === 'append_series'" v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">选择系列</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select><template v-if="['revision', 'reference'].includes(suggestionTarget(suggestion.id))"><select v-model="targetProjectBySuggestion[suggestion.id]" aria-label="选择目标短片"><option value="">关联到短片（可选）</option><option v-for="item in projects" :key="item.id" :value="item.id">{{ item.title }}</option></select><select v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">关联到系列（可选）</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select></template><button class="secondary confirm-relation" :disabled="busy || (suggestion.status !== 'suggested' && suggestionTarget(suggestion.id) !== 'new_series') || (suggestionTarget(suggestion.id) === 'new_series' && lengthModeBySuggestion[suggestion.id] !== 'ongoing' && episodeCountBySuggestion[suggestion.id] < 2) || (suggestionTarget(suggestion.id) === 'append_series' && !targetSeriesBySuggestion[suggestion.id]) || (['revision', 'reference'].includes(suggestionTarget(suggestion.id)) && !targetSeriesBySuggestion[suggestion.id] && !targetProjectBySuggestion[suggestion.id])" @click="confirm(suggestion.id)">{{ suggestion.status === "suggested" ? "确认关系" : suggestionTarget(suggestion.id) === "new_series" ? "创建另一个新系列" : "已确认" }}</button></div>
           </article>
         </template>
       </section>
@@ -197,4 +239,6 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); if (pollTi
 
 <style scoped>
 .back-link { min-height: 40px; display: inline-flex; align-items: center; }.import-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, .8fr); gap: 16px; align-items: start; }.import-editor, .import-result { padding: 24px; }.import-editor header { display: flex; justify-content: space-between; gap: 14px; }.import-editor header div { display: flex; gap: 7px; }.import-editor textarea { width: 100%; min-height: 430px; padding: 15px; border: 1px solid var(--line); border-radius: 13px; resize: vertical; line-height: 1.7; }.file-button { min-height: 40px; display: inline-flex; align-items: center; cursor: pointer; }.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }.file-name { color: var(--muted); font-size: 12px; }.preview-summary { padding: 12px 0; display: flex; gap: 10px; color: var(--muted); font-size: 12px; }.import-editor pre { max-height: 240px; overflow: auto; white-space: pre-wrap; padding: 12px; border-radius: 10px; background: #f7f2eb; }.analyze-button { width: 100%; margin-top: 14px; }.source-unit { margin-bottom: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; }.source-unit summary { cursor: pointer; font-weight: 700; }.source-unit small { margin-left: 8px; color: var(--muted); }.source-unit p { margin: 12px 0 0; color: #5f5750; line-height: 1.7; white-space: pre-wrap; }.relation-card { margin-top: 14px; padding: 15px; display: grid; grid-template-columns: 1fr auto; gap: 15px; border-radius: 13px; background: #f8f3ec; }.relation-card h3 { margin: 8px 0 5px; }.relation-card p { margin: 0; color: var(--muted); line-height: 1.55; }.relation-action { min-width: 185px; display: grid; gap: 7px; }.relation-action select { padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+.series-length { padding: 10px; display: grid; gap: 7px; border: 1px solid var(--line); border-radius: 10px; background: #fffaf4; }.series-length label { display: flex; align-items: center; gap: 6px; }.series-length input[type="number"] { min-width: 0; width: 86px; padding: 7px; }.series-length small { color: #8a6338; line-height: 1.4; }
+.import-history { margin-bottom: 16px; padding: 20px 24px; }.import-history header { display: flex; justify-content: space-between; }.import-history header h2, .import-history header p { margin: 0; }.import-history header p { color: var(--muted); font-size: 12px; }.import-history > div { margin-top: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }.import-history a { min-width: 0; padding: 12px; display: grid; gap: 5px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); text-decoration: none; }.import-history a:hover, .import-history a:focus-visible { border-color: var(--accent); }.import-history span, .import-history time { color: var(--muted); font-size: 11px; }.import-history b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

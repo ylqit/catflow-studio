@@ -103,6 +103,24 @@ def _plan_payload() -> dict[str, object]:
     }
 
 
+def _plan_payload_for(start: int, count: int) -> dict[str, object]:
+    payload = _plan_payload()
+    template = payload["episodes"][0]
+    payload["episodes"] = [
+        {
+            **template,
+            "order": order,
+            "title": f"第 {order} 集",
+            "premise": f"完成事件 {order}",
+            "openingState": f"第 {order} 集开场",
+            "endingState": f"第 {order} 集结尾",
+            "sourceCoverage": [],
+        }
+        for order in range(start, start + count)
+    ]
+    return payload
+
+
 def test_series_routes_keep_planning_and_episode_materialization_explicit() -> None:
     service, client = _client()
     created = client.post("/api/v1/story-series", json=_series_payload(), headers=WRITE_HEADERS)
@@ -213,3 +231,150 @@ def test_failed_story_import_reanalysis_reuses_the_source_document() -> None:
     assert retried.json()["id"] != original_job_id
     assert retried.json()["storySourceDocumentId"] == document_id
     assert len(client.get("/api/v1/story-imports").json()) == 1
+
+
+def test_same_story_text_creates_new_documents_but_request_replay_is_idempotent() -> None:
+    _, client = _client()
+    raw_text = "主题：森林野餐\n孩子和猫咪一起准备野餐篮。"
+    preview = client.post(
+        "/api/v1/story-imports/preview",
+        json={"rawText": raw_text, "sourceFormat": "paste"},
+        headers=WRITE_HEADERS,
+    ).json()
+
+    def create(key: str, text: str = raw_text, input_hash: str = preview["inputHash"]):
+        return client.post(
+            "/api/v1/story-imports",
+            json={
+                "rawText": text,
+                "sourceFormat": "paste",
+                "expectedInputHash": input_hash,
+                "idempotencyKey": key,
+            },
+            headers=WRITE_HEADERS,
+        )
+
+    first = create("first-intentional-import")
+    second = create("second-intentional-import")
+    replayed = create("second-intentional-import")
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["document"]["id"] != second.json()["document"]["id"]
+    assert first.json()["document"]["contentHash"] == second.json()["document"]["contentHash"]
+    assert first.json()["analysisJob"]["id"] != second.json()["analysisJob"]["id"]
+    assert second.json()["idempotencyReplayed"] is False
+    assert replayed.json()["document"]["id"] == second.json()["document"]["id"]
+    assert replayed.json()["analysisJob"]["id"] == second.json()["analysisJob"]["id"]
+    assert replayed.json()["idempotencyReplayed"] is True
+    assert len(client.get("/api/v1/story-imports").json()) == 2
+
+    changed_text = f"{raw_text}\n这是不同的输入。"
+    changed_preview = client.post(
+        "/api/v1/story-imports/preview",
+        json={"rawText": changed_text, "sourceFormat": "paste"},
+        headers=WRITE_HEADERS,
+    ).json()
+    conflict = create(
+        "second-intentional-import", changed_text, changed_preview["inputHash"]
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_input_conflict"
+    assert len(client.get("/api/v1/story-imports").json()) == 2
+
+
+def test_long_series_requires_an_explicit_provider_sized_segment_request() -> None:
+    service, client = _client()
+    payload = {**_series_payload(), "plannedEpisodeCount": 60}
+    created = client.post("/api/v1/story-series", json=payload, headers=WRITE_HEADERS)
+    assert created.status_code == 201
+    series_id = created.json()["id"]
+
+    initial_preview = client.post(
+        f"/api/v1/story-series/{series_id}/plans/preview",
+        json={},
+        headers=WRITE_HEADERS,
+    ).json()
+    assert initial_preview["plannedEpisodeCount"] == 30
+    initial_job = client.post(
+        f"/api/v1/story-series/{series_id}/plans/generations",
+        json={
+            "expectedInputHash": initial_preview["inputHash"],
+            "idempotencyKey": "long-series-initial-job",
+        },
+        headers=WRITE_HEADERS,
+    ).json()
+    initial_candidate = service.complete_series_plan_job(
+        uuid.UUID(initial_job["id"]),
+        SeriesPlanDraft.model_validate(_plan_payload_for(1, 30)),
+    )
+    activated = client.post(
+        f"/api/v1/story-series/{series_id}/plans/{initial_candidate.id}/activate",
+        json={
+            "expectedActivePlanVersionId": None,
+            "idempotencyKey": "long-series-initial-activation",
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert activated.status_code == 200
+
+    segment_command = {
+        "startEpisodeOrder": 31,
+        "requestedEpisodeCount": 30,
+        "expectedSeriesPlanVersionId": str(initial_candidate.id),
+        "expectedPreviousSegmentVersionId": None,
+    }
+    segment_preview = client.post(
+        f"/api/v1/story-series/{series_id}/plan-segments/preview",
+        json=segment_command,
+        headers=WRITE_HEADERS,
+    )
+    assert segment_preview.status_code == 200
+    assert segment_preview.json()["remainingEpisodeCount"] == 0
+
+    segment_job = client.post(
+        f"/api/v1/story-series/{series_id}/plan-segments/generations",
+        json={
+            **segment_command,
+            "expectedInputHash": segment_preview.json()["inputHash"],
+            "idempotencyKey": "long-series-second-segment",
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert segment_job.status_code == 202
+    assert segment_job.json()["kind"] == "plan_series_segment"
+    segment_candidate = service.complete_series_plan_segment_job(
+        uuid.UUID(segment_job.json()["id"]),
+        SeriesPlanDraft.model_validate(_plan_payload_for(31, 30)),
+        validation_issues=[],
+    )
+    listed = client.get(
+        f"/api/v1/story-series/{series_id}/plan-segments"
+    ).json()
+    assert [item["id"] for item in listed] == [str(segment_candidate.id)]
+    assert len(client.get(f"/api/v1/story-series/{series_id}/episodes").json()) == 30
+
+    adopted = client.post(
+        f"/api/v1/story-series/{series_id}/plan-segments/{segment_candidate.id}/activate",
+        json={
+            "expectedSeriesPlanVersionId": str(initial_candidate.id),
+            "expectedPreviousSegmentVersionId": None,
+            "idempotencyKey": "long-series-second-segment-activation",
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert adopted.status_code == 200
+    assert adopted.json()["active"] is True
+    assert len(client.get(f"/api/v1/story-series/{series_id}/episodes").json()) == 60
+
+    too_large = client.post(
+        f"/api/v1/story-series/{series_id}/plan-segments/preview",
+        json={
+            "startEpisodeOrder": 61,
+            "requestedEpisodeCount": 31,
+            "expectedSeriesPlanVersionId": str(initial_candidate.id),
+        },
+        headers=WRITE_HEADERS,
+    )
+    assert too_large.status_code == 422

@@ -107,9 +107,8 @@ for ($attempt = 1; $attempt -le 30; $attempt++) {
                 break
             }
         }
-    } catch {
-        Start-Sleep -Seconds 1
-    }
+    } catch {}
+    Start-Sleep -Seconds 1
 }
 
 if (-not $ready) {

@@ -6,6 +6,12 @@ import type {
   CanonProfileDto,
   EditDecisionListDto,
   EditVersionDto,
+  VideoEditDraftDto,
+  VideoEditDraftCreateCommand,
+  VideoDraftPreviewCommand,
+  VideoDraftSaveCommand,
+  VideoReviewCreateCommand,
+  VideoReviewDto,
   GenerationPreviewDto,
   JobDto,
   JobUsageDto,
@@ -29,7 +35,11 @@ import type {
   SeriesAssetBindingDto,
   SeriesPlanDraft,
   SeriesPlanPreviewDto,
+  SeriesPlanSegmentCommand,
+  SeriesPlanSegmentPreviewDto,
+  SeriesPlanSegmentVersionDto,
   SeriesPlanVersionDto,
+  SeriesSourceBeatDto,
   StoryImportCreateResultDto,
   StoryImportPreviewDto,
   StoryImportProjectDto,
@@ -158,6 +168,10 @@ export class CatFlowClient {
     return this.request(`/api/v1/story-series/${seriesId}`);
   }
 
+  seriesSourceBeats(seriesId: string): Promise<SeriesSourceBeatDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/source-beats`);
+  }
+
   previewSeriesPlan(seriesId: string): Promise<SeriesPlanPreviewDto> {
     return this.json(`/api/v1/story-series/${seriesId}/plans/preview`, "POST", {});
   }
@@ -171,6 +185,51 @@ export class CatFlowClient {
 
   seriesPlans(seriesId: string): Promise<SeriesPlanVersionDto[]> {
     return this.request(`/api/v1/story-series/${seriesId}/plans`);
+  }
+
+  previewSeriesPlanSegment(
+    seriesId: string,
+    command: SeriesPlanSegmentCommand,
+  ): Promise<SeriesPlanSegmentPreviewDto> {
+    return this.json(`/api/v1/story-series/${seriesId}/plan-segments/preview`, "POST", command);
+  }
+
+  generateSeriesPlanSegment(
+    seriesId: string,
+    command: SeriesPlanSegmentCommand & { expectedInputHash: string; idempotencyKey: string },
+  ): Promise<JobDto> {
+    return this.json(`/api/v1/story-series/${seriesId}/plan-segments/generations`, "POST", command);
+  }
+
+  seriesPlanSegments(seriesId: string): Promise<SeriesPlanSegmentVersionDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/plan-segments`);
+  }
+
+  activateSeriesPlanSegment(
+    seriesId: string,
+    segmentVersionId: string,
+    command: {
+      expectedSeriesPlanVersionId: string;
+      expectedPreviousSegmentVersionId?: string | null;
+      idempotencyKey: string;
+    },
+  ): Promise<SeriesPlanSegmentVersionDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/plan-segments/${segmentVersionId}/activate`,
+      "POST",
+      command,
+    );
+  }
+
+  rejectSeriesPlanSegment(
+    seriesId: string,
+    segmentVersionId: string,
+  ): Promise<SeriesPlanSegmentVersionDto> {
+    return this.json(
+      `/api/v1/story-series/${seriesId}/plan-segments/${segmentVersionId}/reject`,
+      "POST",
+      {},
+    );
   }
 
   materializeSeriesPlan(
@@ -330,6 +389,8 @@ export class CatFlowClient {
       target: "new_series" | "append_series" | "independent" | "revision" | "reference";
       targetSeriesId?: string | null;
       targetProjectId?: string | null;
+      seriesLengthMode?: "fixed" | "ongoing" | null;
+      plannedEpisodeCount?: number | null;
       idempotencyKey: string;
     },
   ): Promise<{ series?: StorySeriesDto | null; projects: StoryImportProjectDto[] }> {
@@ -446,8 +507,8 @@ export class CatFlowClient {
     return this.write(`/api/v1/projects/${projectId}/assets/upload?role=${role}`, "POST", body);
   }
 
-  selectAsset(projectId: string, slot: AssetSlot, assetId: string): Promise<unknown> {
-    return this.json(`/api/v1/projects/${projectId}/selections`, "POST", { slot, assetId });
+  selectAsset(projectId: string, slot: AssetSlot, assetId: string, reviewId?: string): Promise<unknown> {
+    return this.json(`/api/v1/projects/${projectId}/selections`, "POST", { slot, assetId, reviewId });
   }
 
   previewAssetGeneration(
@@ -522,6 +583,34 @@ export class CatFlowClient {
 
   edits(projectId: string): Promise<EditVersionDto[]> {
     return this.request(`/api/v1/projects/${projectId}/edits`);
+  }
+
+  createVideoEditDraft(projectId: string, command: VideoEditDraftCreateCommand): Promise<VideoEditDraftDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edit-drafts`, "POST", command);
+  }
+  videoEditDraft(projectId: string, draftId: string): Promise<VideoEditDraftDto> {
+    return this.request(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}`);
+  }
+  videoEditDrafts(projectId: string): Promise<VideoEditDraftDto[]> {
+    return this.request(`/api/v1/projects/${projectId}/video-edit-drafts`);
+  }
+  videoDraftJobs(projectId: string, draftId: string): Promise<JobDto[]> {
+    return this.request(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/jobs`);
+  }
+  saveVideoDraft(projectId: string, draftId: string, command: VideoDraftSaveCommand): Promise<EditVersionDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/versions`, "POST", command);
+  }
+  renderDraftPreview(projectId: string, draftId: string, command: VideoDraftPreviewCommand): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/previews`, "POST", command);
+  }
+  renderEditPreview(projectId: string, editVersionId: string, idempotencyKey: string): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/edit-previews`, "POST", { editVersionId, idempotencyKey });
+  }
+  createVideoReview(projectId: string, command: VideoReviewCreateCommand): Promise<VideoReviewDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-reviews`, "POST", command);
+  }
+  videoReviews(projectId: string, assetId: string): Promise<VideoReviewDto[]> {
+    return this.request(`/api/v1/projects/${projectId}/video-reviews?assetId=${encodeURIComponent(assetId)}`);
   }
 
   createEdit(projectId: string, edl: EditDecisionListDto): Promise<EditVersionDto> {

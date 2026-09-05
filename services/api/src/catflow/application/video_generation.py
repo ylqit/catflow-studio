@@ -63,7 +63,8 @@ def _clean_fragment(value: str) -> str:
     return text.rstrip(_BOUNDARY_PUNCTUATION).strip()
 
 
-def _sentence(*clauses: str) -> str:
+def compile_prompt_sentence(*clauses: str) -> str:
+    """Serialize field boundaries once, shared by whole-video and segment-edit compilers."""
     content = "；".join(
         normalized for clause in clauses if (normalized := _clean_fragment(clause))
     )
@@ -102,7 +103,7 @@ def synchronize_professional_shot_summaries(shot: ShotSpec) -> ShotSpec:
 
 
 def _identity_style_section(project_title: str, target_duration_seconds: int) -> str:
-    return _sentence(
+    return compile_prompt_sentence(
         f"原创一人一猫生活短片《{_clean_fragment(project_title)}》，9:16，"
         f"{target_duration_seconds}秒",
         "固定同一位6至7岁儿童，身高约1.2米，齐下颌短发，保持圆润儿童脸型和"
@@ -130,12 +131,12 @@ def _creative_treatment_section(treatment: DirectorStoryTreatment | None) -> str
             "逐镜执行是动作、节拍和最终状态的唯一权威",
         )
     )
-    return _sentence(*clauses)
+    return compile_prompt_sentence(*clauses)
 
 
 def _shot_execution(shot: ShotSpec) -> str:
     paragraphs = [
-        _sentence(
+        compile_prompt_sentence(
             f"镜头设置：{shot.duration_seconds}秒，{shot.framing}",
             f"运镜：{shot.camera_movement}",
             f"转场：{shot.transition}",
@@ -143,7 +144,7 @@ def _shot_execution(shot: ShotSpec) -> str:
     ]
     if shot.lens is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"焦距与机位：{shot.lens.focal_length_equivalent}",
                 f"机位高度：{shot.lens.camera_height}",
                 f"角度：{shot.lens.camera_angle}",
@@ -152,7 +153,7 @@ def _shot_execution(shot: ShotSpec) -> str:
         )
     if shot.composition is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"构图主体：{shot.composition.subject_placement}",
                 f"前景：{shot.composition.foreground}",
                 f"中景：{shot.composition.middle_ground}",
@@ -163,35 +164,35 @@ def _shot_execution(shot: ShotSpec) -> str:
         )
     if shot.child_blocking is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"人物走位：{_blocking_summary(shot.child_blocking)}",
                 f"人物微动作：{_items(shot.child_blocking.micro_motions)}",
             )
         )
     else:
-        paragraphs.append(_sentence(f"人物动作：{shot.child_action}"))
+        paragraphs.append(compile_prompt_sentence(f"人物动作：{shot.child_action}"))
     if shot.cat_blocking is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"猫咪走位：{_blocking_summary(shot.cat_blocking)}",
                 f"猫咪微动作：{_items(shot.cat_blocking.micro_motions)}",
             )
         )
     else:
-        paragraphs.append(_sentence(f"猫咪动作：{shot.cat_action}"))
+        paragraphs.append(compile_prompt_sentence(f"猫咪动作：{shot.cat_action}"))
     if shot.physical_change is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"物理变化：{shot.physical_change.subject}从"
                 f"{_clean_fragment(shot.physical_change.before)} → "
                 f"{_clean_fragment(shot.physical_change.after)}"
             )
         )
     else:
-        paragraphs.append(_sentence(f"画面变化：{shot.environment_change}"))
+        paragraphs.append(compile_prompt_sentence(f"画面变化：{shot.environment_change}"))
     if shot.continuity is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"镜头承接：{shot.continuity.incoming}",
                 f"离开状态：{shot.continuity.outgoing}",
                 f"共享视觉元素：{shot.continuity.shared_visual_element}",
@@ -199,7 +200,7 @@ def _shot_execution(shot: ShotSpec) -> str:
         )
     if shot.lighting is not None:
         paragraphs.append(
-            _sentence(
+            compile_prompt_sentence(
                 f"光线方向：{shot.lighting.direction}",
                 f"柔和度：{shot.lighting.softness}",
                 f"色彩意图：{shot.lighting.color_intent}",
@@ -214,9 +215,9 @@ def _shot_execution(shot: ShotSpec) -> str:
         ]
         if shot.sound.dialogue:
             sound_clauses.append(f"对白：{shot.sound.dialogue}")
-        paragraphs.append(_sentence(*sound_clauses))
+        paragraphs.append(compile_prompt_sentence(*sound_clauses))
     if shot.director_intent:
-        paragraphs.append(_sentence(f"导演意图：{shot.director_intent}"))
+        paragraphs.append(compile_prompt_sentence(f"导演意图：{shot.director_intent}"))
     return f"镜头 {shot.order}\n" + "\n".join(paragraph for paragraph in paragraphs if paragraph)
 
 
@@ -224,7 +225,7 @@ def _active_ending(shots: list[ShotSpec]) -> str:
     final_shot = shots[-1]
     if final_shot.continuity is not None and final_shot.continuity.final_frame.strip():
         return _clean_fragment(final_shot.continuity.final_frame)
-    return _sentence(
+    return compile_prompt_sentence(
         final_shot.child_action,
         final_shot.cat_action,
         final_shot.environment_change,
@@ -254,7 +255,7 @@ def _prompt_summary(project_title: str, shots: list[ShotSpec], active_ending: st
             )
         else:
             changes.append(_clean_fragment(shot.environment_change))
-    return _sentence(
+    return compile_prompt_sentence(
         f"《{project_title}》共{len(shots)}个镜头",
         f"主要动作：{'；'.join(actions)}",
         f"可见变化：{'；'.join(changes)}",
@@ -315,18 +316,18 @@ def compile_video_generation_prompt(
             title="结尾与生成限制",
             content="\n".join(
                 [
-                    _sentence(f"主动结尾：{active_ending}"),
-                    _sentence(
+                    compile_prompt_sentence(f"主动结尾：{active_ending}"),
+                    compile_prompt_sentence(
                         "结尾必须完成逐镜指定的最后动作并清楚呈现最终状态",
                         "不得擅自追加下一项任务",
                         "不得让儿童和猫咪原地互看",
                         "不得使用完全静止、重复呼吸、无意义慢镜头或停帧填充剩余时长",
                     ),
-                    _sentence(
+                    compile_prompt_sentence(
                         "无文字、无Logo、无水印",
                         "不复制任何画风来源中的叶片、露珠或摄影构图",
                     ),
-                    *(_sentence(constraint) for constraint in continuity_constraints),
+                    *(compile_prompt_sentence(constraint) for constraint in continuity_constraints),
                 ]
             ),
         ),

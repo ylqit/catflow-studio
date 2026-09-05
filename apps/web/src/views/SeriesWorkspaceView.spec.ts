@@ -11,10 +11,16 @@ const client = vi.hoisted(() => ({
   seriesJobs: vi.fn(),
   runtime: vi.fn(),
   seriesAssets: vi.fn(),
+  seriesSourceBeats: vi.fn(),
+  seriesPlanSegments: vi.fn(),
   previewSeriesPlan: vi.fn(),
+  previewSeriesPlanSegment: vi.fn(),
   generateSeriesPlan: vi.fn(),
+  generateSeriesPlanSegment: vi.fn(),
   activateSeriesPlan: vi.fn(),
+  activateSeriesPlanSegment: vi.fn(),
   rejectSeriesPlan: vi.fn(),
+  rejectSeriesPlanSegment: vi.fn(),
   materializeSeriesPlan: vi.fn(),
   materializeSeriesEpisode: vi.fn(),
   previewSeriesEpisodeStory: vi.fn(),
@@ -41,6 +47,7 @@ const series = {
   title: "森林野餐",
   premise: "孩子和猫咪从准备到返程。",
   narrativeMode: "continuous",
+  lengthMode: "fixed",
   plannedEpisodeCount: 30,
   defaultEpisodeDurationSeconds: 12,
   worldSetting: "家与森林",
@@ -76,6 +83,7 @@ function outline(order: number) {
     recurringLocationKeys: [],
     recurringPropKeys: [],
     productionWarnings: [],
+    sourceCoverage: [],
   };
 }
 
@@ -153,6 +161,8 @@ describe("SeriesWorkspaceView", () => {
       provider: { apiKeyConfigured: true, paidCallsEnabled: true },
     });
     client.seriesAssets.mockResolvedValue([]);
+    client.seriesSourceBeats.mockResolvedValue([]);
+    client.seriesPlanSegments.mockResolvedValue([]);
     client.previewSeriesPlan.mockResolvedValue({
       seriesId: "series-1",
       provider: "ark",
@@ -165,6 +175,72 @@ describe("SeriesWorkspaceView", () => {
       defaultEpisodeDurationSeconds: 12,
       promptRevision: "series-v1",
     });
+  });
+
+  it("plans the next provider-sized segment only after an explicit paid action", async () => {
+    client.storySeriesDetail.mockResolvedValue({
+      ...series,
+      plannedEpisodeCount: 60,
+      plannedCount: 30,
+    });
+    client.previewSeriesPlanSegment.mockResolvedValue({
+      seriesId: "series-1",
+      startEpisodeOrder: 31,
+      requestedEpisodeCount: 30,
+      remainingEpisodeCount: 0,
+      expectedSeriesPlanVersionId: "plan-1",
+      expectedPreviousSegmentVersionId: null,
+      provider: "ark",
+      model: "planning",
+      capabilityRevision: "v1",
+      inputHash: "e".repeat(64),
+      prompt: "只规划第 31–60 集。",
+      outputSchema: {},
+      promptRevision: "series-segment-v1",
+    });
+    client.generateSeriesPlanSegment.mockResolvedValue({
+      id: "segment-job-1",
+      seriesId: "series-1",
+      projectId: null,
+      kind: "plan_series_segment",
+      status: "queued",
+      inputHash: "e".repeat(64),
+      idempotencyKey: "segment-request-1",
+      frozenInput: {},
+      resultAssetIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(client.previewSeriesPlanSegment).toHaveBeenCalledWith("series-1", {
+      startEpisodeOrder: 31,
+      requestedEpisodeCount: 30,
+      expectedSeriesPlanVersionId: "plan-1",
+      expectedPreviousSegmentVersionId: null,
+    });
+    const button = wrapper.get(".segment-planning .primary");
+    expect(button.text()).toContain("规划下一段");
+    expect(wrapper.text()).toContain("第 31–60 集");
+    expect(client.generateSeriesPlanSegment).not.toHaveBeenCalled();
+
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(client.generateSeriesPlanSegment).toHaveBeenCalledTimes(1);
+    expect(client.generateSeriesPlanSegment).toHaveBeenCalledWith(
+      "series-1",
+      expect.objectContaining({
+        startEpisodeOrder: 31,
+        requestedEpisodeCount: 30,
+        expectedSeriesPlanVersionId: "plan-1",
+        expectedPreviousSegmentVersionId: null,
+        expectedInputHash: "e".repeat(64),
+      }),
+    );
+    expect(button.attributes("disabled")).toBeDefined();
   });
 
   it("keeps a 30-episode series lightweight and does not auto-adopt a candidate", async () => {
@@ -288,6 +364,77 @@ describe("SeriesWorkspaceView", () => {
           episodes: expect.arrayContaining([
             expect.objectContaining({ order: 1 }),
             expect.objectContaining({ order: 30 }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it("keeps source-beat coverage editable and blocks saving until every bound beat is covered", async () => {
+    const beats = [1, 2, 3].map((bindingOrder) => ({
+      id: `beat-${bindingOrder}`,
+      seriesId: "series-1",
+      sourceUnitId: `unit-${bindingOrder}`,
+      sourceUnitOrdinal: bindingOrder,
+      bindingOrder,
+      title: `剧情节拍 ${bindingOrder}`,
+      rawText: `原始事件 ${bindingOrder}`,
+      createdAt: now,
+    }));
+    const needsCoverage = {
+      ...candidatePlan,
+      disposition: "needs_input",
+      plan: {
+        seriesBible: bible,
+        episodes: [
+          { ...outline(1), sourceCoverage: [{ sourceUnitOrdinal: 1, coverage: "whole", coverageNote: "剧情节拍 1" }] },
+          { ...outline(2), sourceCoverage: [{ sourceUnitOrdinal: 2, coverage: "whole", coverageNote: "剧情节拍 2" }] },
+        ],
+      },
+      issues: [{ code: "source_beat_not_covered", severity: "blocking", path: "episodes", message: "剧情节拍 3 尚未覆盖。" }],
+    };
+    client.storySeriesDetail.mockResolvedValue({ ...series, plannedEpisodeCount: 2, plannedCount: 0, activePlanVersionId: null });
+    client.seriesPlans.mockResolvedValue([needsCoverage]);
+    client.seriesEpisodes.mockResolvedValue([]);
+    client.seriesSourceBeats.mockResolvedValue(beats);
+    client.previewSeriesPlan.mockResolvedValue({
+      seriesId: "series-1",
+      provider: "ark",
+      model: "planning",
+      capabilityRevision: "v1",
+      inputHash: "b".repeat(64),
+      prompt: "只规划整季路线。",
+      outputSchema: {},
+      plannedEpisodeCount: 2,
+      defaultEpisodeDurationSeconds: 12,
+      promptRevision: "series-v1",
+    });
+    client.materializeSeriesPlan.mockResolvedValue({ ...candidatePlan, id: "plan-3", revision: 3 });
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get(".candidate-actions .ghost").trigger("click");
+    const save = wrapper.get(".editor-actions .primary");
+    expect(save.attributes("disabled")).toBeDefined();
+
+    await wrapper.get("input[aria-label='第 2 集使用剧情节拍 3']").setValue(true);
+    expect((wrapper.get("input[aria-label='第 2 集剧情节拍 3覆盖说明']").element as HTMLInputElement).value).toBe("剧情节拍 3");
+    expect(save.attributes("disabled")).toBeUndefined();
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(client.materializeSeriesPlan).toHaveBeenCalledWith(
+      "series-1",
+      "plan-2",
+      expect.objectContaining({
+        plan: expect.objectContaining({
+          episodes: expect.arrayContaining([
+            expect.objectContaining({
+              order: 2,
+              sourceCoverage: expect.arrayContaining([
+                expect.objectContaining({ sourceUnitOrdinal: 3, coverage: "whole", coverageNote: "剧情节拍 3" }),
+              ]),
+            }),
           ]),
         }),
       }),

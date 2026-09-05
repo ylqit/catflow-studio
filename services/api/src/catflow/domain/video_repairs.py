@@ -9,7 +9,7 @@ from pydantic import Field, model_validator
 from .contract import ContractModel
 
 EDIT_FRAME_RATE = 24
-MIN_ISSUE_FRAMES = 4 * EDIT_FRAME_RATE
+MIN_ISSUE_FRAMES = 1
 MAX_ISSUE_FRAMES = 15 * EDIT_FRAME_RATE
 
 
@@ -48,7 +48,7 @@ def validate_issue_range(issue_range: FrameRange, *, total_frames: int) -> None:
     if total_frames <= 0 or issue_range.end_frame > total_frames:
         raise ValueError("issue range must be inside the video")
     if issue_range.duration_frames < MIN_ISSUE_FRAMES:
-        raise ValueError("issue range must be at least 4 seconds (96 frames)")
+        raise ValueError("issue range must contain at least one frame")
     if issue_range.duration_frames > min(total_frames, MAX_ISSUE_FRAMES):
         raise ValueError("issue range must not exceed 15 seconds (360 frames)")
 
@@ -220,7 +220,10 @@ def splice_repair_candidate(
             segments.append(
                 segment.model_copy(
                     update={
-                        "id": uuid.uuid4(),
+                        "id": uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"repair-prefix:{repair_id}:{segment.id}:{issue_range.start_frame}",
+                        ),
                         "duration_frames": issue_range.start_frame - segment_start,
                     }
                 )
@@ -228,7 +231,10 @@ def splice_repair_candidate(
         if not inserted:
             segments.append(
                 EditVideoSegment(
-                    id=uuid.uuid4(),
+                    id=uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"repair-core:{repair_id}:{candidate_asset_id}:{candidate_source_range.start_frame}:{candidate_source_range.end_frame}",
+                    ),
                     assetId=candidate_asset_id,
                     sha256=candidate_sha256,
                     sourceInFrame=candidate_source_range.start_frame,
@@ -243,7 +249,10 @@ def splice_repair_candidate(
             segments.append(
                 segment.model_copy(
                     update={
-                        "id": uuid.uuid4(),
+                        "id": uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"repair-suffix:{repair_id}:{segment.id}:{issue_range.end_frame}",
+                        ),
                         "source_in_frame": segment.source_in_frame + consumed,
                         "duration_frames": segment_end - issue_range.end_frame,
                     }
