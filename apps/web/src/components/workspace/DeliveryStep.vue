@@ -71,7 +71,7 @@ function metadataNumber(asset: AssetDto, key: string): number | null {
 }
 
 async function saveEdit() {
-  if (savedEdit.value?.formatVersion === 2) {
+  if ((savedEdit.value?.formatVersion === 2 || savedEdit.value?.formatVersion === 3)) {
     error.value = "当前视频包含局部修改。请进入编辑草稿保存后续版本，不能用原片裁切覆盖。";
     return;
   }

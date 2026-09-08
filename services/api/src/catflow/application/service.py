@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
@@ -29,11 +30,16 @@ from catflow.domain.references import CompiledReference, ProviderReference, comp
 from catflow.domain.video_repairs import (
     MAX_ISSUE_FRAMES,
     MIN_ISSUE_FRAMES,
+    CandidatePlacement,
     EditDecisionListV2,
+    EditDecisionListV3,
     EditTransitionV2,
+    FrameEditTimeline,
     FrameRange,
     RationalFrameRate,
+    SegmentGenerationWindow,
     build_base_timeline,
+    build_candidate_trial,
     expand_generation_window,
     splice_repair_candidate,
     validate_issue_range,
@@ -87,6 +93,15 @@ from .series import (
     compile_series_episode_story_preview,
     compile_series_plan_preview,
     compile_series_plan_segment_preview,
+)
+from .shot_production import (
+    ShotAssemblyCommand,
+    ShotFrameConfirmCommand,
+    ShotFrameExtractCommand,
+    ShotMediaCommand,
+    ShotMediaPreviewCommand,
+    ShotTarget,
+    shot_design_hash,
 )
 from .story_imports import (
     StoryImportAnalysisDraft,
@@ -556,6 +571,7 @@ class GenerationInputVideoReferenceDto(ContractModel):
 
 
 class GenerationVideoSpecDto(ContractModel):
+    generate_audio: bool = Field(alias="generateAudio", default=False)
     duration_seconds: int = Field(alias="durationSeconds", ge=4, le=15)
     resolution: Literal["480p"]
     aspect_ratio: Literal["9:16"] = Field(alias="aspectRatio")
@@ -573,7 +589,16 @@ class GenerationInputSourceDto(ContractModel):
 
 
 class SegmentEditInputDto(ContractModel):
-    base_edl: EditDecisionListV2 | None = Field(alias="baseEdl", default=None)
+    generation_mode: Literal["edit_existing", "from_frame"] = Field(
+        alias="generationMode", default="edit_existing"
+    )
+    audio_mode: Literal["preserve_current", "generate_candidate"] | None = Field(
+        alias="audioMode", default=None
+    )
+    sound_description: str = Field(alias="soundDescription", default="")
+    anchor_start_frame: int | None = Field(alias="anchorStartFrame", default=None)
+    anchor_end_frame: int | None = Field(alias="anchorEndFrame", default=None)
+    base_edl: FrameEditTimeline | None = Field(alias="baseEdl", default=None)
     end_state_policy: Literal["match_original", "replace"] = Field(
         alias="endStatePolicy", default="match_original"
     )
@@ -742,6 +767,7 @@ class JobEventDto(ContractModel):
 
 
 class GenerationPreviewDto(ContractModel):
+    generate_audio: bool = Field(alias="generateAudio", default=False)
     input_hash: str = Field(alias="inputHash")
     kind: Literal["video"] = "video"
     provider: str
@@ -831,7 +857,7 @@ class EditDecisionListDto(ContractModel):
         return self
 
 
-EditDecisionListContract = EditDecisionListDto | EditDecisionListV2
+EditDecisionListContract = EditDecisionListDto | EditDecisionListV2 | EditDecisionListV3
 
 
 class EditCreateCommand(ContractModel):
@@ -847,7 +873,7 @@ class EditVersionDto(ContractModel):
     status: Literal["draft", "rendered", "approved"]
     rendered_asset_id: uuid.UUID | None = Field(alias="renderedAssetId", default=None)
     parent_edit_version_id: uuid.UUID | None = Field(alias="parentEditVersionId", default=None)
-    format_version: Literal[1, 2] = Field(alias="formatVersion", default=1)
+    format_version: Literal[1, 2, 3] = Field(alias="formatVersion", default=1)
     active: bool = False
     timeline_hash: str | None = Field(alias="timelineHash", default=None)
     created_at: datetime = Field(alias="createdAt")
@@ -883,14 +909,20 @@ class VideoDraftPreviewCommand(ContractModel):
     expected_edit_version_id: uuid.UUID = Field(alias="expectedEditVersionId")
     expected_timeline_hash: str = Field(alias="expectedTimelineHash")
     repair_id: uuid.UUID | None = Field(alias="repairId", default=None)
+    placement: CandidatePlacement | None = None
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
 class VideoDraftSaveCommand(VideoDraftPreviewCommand):
-    edl: EditDecisionListV2
+    edl: FrameEditTimeline | None = None
+    preview_job_id: uuid.UUID | None = Field(alias="previewJobId", default=None)
 
 
 class VideoReviewCreateCommand(ContractModel):
+    audio_checks: dict[
+        Literal["soundIntent", "sync", "continuity"],
+        Literal["pass", "warning", "fail", "not_applicable"],
+    ] = Field(alias="audioChecks", default_factory=dict)
     asset_id: uuid.UUID = Field(alias="assetId")
     edit_version_id: uuid.UUID | None = Field(alias="editVersionId", default=None)
     timeline_hash: str | None = Field(alias="timelineHash", default=None)
@@ -921,6 +953,8 @@ VIDEO_REVIEW_KEYS = frozenset(
 
 
 SegmentReferenceRole = Literal[
+    "first_frame",
+    "last_frame",
     "anchor_in",
     "anchor_out",
     "episode_child",
@@ -960,6 +994,15 @@ VideoRepairStatus = Literal[
 
 
 class SegmentRepairPreviewCommand(ContractModel):
+    generation_mode: Literal["edit_existing", "from_frame"] = Field(
+        alias="generationMode", default="edit_existing"
+    )
+    audio_mode: Literal["preserve_current", "generate_candidate"] | None = Field(
+        alias="audioMode", default=None
+    )
+    sound_description: str = Field(alias="soundDescription", default="", max_length=2000)
+    anchor_start_frame: int | None = Field(alias="anchorStartFrame", default=None, ge=0)
+    anchor_end_frame: int | None = Field(alias="anchorEndFrame", default=None, ge=0)
     base_video_asset_id: uuid.UUID = Field(alias="baseVideoAssetId")
     base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
     issue_range: FrameRange = Field(alias="issueRange")
@@ -982,6 +1025,15 @@ class SegmentRepairPreviewCommand(ContractModel):
 
 
 class SegmentRepairPreviewDto(ContractModel):
+    generation_mode: Literal["edit_existing", "from_frame"] = Field(
+        alias="generationMode", default="edit_existing"
+    )
+    audio_mode: Literal["preserve_current", "generate_candidate"] | None = Field(
+        alias="audioMode", default=None
+    )
+    sound_description: str = Field(alias="soundDescription", default="", max_length=2000)
+    anchor_start_frame: int | None = Field(alias="anchorStartFrame", default=None, ge=0)
+    anchor_end_frame: int | None = Field(alias="anchorEndFrame", default=None, ge=0)
     project_id: uuid.UUID = Field(alias="projectId")
     base_video_asset_id: uuid.UUID = Field(alias="baseVideoAssetId")
     base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
@@ -998,13 +1050,15 @@ class SegmentRepairPreviewDto(ContractModel):
     prompt: str
     negative_prompt: str = Field(alias="negativePrompt")
     image_references: list[SegmentRepairImageReferenceDto] = Field(alias="imageReferences")
-    video_reference: SegmentRepairVideoReferenceDto = Field(alias="videoReference")
+    video_reference: SegmentRepairVideoReferenceDto | None = Field(
+        alias="videoReference", default=None
+    )
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
     cost_estimate_status: Literal["priced", "unmetered_paid"] = Field(alias="costEstimateStatus")
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
     input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
     edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
-    base_edl: EditDecisionListV2 | None = Field(alias="baseEdl", default=None)
+    base_edl: FrameEditTimeline | None = Field(alias="baseEdl", default=None)
     end_state_policy: Literal["match_original", "replace"] = Field(
         alias="endStatePolicy", default="match_original"
     )
@@ -2457,7 +2511,8 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v3",
+            "directorPromptRevision": "catflow-director-v4-vision",
+            "referenceInputMode": "vision",
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.planning_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
@@ -2512,6 +2567,315 @@ class StudioService:
                 updatedAt=now,
             )
         )
+
+    def shot_production_context(self, project_id: uuid.UUID, target: ShotTarget) -> dict[str, Any]:
+        self._require_project(project_id)
+        plan = self._repository.active_shot_plan(project_id)
+        story = self._repository.active_story(project_id)
+        if plan is None or plan.id != target.shot_plan_version_id or story is None:
+            raise StudioConflictError("请先保存并使用当前分镜版本。")
+        if (
+            plan.source_story_version_id != story.id
+            or plan.source_selection_hash != self.current_selection_hash(project_id)
+        ):
+            raise StudioConflictError("分镜对应的故事或参考已经变化，请先更新分镜。")
+        shot = next((item for item in plan.shots if item.id == target.shot_id), None)
+        if shot is None:
+            raise StudioNotFoundError("shot not found")
+        # Derived summaries use the same normalization as saving a new plan; confirmation
+        # must not invalidate itself when a provider-origin plan is first saved manually.
+        shot = synchronize_professional_shot_summaries(shot)
+        selections = self._repository.current_selections(project_id)
+        roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
+        references = []
+        for role in roles:
+            asset = (
+                self.get_asset(shot.scene_asset_id)
+                if role == "environment" and shot.scene_asset_id
+                else selections.get(role)
+            )
+            if (
+                asset is None
+                or asset.media_type != "image"
+                or (
+                    asset.project_id != project_id
+                    and asset.id not in {item.id for item in selections.values()}
+                )
+            ):
+                raise StudioConflictError("镜头参考缺失或不属于当前项目。")
+            references.append({"assetId": str(asset.id), "sha256": asset.sha256, "role": role})
+        design_hash = shot_design_hash(shot, references, story.environment_intent)
+        frame = shot.confirmed_frame
+        frame_current = bool(
+            frame
+            and frame.design_hash == design_hash
+            and self.get_asset(frame.asset_id).sha256 == frame.sha256
+        )
+        return {
+            "shotPlanVersionId": str(plan.id),
+            "shotId": shot.id,
+            "shot": shot.model_dump(mode="json", by_alias=True),
+            "references": references,
+            "designHash": design_hash,
+            "frameCurrent": frame_current,
+            "environmentIntent": story.environment_intent,
+            "storyBody": story.body,
+            "targetDurationFrames": shot.duration_seconds * 24,
+            "jobs": [
+                job.model_dump(mode="json", by_alias=True)
+                for job in self._repository.list_project_jobs(project_id)
+                if job.frozen_input.get("targetShotId") == shot.id
+            ],
+        }
+
+    def preview_shot_media(
+        self, project_id: uuid.UUID, command: ShotMediaPreviewCommand
+    ) -> dict[str, Any]:
+        context = self.shot_production_context(project_id, command)
+        shot = context["shot"]
+        is_video = command.purpose == "shot_video"
+        if is_video and not context["frameCurrent"]:
+            raise StudioConflictError("请先确认仍对应当前设计的镜头起始画面。")
+        references = context["references"]
+        if is_video:
+            frame = shot["confirmedFrame"]
+            references = [
+                {"assetId": frame["assetId"], "sha256": frame["sha256"], "role": "first_frame"}
+            ]
+        duration = max(4, shot["durationSeconds"])
+        shot_description = {key: value for key, value in shot.items() if key != "confirmedFrame"}
+        prompt = (
+            (
+                f"生成单个镜头视频，目标取用{shot['durationSeconds']}秒，模型输出{duration}秒。"
+                "严格从给定首帧开始，按分镜执行动作与已有声音设计，不重复动作填时长。"
+                if is_video
+                else (
+                    "生成9:16、2K的镜头起始画面，允许儿童和猫咪。"
+                    "只画动作开始前的状态，不能提前完成目标动作。"
+                )
+            )
+            + f"故事约束：{context['storyBody']}。场景意图：{context['environmentIntent']}。"
+            + (
+                "沿用场景参考布局。"
+                if shot["environmentUse"] == "preserve_layout"
+                else "保持场景外观与空间关系，允许按照镜头重新构图。"
+            )
+            + "图片按实际清单承担职责："
+            + "、".join(item["role"] for item in references)
+            + "。镜头执行设计："
+            + json.dumps(shot_description, ensure_ascii=False)
+        )
+        frozen = {
+            "purpose": command.purpose,
+            "role": command.purpose,
+            "projectId": str(project_id),
+            "shotPlanVersionId": str(command.shot_plan_version_id),
+            "targetShotId": command.shot_id,
+            "shotDesignHash": context["designHash"],
+            "references": references,
+            "referenceAssetIds": [r["assetId"] for r in references],
+            "referenceRoles": [r["role"] for r in references],
+            "referenceSha256": [r["sha256"] for r in references],
+            "prompt": prompt,
+            "negativePrompt": _default_asset_negative_prompt(),
+            "provider": self._provider_runtime.provider,
+            "model": self._provider_runtime.video_model
+            if is_video
+            else self._provider_runtime.image_model,
+            "capabilityRevision": self._provider_runtime.capability_revision,
+            "promptCompilerRevision": "catflow-shot-production-v1",
+            "generationMode": "from_frame" if is_video else "references",
+            "durationSeconds": duration if is_video else None,
+            "targetDurationFrames": context["targetDurationFrames"],
+            "generateAudio": is_video,
+            "resolution": "480p" if is_video else "2K",
+        }
+        return {
+            **frozen,
+            "inputHash": _hash_document(frozen),
+            "expectedCostMicros": None,
+            "costEstimateStatus": "unmetered_paid",
+        }
+
+    def create_shot_media_job(self, project_id: uuid.UUID, command: ShotMediaCommand) -> JobDto:
+        preview = self.preview_shot_media(project_id, command)
+        if preview["inputHash"] != command.expected_input_hash:
+            raise StudioConflictError("镜头输入已经变化，请重新检查生成清单。")
+        for job in self._repository.list_project_jobs(project_id):
+            if (
+                job.frozen_input.get("targetShotId") == command.shot_id
+                and job.frozen_input.get("purpose") == command.purpose
+                and job.status not in {"succeeded", "failed", "cancelled"}
+            ):
+                if (
+                    job.idempotency_key == command.idempotency_key
+                    and job.input_hash == preview["inputHash"]
+                ):
+                    return job
+                raise StudioConflictError("此镜头任务尚未终结或提交结果未知，请勿重复提交。")
+        self._require_paid_calls_enabled()
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=project_id,
+                kind="generate_video" if command.purpose == "shot_video" else "generate_image",
+                status="queued",
+                inputHash=preview["inputHash"],
+                idempotencyKey=command.idempotency_key,
+                provider=preview["provider"],
+                model=preview["model"],
+                expectedCostMicros=None,
+                frozenInput=preview,
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    def confirm_shot_frame(
+        self, project_id: uuid.UUID, command: ShotFrameConfirmCommand
+    ) -> ShotPlanVersionDto:
+        context = self.shot_production_context(project_id, command)
+        if context["designHash"] != command.expected_design_hash or len(set(command.checks)) != 5:
+            raise StudioConflictError("镜头设计已变化或画面判断不完整。")
+        asset = self.get_asset(command.asset_id)
+        allowed = {r["assetId"] for r in context["references"]}
+        if asset.media_type != "image" or (
+            asset.project_id != project_id and str(asset.id) not in allowed
+        ):
+            raise StudioConflictError("起始画面必须是当前项目图片或已绑定的真实参考。")
+        plan = self._repository.active_shot_plan(project_id)
+        payload = {
+            key: value
+            for key, value in plan.model_dump(mode="json", by_alias=True).items()
+            if key in ShotPlanDraft.model_json_schema()["properties"]
+        }
+        payload.update(
+            baseShotPlanVersionId=str(plan.id), expectedActiveShotPlanVersionId=str(plan.id)
+        )
+        for shot in payload["shots"]:
+            if shot["id"] == command.shot_id:
+                shot["confirmedFrame"] = {
+                    "assetId": str(asset.id),
+                    "sha256": asset.sha256,
+                    "designHash": context["designHash"],
+                    "checks": command.checks,
+                }
+        return self.create_shot_plan(project_id, ShotPlanDraft.model_validate(payload))
+
+    def extract_shot_frame(self, project_id: uuid.UUID, command: ShotFrameExtractCommand) -> JobDto:
+        context = self.shot_production_context(project_id, command)
+        asset = self.get_asset(command.source_video_asset_id)
+        if (
+            asset.project_id != project_id
+            or asset.media_type != "video"
+            or command.frame >= asset.metadata.get("durationFrames", 0)
+        ):
+            raise StudioConflictError("真实视频帧超出有效范围。")
+        frozen = {
+            "purpose": "shot_frame",
+            "targetShotId": command.shot_id,
+            "shotPlanVersionId": str(command.shot_plan_version_id),
+            "shotDesignHash": context["designHash"],
+            "sourceVideoAssetId": str(asset.id),
+            "sourceVideoSha256": asset.sha256,
+            "sourceFrame": command.frame,
+        }
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=project_id,
+                kind="extract_continuity_frames",
+                status="queued",
+                inputHash=_hash_document(frozen),
+                idempotencyKey=command.idempotency_key,
+                provider="local_ffmpeg",
+                model="ffmpeg-shot-frame",
+                expectedCostMicros=0,
+                frozenInput=frozen,
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    def assemble_shot_draft(
+        self, project_id: uuid.UUID, command: ShotAssemblyCommand
+    ) -> VideoEditDraftDto:
+        plan = self._repository.active_shot_plan(project_id)
+        if (
+            plan is None
+            or plan.id != command.shot_plan_version_id
+            or [s.id for s in plan.shots] != [t.shot_id for t in command.takes]
+        ):
+            raise StudioConflictError("请按当前分镜顺序为每个镜头选择一份等长素材。")
+        segments, audio = [], []
+        for shot, take in zip(plan.shots, command.takes, strict=True):
+            context = self.shot_production_context(
+                project_id, ShotTarget(shotPlanVersionId=plan.id, shotId=shot.id)
+            )
+            asset = self.get_asset(take.asset_id)
+            if (
+                asset.project_id != project_id
+                or asset.role != "shot_video"
+                or asset.metadata.get("shotDesignHash") != context["designHash"]
+            ):
+                raise StudioConflictError("镜头素材不属于当前设计，请重新选择。")
+            frames = shot.duration_seconds * 24
+            if (
+                asset.metadata.get("frameRateNumerator"),
+                asset.metadata.get("frameRateDenominator"),
+            ) != (24, 1) or take.source_in_frame + frames > asset.metadata.get("durationFrames", 0):
+                raise StudioConflictError("素材不足或实际帧率不是24fps，不能自动变速或补帧。")
+            interval = {
+                "assetId": str(asset.id),
+                "sha256": asset.sha256,
+                "sourceInFrame": take.source_in_frame,
+                "durationFrames": frames,
+            }
+            segments.append({**interval, "id": str(uuid.uuid4()), "origin": "base_video"})
+            audio.append({**interval, "requireAudio": bool(asset.metadata.get("hasAudio"))})
+        root = self.get_asset(command.takes[0].asset_id)
+        timeline = EditDecisionListV3.model_validate(
+            {
+                "frameRate": {"numerator": 24, "denominator": 1},
+                "rootVideoAssetId": str(root.id),
+                "rootVideoSha256": root.sha256,
+                "videoSegments": segments,
+                "audio": {"policy": "segmented", "segments": audio},
+                "output": {"aspectRatio": "9:16", "width": 720, "height": 1280, "format": "mp4"},
+            }
+        )
+        fingerprint = _hash_document(
+            command.model_dump(mode="json", by_alias=True, exclude={"idempotency_key"})
+        )
+        now = datetime.now(UTC)
+        draft_id, edit_id = uuid.uuid4(), uuid.uuid4()
+        edit = EditVersionDto(
+            id=edit_id,
+            projectId=project_id,
+            revision=1,
+            sourceSelectionHash=fingerprint,
+            edl=timeline,
+            status="draft",
+            formatVersion=3,
+            active=False,
+            timelineHash=_hash_document(timeline.model_dump(mode="json", by_alias=True)),
+            editDraftId=draft_id,
+            createdAt=now,
+        )
+        draft = VideoEditDraftDto(
+            id=draft_id,
+            projectId=project_id,
+            sourceVideoAssetId=root.id,
+            headEditVersionId=edit_id,
+            references=context["references"],
+            referencesConfirmed=True,
+            inputHash=fingerprint,
+            idempotencyKey=command.idempotency_key,
+            createdAt=now,
+        )
+        return self._repository.create_video_edit_draft(draft, edit)
 
     def list_shot_plans(self, project_id: uuid.UUID) -> list[ShotPlanVersionDto]:
         self._require_project(project_id)
@@ -2807,6 +3171,19 @@ class StudioService:
             "style_board",
         }
         latest_video_job = self._repository.latest_job(project_id, kind="generate_video")
+        if (
+            latest_video_job is not None
+            and latest_video_job.frozen_input.get("purpose") == "shot_video"
+        ):
+            latest_video_job = next(
+                (
+                    job
+                    for job in self._repository.list_project_jobs(project_id)
+                    if job.kind == "generate_video"
+                    and job.frozen_input.get("purpose") != "shot_video"
+                ),
+                None,
+            )
         latest_director_job = self._repository.latest_job(project_id, kind="plan_shots")
         latest_repair_job = self._repository.latest_job(project_id, kind="regenerate_video_segment")
         latest_asset_job = max(
@@ -3025,6 +3402,30 @@ class StudioService:
                     "previous_episode_keyframe_1",
                     "previous_episode_keyframe_2",
                 )
+        for shot in shot_plan.shots:
+            if shot.scene_asset_id and shot.scene_asset_id != selections["environment"].id:
+                scene = self.get_asset(shot.scene_asset_id)
+                if scene.project_id != project_id or scene.media_type != "image":
+                    raise StudioConflictError("镜头场景参考不属于当前项目。")
+                role = f"shot_scene_{shot.order}"
+                provider_references.append(
+                    ProviderReference(assetId=scene.id, role=role, sha256=scene.sha256)
+                )
+                role_order = (*role_order, role)
+            if shot.confirmed_frame:
+                context = self.shot_production_context(
+                    project_id, ShotTarget(shotPlanVersionId=shot_plan.id, shotId=shot.id)
+                )
+                if not context["frameCurrent"]:
+                    raise StudioConflictError(
+                        f"镜头{shot.order}起始画面已过期，请重新确认或在分镜中移除。"
+                    )
+                frame = self.get_asset(shot.confirmed_frame.asset_id)
+                role = f"shot_frame_{shot.order}"
+                provider_references.append(
+                    ProviderReference(assetId=frame.id, role=role, sha256=frame.sha256)
+                )
+                role_order = (*role_order, role)
         reference_limit = (
             self._provider_runtime.maximum_video_references
             if maximum_references is None
@@ -3104,6 +3505,7 @@ class StudioService:
             "model": self._provider_runtime.video_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
             "durationSeconds": project.target_duration_seconds,
+            "generateAudio": True,
             "resolution": "480p",
             "aspectRatio": "9:16",
             "seriesEpisodeId": (str(series_episode.id) if series_episode is not None else None),
@@ -3129,6 +3531,7 @@ class StudioService:
             shotPlanVersionId=shot_plan.id,
             selectionHash=selection_hash,
             durationSeconds=project.target_duration_seconds,
+            generateAudio=True,
             seriesEpisodeId=series_episode.id if series_episode is not None else None,
             continuitySnapshotId=(
                 confirmed_continuity.id if confirmed_continuity is not None else None
@@ -3159,7 +3562,7 @@ class StudioService:
             "episode_child": ("episode_child", "style_board"),
             "episode_cat": ("episode_cat", "style_board"),
             "pair_scale": ("episode_child", "episode_cat", "pair_scale", "style_board"),
-            "environment": ("style_board", "episode_child", "episode_cat"),
+            "environment": ("style_board",),
             "style_board": ("style_board",),
         }
         references = [
@@ -3174,19 +3577,15 @@ class StudioService:
         if command.kind == "environment":
             if story is None:
                 raise StudioValidationError("active story is required for environment generation")
-            missing = [
-                role
-                for role in ("style_board", "episode_child", "episode_cat")
-                if role not in selections
-            ]
+            missing = [role for role in ("style_board",) if role not in selections]
             if missing:
                 raise StudioValidationError(
                     "fixed character and style references are incomplete: " + ", ".join(missing)
                 )
             compiled = compile_references(
                 references,
-                maximum_references=3,
-                role_order=("style_board", "episode_child", "episode_cat"),
+                maximum_references=1,
+                role_order=("style_board",),
             )
             prompt = _environment_asset_prompt(project, story)
             negative_prompt = _environment_negative_prompt()
@@ -3213,7 +3612,7 @@ class StudioService:
                     "sourceStoryVersionId": str(story.id),
                     "environmentIntent": story.environment_intent,
                     "subjectPolicy": "empty_scene",
-                    "promptCompilerRevision": "catflow-environment-v2",
+                    "promptCompilerRevision": "catflow-environment-v3",
                 }
             )
         input_hash = _hash_document(document)
@@ -3321,7 +3720,7 @@ class StudioService:
             "episode_child": ("episode_child", "style_board"),
             "episode_cat": ("episode_cat", "style_board"),
             "pair_scale": ("episode_child", "episode_cat", "pair_scale", "style_board"),
-            "environment": ("style_board", "episode_child", "episode_cat"),
+            "environment": ("style_board",),
             "style_board": ("style_board",),
         }
         labels = {
@@ -3457,6 +3856,7 @@ class StudioService:
                 ),
                 "capabilityRevision": preview.capability_revision,
                 "durationSeconds": preview.duration_seconds,
+                "generateAudio": preview.generate_audio,
                 "resolution": "480p",
                 "aspectRatio": "9:16",
                 "seriesEpisodeId": (
@@ -3638,7 +4038,7 @@ class StudioService:
             sourceSelectionHash=input_hash,
             edl=timeline,
             status="draft",
-            formatVersion=2,
+            formatVersion=3 if isinstance(timeline, EditDecisionListV3) else 2,
             active=False,
             timelineHash=_hash_document(timeline.model_dump(mode="json", by_alias=True)),
             editDraftId=draft_id,
@@ -3736,6 +4136,7 @@ class StudioService:
             or any(value != "pass" for value in review.checks.values())
         ):
             raise StudioConflictError("视频尚未通过完整验收；可以先进入编辑草稿修复。")
+        inherited_audio_source = None
         if asset.role == "edit_preview":
             draft_id = asset.metadata.get("editDraftId")
             if not draft_id or asset.metadata.get("repairId") or review.edit_version_id is None:
@@ -3743,49 +4144,103 @@ class StudioService:
             draft = self.get_video_edit_draft(project_id, uuid.UUID(str(draft_id)))
             if draft.head_edit_version_id != review.edit_version_id:
                 raise StudioConflictError("草稿已经变化，请验收最新的完整视频。")
+            inherited_audio_source = self.get_asset(draft.source_video_asset_id)
+        edit = self._repository.get_edit(review.edit_version_id) if review.edit_version_id else None
+        inherited_audio_request = (
+            edit is not None
+            and edit.format_version == 2
+            and inherited_audio_source is not None
+            and inherited_audio_source.metadata.get("requestedAudio")
+        )
+        if (
+            asset.metadata.get("requestedAudio")
+            or (edit is not None and edit.format_version == 3)
+            or inherited_audio_request
+        ):
+            if asset.metadata.get("audioRequestMissing") or (
+                inherited_audio_request
+                and inherited_audio_source.metadata.get("audioRequestMissing")
+            ):
+                raise StudioConflictError("请求声音但没有返回音轨；请先形成满足声音意图的草稿。")
+            expected = {"soundIntent": "pass", "sync": "pass", "continuity": "pass"}
+            if asset.metadata.get("hasAudio") is False:
+                expected.update(sync="not_applicable", continuity="not_applicable")
+            if review.audio_checks != expected:
+                raise StudioConflictError("请完成此准确音画版本的声音意图、同步与接缝判断。")
 
     def draft_preview_timeline(
         self,
         project_id: uuid.UUID,
         draft_id: uuid.UUID,
         command: VideoDraftPreviewCommand,
-    ) -> tuple[EditVersionDto, EditDecisionListV2]:
+    ) -> tuple[EditVersionDto, FrameEditTimeline]:
         draft = self.get_video_edit_draft(project_id, draft_id)
-        edit = self._repository.get_edit(draft.head_edit_version_id)
+        # Historical parents remain viewable. Only applying a trial requires the current head.
+        edit = self._repository.get_edit(command.expected_edit_version_id)
         if (
             edit is None
-            or edit.id != command.expected_edit_version_id
+            or edit.project_id != project_id
+            or edit.edit_draft_id != draft.id
             or edit.timeline_hash != command.expected_timeline_hash
-            or not isinstance(edit.edl, EditDecisionListV2)
+            or not isinstance(edit.edl, (EditDecisionListV2, EditDecisionListV3))
         ):
-            raise StudioConflictError("草稿版本已经变化，请刷新后再操作。")
+            raise StudioConflictError("试装父版本或时间线哈希不一致。")
         timeline = edit.edl
-        if command.repair_id is not None:
-            repair = self.get_video_repair(command.repair_id)
+        if command.repair_id is None:
+            if command.placement is not None:
+                raise StudioValidationError("试装取用方案必须关联候选。")
+            return edit, timeline
+        repair = self.get_video_repair(command.repair_id)
+        if (
+            repair.project_id != project_id
+            or repair.preview.edit_draft_id != draft.id
+            or repair.base_edit_version_id != edit.id
+            or repair.base_timeline_hash != edit.timeline_hash
+            or repair.candidate_asset_id is None
+        ):
+            raise StudioConflictError("修改候选与试装父版本不一致。")
+        candidate = self.get_asset(repair.candidate_asset_id)
+        take = (
+            command.placement.candidate_source_range
+            if command.placement
+            else repair.candidate_core_range
+        )
+        count = candidate.metadata.get("durationFrames")
+        if (
+            candidate.project_id != project_id
+            or candidate.media_type != "video"
+            or not isinstance(count, int)
+            or count < take.end_frame
+            or take.duration_frames != repair.issue_range.duration_frames
+        ):
+            raise StudioConflictError("候选素材不足或取用长度不等于替换长度，无法形成等长试装。")
+        if command.placement is not None:
             if (
-                repair.project_id != project_id
-                or repair.preview.edit_draft_id != draft.id
-                or repair.base_edit_version_id != edit.id
-                or repair.base_timeline_hash != edit.timeline_hash
-                or repair.status != "candidate_ready"
-                or repair.candidate_asset_id is None
+                candidate.metadata.get("frameRateNumerator", 24),
+                candidate.metadata.get("frameRateDenominator", 1),
+            ) != (24, 1):
+                raise StudioConflictError(
+                    "候选实际帧率不是 24 fps，当前等长试装不自动变速或复制帧。"
+                )
+            if command.placement.audio_policy == "use_candidate" and not candidate.metadata.get(
+                "hasAudio"
             ):
-                raise StudioConflictError("修改候选与当前草稿不一致。")
-            candidate = self.get_asset(repair.candidate_asset_id)
-            count = candidate.metadata.get("durationFrames")
-            if (
-                candidate.project_id != project_id
-                or candidate.media_type != "video"
-                or not isinstance(count, int)
-                or count < repair.candidate_core_range.end_frame
-            ):
-                raise StudioConflictError("修改候选没有完整的替换帧。")
+                raise StudioConflictError("候选未返回音轨，请选择保留父草稿声音。")
+            timeline = build_candidate_trial(
+                timeline,
+                issue_range=repair.issue_range,
+                candidate_asset_id=candidate.id,
+                candidate_sha256=candidate.sha256,
+                repair_id=repair.id,
+                placement=command.placement,
+            )
+        else:
             timeline = splice_repair_candidate(
                 timeline,
                 issue_range=repair.issue_range,
                 candidate_asset_id=candidate.id,
                 candidate_sha256=candidate.sha256,
-                candidate_source_range=repair.candidate_core_range,
+                candidate_source_range=take,
                 repair_id=repair.id,
                 transition=EditTransitionV2(afterSegmentIndex=0, type="cut", durationFrames=0),
             )
@@ -3804,6 +4259,11 @@ class StudioService:
             "timelineHash": _hash_document(timeline.model_dump(mode="json", by_alias=True)),
             "repairId": str(command.repair_id) if command.repair_id else None,
             "edl": timeline.model_dump(mode="json", by_alias=True),
+            "parentTimelineHash": edit.timeline_hash,
+            "baseEdl": edit.edl.model_dump(mode="json", by_alias=True),
+            "placement": command.placement.model_dump(mode="json", by_alias=True)
+            if command.placement
+            else None,
         }
         now = datetime.now(UTC)
         return self._create_job(
@@ -3815,7 +4275,7 @@ class StudioService:
                 inputHash=_hash_document(frozen),
                 idempotencyKey=command.idempotency_key,
                 provider="local_ffmpeg",
-                model="ffmpeg-edl-v2-preview",
+                model=f"ffmpeg-{timeline.format}-preview",
                 expectedCostMicros=0,
                 frozenInput=frozen,
                 resultAssetIds=[],
@@ -3877,17 +4337,69 @@ class StudioService:
             if existing.save_request_hash != request_hash:
                 raise StudioIdempotencyInputConflictError("草稿保存输入已经变化。")
             return existing
-        parent, expected_timeline = self.draft_preview_timeline(project_id, draft_id, command)
-        # Candidate placement is derived from the frozen ranges, never from mutable UI state.
-        if command.repair_id is not None and command.edl != expected_timeline:
-            raise StudioConflictError("候选叠放范围与已冻结的修改范围不一致。")
-        if (
-            command.edl.root_video_asset_id != expected_timeline.root_video_asset_id
-            or command.edl.total_frames != expected_timeline.total_frames
-            or command.edl.audio != expected_timeline.audio
-        ):
-            raise StudioConflictError("草稿的原片、长度和音轨不能被静默替换。")
-        for segment in command.edl.video_segments:
+        draft = self.get_video_edit_draft(project_id, draft_id)
+        if draft.head_edit_version_id != command.expected_edit_version_id:
+            raise StudioConflictError(
+                "草稿已变化；旧父版本的试装可继续查看，但不能应用到当前草稿。"
+            )
+        if command.preview_job_id is not None:
+            job = self._repository.get_job(command.preview_job_id)
+            frozen = job.frozen_input if job else None
+            if (
+                job is None
+                or job.project_id != project_id
+                or job.kind != "render_edit_preview"
+                or job.provider != "local_ffmpeg"
+                or job.status != "succeeded"
+                or not frozen
+                or frozen.get("editDraftId") != str(draft_id)
+                or frozen.get("editVersionId") != str(command.expected_edit_version_id)
+                or frozen.get("parentTimelineHash") != command.expected_timeline_hash
+                or frozen.get("repairId") != (str(command.repair_id) if command.repair_id else None)
+                or not frozen.get("placement")
+            ):
+                raise StudioConflictError("应用必须引用此父版本已完成的真实试装。")
+            trial_command = VideoDraftPreviewCommand(
+                expectedEditVersionId=command.expected_edit_version_id,
+                expectedTimelineHash=command.expected_timeline_hash,
+                repairId=command.repair_id,
+                placement=frozen["placement"],
+                idempotencyKey=command.idempotency_key,
+            )
+            parent, timeline = self.draft_preview_timeline(project_id, draft_id, trial_command)
+            document = timeline.model_dump(mode="json", by_alias=True)
+            if document != frozen.get("edl") or _hash_document(document) != frozen.get(
+                "timelineHash"
+            ):
+                raise StudioConflictError("试装时间线与冻结输入不一致。")
+            previews = [self.get_asset(asset_id) for asset_id in job.result_asset_ids]
+            if not any(
+                asset.role == "edit_preview"
+                and asset.producing_job_id == job.id
+                and asset.metadata.get("timelineHash") == frozen["timelineHash"]
+                for asset in previews
+            ):
+                raise StudioConflictError("试装尚未产生对应的完整视频。")
+            if command.edl is not None and command.edl != timeline:
+                raise StudioConflictError("提交时间线与已试听的试装不一致。")
+        else:
+            parent, expected_timeline = self.draft_preview_timeline(project_id, draft_id, command)
+            timeline = command.edl
+            if (
+                timeline is None
+                or isinstance(timeline, EditDecisionListV3)
+                or command.placement is not None
+            ):
+                raise StudioConflictError("新的音画试装必须通过已完成的试装记录应用。")
+            if command.repair_id is not None and timeline != expected_timeline:
+                raise StudioConflictError("候选叠放范围与已冻结的修改范围不一致。")
+            if (
+                timeline.root_video_asset_id != expected_timeline.root_video_asset_id
+                or timeline.total_frames != expected_timeline.total_frames
+                or timeline.audio != expected_timeline.audio
+            ):
+                raise StudioConflictError("草稿的原片、长度和音轨不能被静默替换。")
+        for segment in timeline.video_segments:
             asset = self.get_asset(segment.asset_id)
             frames = asset.metadata.get("durationFrames")
             if (
@@ -3915,12 +4427,12 @@ class StudioService:
             editDraftId=draft_id,
             revision=1,
             sourceSelectionHash=parent.source_selection_hash,
-            edl=command.edl,
+            edl=timeline,
             status="draft",
             parentEditVersionId=parent.id,
-            formatVersion=2,
+            formatVersion=3 if isinstance(timeline, EditDecisionListV3) else 2,
             active=False,
-            timelineHash=_hash_document(command.edl.model_dump(mode="json", by_alias=True)),
+            timelineHash=_hash_document(timeline.model_dump(mode="json", by_alias=True)),
             saveRequestHash=request_hash,
             createdAt=datetime.now(UTC),
         )
@@ -3932,8 +4444,13 @@ class StudioService:
         self, project_id: uuid.UUID, command: SegmentRepairPreviewCommand
     ) -> SegmentRepairPreviewDto:
         self._require_project(project_id)
-        if reason := self._provider_runtime.segment_repair_block_reason:
-            raise StudioConflictError(reason)
+        if command.generation_mode == "edit_existing":
+            if reason := self._provider_runtime.segment_repair_block_reason:
+                raise StudioConflictError(reason)
+        elif self._provider_runtime.maximum_segment_image_references < (
+            2 if command.anchor_end_frame is not None else 1
+        ):
+            raise StudioConflictError("当前接口无法接受所选起止帧。")
         base_video, active_edit, timeline, timeline_hash = self._repair_base_timeline(
             project_id,
             base_video_asset_id=command.base_video_asset_id,
@@ -3945,17 +4462,41 @@ class StudioService:
             raise StudioConflictError("video repairs require a 24 fps editing timeline")
         try:
             validate_issue_range(command.issue_range, total_frames=timeline.total_frames)
-            window = expand_generation_window(
-                command.issue_range,
-                total_frames=timeline.total_frames,
-                frame_rate=frame_rate,
-            )
+            if command.generation_mode == "from_frame":
+                window = SegmentGenerationWindow(
+                    issueRange=command.issue_range,
+                    generationRange=command.issue_range,
+                    candidateCoreRange=FrameRange(
+                        startFrame=0, endFrame=command.issue_range.duration_frames
+                    ),
+                    providerDurationSeconds=max(
+                        4, math.ceil(command.issue_range.duration_frames / 24)
+                    ),
+                )
+            else:
+                window = expand_generation_window(
+                    command.issue_range,
+                    total_frames=timeline.total_frames,
+                    frame_rate=frame_rate,
+                )
         except ValueError as exc:
             raise StudioValidationError(str(exc)) from exc
 
+        if command.generation_mode == "from_frame":
+            if command.anchor_start_frame is None:
+                raise StudioValidationError("从正确起点重新生成必须明确选择起始帧。")
+            if command.audio_mode is None:
+                raise StudioValidationError("请明确选择本次声音生成方式。")
+            if command.anchor_start_frame >= timeline.total_frames or (
+                command.anchor_end_frame is not None
+                and command.anchor_end_frame >= timeline.total_frames
+            ):
+                raise StudioValidationError("选定参考帧超出父草稿范围。")
+            if command.end_state_policy == "replace" and command.anchor_end_frame is not None:
+                raise StudioValidationError("原结尾需要替换时不能将其作为目标尾帧。")
         selections = self._repository.current_selections(project_id)
         canon_roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
-        if command.edit_draft_id:
+        if command.edit_draft_id and command.generation_mode == "edit_existing":
             draft = self.get_video_edit_draft(project_id, command.edit_draft_id)
             if not draft.references_confirmed:
                 raise StudioConflictError("旧视频缺少完整冻结参考，请明确确认编辑参考后继续。")
@@ -3966,7 +4507,7 @@ class StudioService:
                     raise StudioConflictError("editing reference content changed")
                 selections[ref["role"]] = asset
         missing = [role for role in canon_roles if role not in selections]
-        if missing:
+        if missing and command.generation_mode == "edit_existing":
             raise StudioConflictError(f"missing segment repair references: {', '.join(missing)}")
         anchor_in_sha = _hash_document(
             {"sourceSha256": base_video.sha256, "frame": command.issue_range.start_frame}
@@ -3992,6 +4533,7 @@ class StudioService:
                     role=role, assetId=selections[role].id, sha256=selections[role].sha256
                 )
                 for role in canon_roles
+                if command.generation_mode == "edit_existing"
             ],
         ]
         if command.end_state_policy == "replace":
@@ -4002,6 +4544,29 @@ class StudioService:
             sha256=base_video.sha256,
             range=window.generation_range,
         )
+        if command.generation_mode == "from_frame":
+            video_reference = None
+            image_references = [
+                SegmentRepairImageReferenceDto(
+                    role="first_frame",
+                    sha256=_hash_document(
+                        {"timelineHash": timeline_hash, "frame": command.anchor_start_frame}
+                    ),
+                    frameNumber=command.anchor_start_frame,
+                    derived=True,
+                )
+            ]
+            if command.anchor_end_frame is not None:
+                image_references.append(
+                    SegmentRepairImageReferenceDto(
+                        role="last_frame",
+                        sha256=_hash_document(
+                            {"timelineHash": timeline_hash, "frame": command.anchor_end_frame}
+                        ),
+                        frameNumber=command.anchor_end_frame,
+                        derived=True,
+                    )
+                )
         negative_prompt = (
             "真实摄影，3D塑料质感，身份漂移，儿童年龄或发型变化，猫咪毛色或虎斑变化，"
             "额外肢体，融脸，断尾，错误四足，动作双影，背景或光线跳变，文字，Logo，水印，"
@@ -4015,12 +4580,53 @@ class StudioService:
             end_state_policy=command.end_state_policy,
             desired_end_state=command.desired_end_state,
         )
+        compiler_revision = (
+            "segment-edit-v4"
+            if command.audio_mode is not None or command.generation_mode == "from_frame"
+            else "segment-edit-v3"
+        )
+        if command.generation_mode == "from_frame":
+            prompt = (
+                f"以提供的正确起始画面开始，重新生成动作：{command.instruction}。"
+                f"生成完整的{window.provider_duration_seconds}秒连续视频。"
+                "保持起始画面的角色、构图和画风，动作必须可见且完整发生。"
+                + (
+                    "以提供的确认正确的结束画面结束。"
+                    if command.anchor_end_frame is not None
+                    else "不要求返回原结尾。"
+                )
+                + (
+                    f"目标结束状态：{command.desired_end_state}。"
+                    if command.desired_end_state
+                    else ""
+                )
+            )
+        if command.audio_mode == "generate_candidate":
+            prompt += (
+                "\n生成与修改后的动作同步的环境、物件和动作声音。"
+                "不复用原视频中可能错误的混合声音。声音设计："
+                + (
+                    command.sound_description.strip()
+                    or "自然环境声及与可见动作同步的物件声、动作声。"
+                )
+            )
+        elif command.audio_mode == "preserve_current":
+            prompt += "\n本次仅生成画面，试装时沿用父草稿完整声音。"
+        mode_input = {
+            "generationMode": command.generation_mode,
+            "audioMode": command.audio_mode,
+            "generateAudio": command.audio_mode == "generate_candidate",
+            "soundDescription": command.sound_description,
+            "anchorStartFrame": command.anchor_start_frame,
+            "anchorEndFrame": command.anchor_end_frame,
+        }
         document = {
+            **mode_input,
             "editDraftId": str(command.edit_draft_id) if command.edit_draft_id else None,
             "baseEdl": timeline.model_dump(mode="json", by_alias=True),
             "endStatePolicy": command.end_state_policy,
             "desiredEndState": command.desired_end_state,
-            "promptCompilerRevision": "segment-edit-v3",
+            "promptCompilerRevision": compiler_revision,
             "projectId": str(project_id),
             "baseVideoAssetId": str(base_video.id),
             "baseVideoSha256": base_video.sha256,
@@ -4039,12 +4645,15 @@ class StudioService:
             "imageReferences": [
                 item.model_dump(mode="json", by_alias=True) for item in image_references
             ],
-            "videoReference": video_reference.model_dump(mode="json", by_alias=True),
+            "videoReference": video_reference.model_dump(mode="json", by_alias=True)
+            if video_reference
+            else None,
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.video_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
         }
         preview = SegmentRepairPreviewDto(
+            **{key: value for key, value in mode_input.items() if key != "generateAudio"},
             editDraftId=command.edit_draft_id,
             baseEdl=timeline,
             endStatePolicy=command.end_state_policy,
@@ -4087,6 +4696,11 @@ class StudioService:
         preview = self.preview_video_repair(
             project_id,
             SegmentRepairPreviewCommand(
+                generationMode=command.generation_mode,
+                audioMode=command.audio_mode,
+                soundDescription=command.sound_description,
+                anchorStartFrame=command.anchor_start_frame,
+                anchorEndFrame=command.anchor_end_frame,
                 baseVideoAssetId=command.base_video_asset_id,
                 baseEditVersionId=command.base_edit_version_id,
                 issueRange=command.issue_range,
@@ -4143,7 +4757,13 @@ class StudioService:
                     "baseEdl": preview.base_edl.model_dump(mode="json", by_alias=True),
                     "endStatePolicy": preview.end_state_policy,
                     "desiredEndState": preview.desired_end_state,
-                    "promptCompilerRevision": "segment-edit-v3",
+                    "promptCompilerRevision": input_snapshot["promptCompilerRevision"],
+                    "generationMode": preview.generation_mode,
+                    "audioMode": preview.audio_mode,
+                    "generateAudio": preview.audio_mode == "generate_candidate",
+                    "soundDescription": preview.sound_description,
+                    "anchorStartFrame": preview.anchor_start_frame,
+                    "anchorEndFrame": preview.anchor_end_frame,
                     "inputSnapshot": input_snapshot,
                     "baseVideoAssetId": str(preview.base_video_asset_id),
                     "baseEditVersionId": (
@@ -4166,9 +4786,9 @@ class StudioService:
                     "imageReferences": [
                         item.model_dump(mode="json", by_alias=True) for item in image_references
                     ],
-                    "videoReference": preview.video_reference.model_dump(
-                        mode="json", by_alias=True
-                    ),
+                    "videoReference": preview.video_reference.model_dump(mode="json", by_alias=True)
+                    if preview.video_reference
+                    else None,
                     "referenceAssetIds": [
                         str(item.asset_id) for item in image_references if item.asset_id is not None
                     ],
@@ -4324,7 +4944,7 @@ class StudioService:
         usages = [
             _job_usage(job)
             for job in self._repository.list_project_jobs(project_id)
-            if job.provider is not None and job.model is not None
+            if job.provider is not None and job.provider != "local_ffmpeg" and job.model is not None
         ]
         totals: dict[str, int] = {}
         for item in usages:
@@ -4374,7 +4994,7 @@ class StudioService:
         base_video_asset_id: uuid.UUID,
         expected_edit_version_id: uuid.UUID | None,
         edit_draft_id: uuid.UUID | None = None,
-    ) -> tuple[AssetDto, EditVersionDto | None, EditDecisionListV2, str]:
+    ) -> tuple[AssetDto, EditVersionDto | None, FrameEditTimeline, str]:
         if edit_draft_id is not None:
             draft = self.get_video_edit_draft(project_id, edit_draft_id)
             if (
@@ -4383,7 +5003,7 @@ class StudioService:
             ):
                 raise StudioConflictError("editing draft has changed")
             edit = self._repository.get_edit(draft.head_edit_version_id)
-            if edit is None or not isinstance(edit.edl, EditDecisionListV2):
+            if edit is None or not isinstance(edit.edl, (EditDecisionListV2, EditDecisionListV3)):
                 raise StudioConflictError("editing draft has no readable timeline")
             source = self.get_asset(base_video_asset_id)
             return source, edit, edit.edl, edit.timeline_hash
@@ -4399,8 +5019,8 @@ class StudioService:
             active_edit is None or active_edit.id != expected_edit_version_id
         ):
             raise StudioConflictError("base timeline changed")
-        if active_edit is not None and active_edit.format_version == 2:
-            if not isinstance(active_edit.edl, EditDecisionListV2):
+        if active_edit is not None and active_edit.format_version in {2, 3}:
+            if not isinstance(active_edit.edl, (EditDecisionListV2, EditDecisionListV3)):
                 raise StudioConflictError("active edit has an invalid v2 timeline")
             timeline = active_edit.edl
         elif active_edit is not None:
@@ -4692,6 +5312,11 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
         "只允许1至4个镜头，单镜头至少2秒，总帧数必须精确等于目标秒数乘24。"
         "shots数组只能包含最终采用且内容完整的镜头；不得输出空占位镜头、备用镜头或修订镜头，"
         "不得在数组末尾追加用于解释、自我纠正或替换前文的条目。"
+        f"场景意图：{story.environment_intent}。故事原文：{story.body}。"
+        "实际图片按顺序为：图一儿童身份，图二猫咪身份，图三人猫比例，图四环境外观与空间关系，图五画风。"
+        "请实际观察这些图片；场景保持外观、材质、光线与空间关系，允许每个镜头重新构图。"
+        "场景图不是每个镜头的严格首帧。不要因环境图陈设而改写原故事因果链或道具约束。"
+        "若角色落脚点、手臂动作空间、道具可见性与图像冲突，在feasibilityWarnings及generationRisks返回具体冲突与调整建议，不自动付费诊断。"
         f"唯一因果链：触发“{event.trigger}”；孩子动作“{event.child_action}”；"
         f"猫咪回应“{event.cat_response}”；可见变化“{event.visible_change}”；"
         f"主动结尾“{event.warm_ending}”。"
@@ -4869,6 +5494,7 @@ def _whole_generation_input_snapshot(
         videoReferences=[item for item in preview.video_references if item.included],
         video={
             "durationSeconds": preview.duration_seconds,
+            "generateAudio": preview.generate_audio,
             "resolution": "480p",
             "aspectRatio": "9:16",
             "frameRate": 24,
@@ -4913,6 +5539,7 @@ def _segment_generation_input_snapshot(
         references=references,
         video={
             "durationSeconds": preview.provider_duration_seconds,
+            "generateAudio": preview.audio_mode == "generate_candidate",
             "resolution": "480p",
             "aspectRatio": "9:16",
             "frameRate": 24,
@@ -4924,6 +5551,11 @@ def _segment_generation_input_snapshot(
             "editDraftId": preview.edit_draft_id,
         },
         segmentEdit={
+            "generationMode": preview.generation_mode,
+            "audioMode": preview.audio_mode,
+            "soundDescription": preview.sound_description,
+            "anchorStartFrame": preview.anchor_start_frame,
+            "anchorEndFrame": preview.anchor_end_frame,
             "baseEdl": preview.base_edl,
             "endStatePolicy": preview.end_state_policy,
             "desiredEndState": preview.desired_end_state,
@@ -4932,7 +5564,9 @@ def _segment_generation_input_snapshot(
             "generationRange": preview.generation_range,
             "candidateCoreRange": preview.candidate_core_range,
         },
-        promptCompilerRevision="segment-edit-v3"
+        promptCompilerRevision="segment-edit-v4"
+        if preview.audio_mode is not None or preview.generation_mode == "from_frame"
+        else "segment-edit-v3"
         if preview.base_edl is not None
         else "segment-edit-v2",
         createdAt=created_at,
@@ -4973,8 +5607,7 @@ def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto) -> st
         "为后续一位约1.2米高的6至7岁儿童和一只灰白虎斑猫预留清楚的前景、中景、"
         "落脚位置与动作空间，但不要把角色画入环境板。"
         "图一是固定画风板，只负责色彩、柔和漫射光、哑光材质、轻微纸感颗粒和暖灰细轮廓线；"
-        "图二是固定儿童设计，只用于匹配整套插画的轮廓精细度、柔和程度和渲染语言，不得复制儿童主体；"
-        "图三是固定猫咪设计，只用于匹配毛发、轮廓和整体插画语言，不得复制猫咪主体。"
+        "这是场景外观与空间关系参考，后续镜头允许重新构图；不得把正在发生的动作或已完成动作冻结为场景陈设。"
         "自然暖色但不过度橙黄，空间与道具比例可信，保持原创二维柔和数字插画。"
     )
 
@@ -5024,6 +5657,6 @@ def _image_generation_input_snapshot(
             for reference in preview.references
         ],
         inputHash=preview.input_hash,
-        promptCompilerRevision="catflow-environment-v2",
+        promptCompilerRevision="catflow-environment-v3",
         createdAt=created_at,
     )

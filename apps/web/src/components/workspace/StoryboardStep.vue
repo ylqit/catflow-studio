@@ -2,7 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import { api } from "../../api/client";
-import type { JobDto, ShotPlanGenerationAttemptDto, ShotPlanVersionDto, ShotSpecDto, WorkspaceDto } from "../../api/types";
+import ShotProduction from "./ShotProduction.vue";
+import type { AssetDto, JobDto, ShotPlanGenerationAttemptDto, ShotPlanVersionDto, ShotSpecDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 
@@ -19,6 +20,7 @@ const error = ref("");
 const errorDetail = ref("");
 const versionsError = ref("");
 const plans = ref<ShotPlanVersionDto[]>([]);
+const sceneAssets = ref<AssetDto[]>([]);
 const attempts = ref<ShotPlanGenerationAttemptDto[]>([]);
 const failedAttemptCount = computed(() => attempts.value.filter((attempt) => (
   attempt.status === "failed" && attempt.result?.disposition !== "candidate_ready"
@@ -368,6 +370,7 @@ function hydratePlan(plan: ShotPlanVersionDto | null) {
 }
 
 async function loadVersionData(preferCandidate = false) {
+  try { sceneAssets.value = (await api.assets(props.projectId)).filter(a => a.role === "environment"); } catch { versionsError.value = "环境参考暂时无法读取"; }
   try {
     const [nextPlans, nextAttempts] = await Promise.all([
       api.shotPlans(props.projectId),
@@ -566,22 +569,23 @@ async function save() {
   saving.value = true;
   error.value = "";
   try {
+    let savedPlan: ShotPlanVersionDto;
     if (plan.reviewStatus === "candidate" && !shotsDirty.value) {
-      await api.activateShotPlan(
+      savedPlan = await api.activateShotPlan(
         props.projectId,
         plan.id,
         activePlan.value?.id ?? null,
         pendingIdempotencyKey(`shot-plan-activate:${props.projectId}`, `${plan.id}:${activePlan.value?.id ?? "none"}`),
       );
     } else if (!plan.active && plan.reviewStatus === "accepted" && !shotsDirty.value) {
-      await api.activateShotPlan(
+      savedPlan = await api.activateShotPlan(
         props.projectId,
         plan.id,
         activePlan.value?.id ?? null,
         pendingIdempotencyKey(`shot-plan-restore:${props.projectId}`, `${plan.id}:${activePlan.value?.id ?? "none"}`),
       );
     } else {
-      await api.createShotPlan(props.projectId, {
+      savedPlan = await api.createShotPlan(props.projectId, {
         sourceStoryVersionId: story.id,
         sourceSelectionHash: props.workspace.selectionHash,
         baseShotPlanVersionId: plan.id,
@@ -594,6 +598,7 @@ async function save() {
         directorInputHash: plan.directorInputHash,
       });
     }
+    selectedPlanId.value = savedPlan.id;
     emit("changed");
     await loadVersionData();
   } catch (reason) {
@@ -652,6 +657,8 @@ async function closeComparison() {
         <li><b>可见变化</b>{{ workspace.activeStory.microEvent.visibleChange }}</li>
         <li><b>温暖结尾</b>{{ workspace.activeStory.microEvent.warmEnding }}</li>
       </ol>
+      <details class="director-references"><summary>本次分镜将实际读取的参考（5 张）</summary><p>儿童身份、猫咪身份、同框比例、环境外观与空间关系、画风。环境允许镜头重新构图；空间冲突会在同一次结果中提示，故事因果链仍需保留。</p><div><figure v-for="role in (['episode_child', 'episode_cat', 'pair_scale', 'environment', 'style_board'] as const)" :key="role"><img v-if="workspace.selections[role]" :src="`/api/v1/assets/${workspace.selections[role]!.id}/content`" :alt="role" /><figcaption>{{ role }}</figcaption></figure></div></details>
+      <p v-if="selectedPlan?.directorPromptRevision">此版本来源规划方式：{{ selectedPlan.directorPromptRevision === 'catflow-director-v4-vision' ? '视觉规划；后续手工修改未再次调用模型' : '历史文本规划；当时未发送参考图片' }}</p>
       <details v-if="selectedPlan?.directorTreatment" class="treatment"><summary>故事导演解析</summary><pre>{{ JSON.stringify(selectedPlan.directorTreatment, null, 2) }}</pre></details>
       <p v-if="selectedPlan?.outdated" class="notice error">故事、角色或环境已经更新，这版分镜仅作历史参考。</p>
     </aside>
@@ -723,6 +730,8 @@ async function closeComparison() {
 
       <div class="shot-list">
         <article v-for="shot in shots" :key="shot.id" class="shot-card">
+          <div class="shot-scene-controls"><label>镜头场景<select v-model="shot.sceneAssetId" :disabled="!canEditSelected"><option :value="null">当前项目环境</option><option v-for="asset in sceneAssets" :key="asset.id" :value="asset.id">环境 · {{ asset.id.slice(0, 8) }}</option></select></label><label>环境使用<select v-model="shot.environmentUse" :disabled="!canEditSelected"><option value="recompose">保持场景外观，允许重新构图</option><option value="preserve_layout">沿用此图布局</option></select></label><button v-if="shot.confirmedFrame" class="quiet" :disabled="!canEditSelected" @click="shot.confirmedFrame = null">移除当前镜头画面绑定（保存后生效）</button></div>
+          <ShotProduction v-if="selectedPlan" :project-id="projectId" :plan-id="selectedPlan.id" :shot-id="shot.id" :disabled="shotsDirty || !selectedPlan.active" :runtime="runtime" @changed="selectedPlanId = null; emit('changed'); loadVersionData()" />
           <div class="shot-summary">
             <div class="shot-number">{{ String(shot.order).padStart(2, "0") }}<label><input v-model.number="shot.durationSeconds" type="number" min="2" max="15" :disabled="!canEditSelected" /> 秒</label></div>
             <div class="shot-fields">
@@ -796,3 +805,5 @@ async function closeComparison() {
 .attempt-validation { margin-top: 4px; }.attempt-validation > summary { cursor: pointer; }.attempt-validation ul { display: grid; gap: 5px; margin: 6px 0 0; padding: 0; list-style: none; }.attempt-validation li { padding: 6px 8px; background: #fffaf4; }.attempt-validation code { color: #6b5043; }
 @media (max-width: 1050px) { .storyboard-layout { grid-template-columns: 1fr; }.story-source { position: static; }.professional-grid, .compare-columns, .detail-subgrid, .detail-subgrid.detail-three { grid-template-columns: 1fr; }.professional-grid .span-two { grid-column: auto; }.editor-head { align-items: flex-start; }.progress-steps { grid-template-columns: 1fr; } }
 </style>
+
+<style scoped>.shot-scene-controls { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }.shot-scene-controls label { display: grid; gap: 4px; }.director-references { padding: 10px 0; font-size: 12px; }.director-references div { display: flex; gap: 8px; flex-wrap: wrap; }.director-references figure { margin: 0; }.director-references img { width: 64px; height: 80px; object-fit: contain; }.director-references figcaption { font-size: 10px; }</style>

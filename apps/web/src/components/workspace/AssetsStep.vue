@@ -37,10 +37,10 @@ const slots: Array<{ id: AssetGenerationKind; order: string; title: string; resp
   { id: "episode_child", order: "01", title: "本集儿童设计", responsibility: "锁定 6–7 岁、约 1.2 米、约 4.5–5 头身、齐下颌短发与脸型" },
   { id: "episode_cat", order: "02", title: "本集猫咪设计", responsibility: "锁定灰白分区、虎斑、眼鼻口、环纹尾巴与四足" },
   { id: "pair_scale", order: "03", title: "人猫同框比例", responsibility: "只负责可信的人猫尺寸与站位关系" },
-  { id: "environment", order: "04", title: "当前环境参考", responsibility: "空场景只控制空间、道具、天气、构图与光线" },
+  { id: "environment", order: "04", title: "当前环境参考", responsibility: "保持场景外观与空间关系，允许镜头重新构图；并非严格首帧" },
   { id: "style_board", order: "05", title: "固定画风板", responsibility: "只控制线条、材质、色彩与柔和暖光" },
 ];
-const environmentGenerationRoles = ["style_board", "episode_child", "episode_cat"] as const;
+const environmentGenerationRoles = ["style_board"] as const;
 const comparisonRoles: FixedCanonRole[] = ["episode_child", "episode_cat", "pair_scale", "style_board"];
 
 const grouped = computed(() => Object.fromEntries(slots.map((slot) => [slot.id, assets.value.filter((asset) => asset.role === slot.id)])) as Record<AssetSlot, AssetDto[]>);

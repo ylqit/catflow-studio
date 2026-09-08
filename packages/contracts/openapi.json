@@ -3138,6 +3138,310 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/shot-production/context": {
+      "post": {
+        "summary": "Shot Production Context",
+        "operationId": "shot_production_context_api_v1_projects__project_id__shot_production_context_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Shot Production Context Api V1 Projects  Project Id  Shot Production Context Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-production/preview": {
+      "post": {
+        "summary": "Preview Shot Media",
+        "operationId": "preview_shot_media_api_v1_projects__project_id__shot_production_preview_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotMediaPreviewCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Preview Shot Media Api V1 Projects  Project Id  Shot Production Preview Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-production/generations": {
+      "post": {
+        "summary": "Generate Shot Media",
+        "operationId": "generate_shot_media_api_v1_projects__project_id__shot_production_generations_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotMediaCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-production/confirm-frame": {
+      "post": {
+        "summary": "Confirm Shot Frame",
+        "operationId": "confirm_shot_frame_api_v1_projects__project_id__shot_production_confirm_frame_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotFrameConfirmCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShotPlanVersionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-production/extract-frame": {
+      "post": {
+        "summary": "Extract Shot Frame",
+        "operationId": "extract_shot_frame_api_v1_projects__project_id__shot_production_extract_frame_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotFrameExtractCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/shot-production/assemble": {
+      "post": {
+        "summary": "Assemble Shots",
+        "operationId": "assemble_shots_api_v1_projects__project_id__shot_production_assemble_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShotAssemblyCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditDraftDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/shot-plans": {
       "get": {
         "summary": "Shot Plans",
@@ -5678,6 +5982,40 @@
         ],
         "title": "Body_upload_canon_asset_api_v1_canon_assets_upload_post"
       },
+      "CandidatePlacement": {
+        "properties": {
+          "candidateSourceRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "audioPolicy": {
+            "type": "string",
+            "enum": [
+              "preserve_current",
+              "use_candidate"
+            ],
+            "title": "Audiopolicy"
+          },
+          "fadeInMs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fadeinms",
+            "default": 0
+          },
+          "fadeOutMs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fadeoutms",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidateSourceRange",
+          "audioPolicy"
+        ],
+        "title": "CandidatePlacement"
+      },
       "CanonProfileDto": {
         "properties": {
           "id": {
@@ -5784,6 +6122,14 @@
               "environment",
               "style_board",
               "style_source",
+              "shot_frame_1",
+              "shot_frame_2",
+              "shot_frame_3",
+              "shot_frame_4",
+              "shot_scene_1",
+              "shot_scene_2",
+              "shot_scene_3",
+              "shot_scene_4",
               "previous_episode_last_frame",
               "previous_episode_keyframe_1",
               "previous_episode_keyframe_2"
@@ -5876,6 +6222,50 @@
           "eyeLine"
         ],
         "title": "CompositionDesign"
+      },
+      "ConfirmedShotFrame": {
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "designHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Designhash"
+          },
+          "checks": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "identity_scale",
+                "placement_state",
+                "movement_space",
+                "action_start",
+                "continuity"
+              ]
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 5,
+            "title": "Checks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assetId",
+          "sha256",
+          "designHash",
+          "checks"
+        ],
+        "title": "ConfirmedShotFrame"
       },
       "ContinuityDesign": {
         "properties": {
@@ -6231,6 +6621,87 @@
         ],
         "title": "DirectorValidationIssueDto"
       },
+      "EditAudioSegment": {
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "sourceInFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sourceinframe"
+          },
+          "durationFrames": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Durationframes"
+          },
+          "repairId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repairid"
+          },
+          "requireAudio": {
+            "type": "boolean",
+            "title": "Requireaudio",
+            "default": false
+          },
+          "fadeInMs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fadeinms",
+            "default": 0
+          },
+          "fadeOutMs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fadeoutms",
+            "default": 0
+          },
+          "envelopeStartFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Envelopestartframe",
+            "default": 0
+          },
+          "envelopeDurationFrames": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Envelopedurationframes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assetId",
+          "sha256",
+          "sourceInFrame",
+          "durationFrames"
+        ],
+        "title": "EditAudioSegment",
+        "description": "An ordered audio interval; envelopes stay anchored when later edits split it."
+      },
       "EditAudioV2": {
         "properties": {
           "policy": {
@@ -6257,6 +6728,30 @@
           "sha256"
         ],
         "title": "EditAudioV2"
+      },
+      "EditAudioV3": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "const": "segmented",
+            "title": "Policy",
+            "default": "segmented"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/EditAudioSegment"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Segments"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "segments"
+        ],
+        "title": "EditAudioV3"
       },
       "EditCreateCommand": {
         "properties": {
@@ -6365,6 +6860,61 @@
           "output"
         ],
         "title": "EditDecisionListV2"
+      },
+      "EditDecisionListV3": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "const": "catflow-edl-v3",
+            "title": "Format",
+            "default": "catflow-edl-v3"
+          },
+          "frameRate": {
+            "$ref": "#/components/schemas/RationalFrameRate"
+          },
+          "rootVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Rootvideoassetid"
+          },
+          "rootVideoSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Rootvideosha256"
+          },
+          "videoSegments": {
+            "items": {
+              "$ref": "#/components/schemas/EditVideoSegment"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Videosegments"
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/EditTransitionV2"
+            },
+            "type": "array",
+            "title": "Transitions"
+          },
+          "audio": {
+            "$ref": "#/components/schemas/EditAudioV3"
+          },
+          "output": {
+            "$ref": "#/components/schemas/EditOutputV2"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "frameRate",
+          "rootVideoAssetId",
+          "rootVideoSha256",
+          "videoSegments",
+          "audio",
+          "output"
+        ],
+        "title": "EditDecisionListV3"
       },
       "EditOutputDto": {
         "properties": {
@@ -6559,6 +7109,9 @@
               },
               {
                 "$ref": "#/components/schemas/EditDecisionListV2"
+              },
+              {
+                "$ref": "#/components/schemas/EditDecisionListV3"
               }
             ],
             "title": "Edl"
@@ -6600,7 +7153,8 @@
             "type": "integer",
             "enum": [
               1,
-              2
+              2,
+              3
             ],
             "title": "Formatversion",
             "default": 1
@@ -7597,6 +8151,11 @@
       },
       "GenerationPreviewDto": {
         "properties": {
+          "generateAudio": {
+            "type": "boolean",
+            "title": "Generateaudio",
+            "default": false
+          },
           "inputHash": {
             "type": "string",
             "title": "Inputhash"
@@ -7811,6 +8370,11 @@
       },
       "GenerationVideoSpecDto": {
         "properties": {
+          "generateAudio": {
+            "type": "boolean",
+            "title": "Generateaudio",
+            "default": false
+          },
           "durationSeconds": {
             "type": "integer",
             "maximum": 15.0,
@@ -10146,15 +10710,70 @@
       },
       "SegmentEditInputDto": {
         "properties": {
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "edit_existing"
+          },
+          "audioMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_current",
+                  "generate_candidate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiomode"
+          },
+          "soundDescription": {
+            "type": "string",
+            "title": "Sounddescription",
+            "default": ""
+          },
+          "anchorStartFrame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorstartframe"
+          },
+          "anchorEndFrame": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorendframe"
+          },
           "baseEdl": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/EditDecisionListV2"
               },
               {
+                "$ref": "#/components/schemas/EditDecisionListV3"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Baseedl"
           },
           "endStatePolicy": {
             "type": "string",
@@ -10258,6 +10877,60 @@
       },
       "SegmentRepairCreateCommand": {
         "properties": {
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "edit_existing"
+          },
+          "audioMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_current",
+                  "generate_candidate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiomode"
+          },
+          "soundDescription": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Sounddescription",
+            "default": ""
+          },
+          "anchorStartFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorstartframe"
+          },
+          "anchorEndFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorendframe"
+          },
           "baseVideoAssetId": {
             "type": "string",
             "format": "uuid",
@@ -10339,6 +11012,8 @@
           "role": {
             "type": "string",
             "enum": [
+              "first_frame",
+              "last_frame",
               "anchor_in",
               "anchor_out",
               "episode_child",
@@ -10394,6 +11069,60 @@
       },
       "SegmentRepairPreviewCommand": {
         "properties": {
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "edit_existing"
+          },
+          "audioMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_current",
+                  "generate_candidate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiomode"
+          },
+          "soundDescription": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Sounddescription",
+            "default": ""
+          },
+          "anchorStartFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorstartframe"
+          },
+          "anchorEndFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorendframe"
+          },
           "baseVideoAssetId": {
             "type": "string",
             "format": "uuid",
@@ -10459,6 +11188,60 @@
       },
       "SegmentRepairPreviewDto": {
         "properties": {
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "edit_existing"
+          },
+          "audioMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_current",
+                  "generate_candidate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiomode"
+          },
+          "soundDescription": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Sounddescription",
+            "default": ""
+          },
+          "anchorStartFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorstartframe"
+          },
+          "anchorEndFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorendframe"
+          },
           "projectId": {
             "type": "string",
             "format": "uuid",
@@ -10536,7 +11319,14 @@
             "title": "Imagereferences"
           },
           "videoReference": {
-            "$ref": "#/components/schemas/SegmentRepairVideoReferenceDto"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SegmentRepairVideoReferenceDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "expectedCostMicros": {
             "anyOf": [
@@ -10590,9 +11380,13 @@
                 "$ref": "#/components/schemas/EditDecisionListV2"
               },
               {
+                "$ref": "#/components/schemas/EditDecisionListV3"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Baseedl"
           },
           "endStatePolicy": {
             "type": "string",
@@ -10627,7 +11421,6 @@
           "prompt",
           "negativePrompt",
           "imageReferences",
-          "videoReference",
           "costEstimateStatus",
           "inputHash"
         ],
@@ -12279,6 +13072,205 @@
         ],
         "title": "SeriesValidationIssueDto"
       },
+      "ShotAssemblyCommand": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "takes": {
+            "items": {
+              "$ref": "#/components/schemas/ShotTake"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Takes"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "takes",
+          "idempotencyKey"
+        ],
+        "title": "ShotAssemblyCommand"
+      },
+      "ShotFrameConfirmCommand": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "shotId": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Shotid"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "expectedDesignHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expecteddesignhash"
+          },
+          "checks": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "identity_scale",
+                "placement_state",
+                "movement_space",
+                "action_start",
+                "continuity"
+              ]
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 5,
+            "title": "Checks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "shotId",
+          "assetId",
+          "expectedDesignHash",
+          "checks"
+        ],
+        "title": "ShotFrameConfirmCommand"
+      },
+      "ShotFrameExtractCommand": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "shotId": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Shotid"
+          },
+          "sourceVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sourcevideoassetid"
+          },
+          "frame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Frame"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "shotId",
+          "sourceVideoAssetId",
+          "frame",
+          "idempotencyKey"
+        ],
+        "title": "ShotFrameExtractCommand"
+      },
+      "ShotMediaCommand": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "shotId": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Shotid"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "shot_frame",
+              "shot_video"
+            ],
+            "title": "Purpose"
+          },
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "shotId",
+          "purpose",
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "ShotMediaCommand"
+      },
+      "ShotMediaPreviewCommand": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "shotId": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Shotid"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "shot_frame",
+              "shot_video"
+            ],
+            "title": "Purpose"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "shotId",
+          "purpose"
+        ],
+        "title": "ShotMediaPreviewCommand"
+      },
       "ShotPlanActivationCommand": {
         "properties": {
           "expectedActiveShotPlanVersionId": {
@@ -13100,6 +14092,37 @@
             },
             "type": "array",
             "title": "Generationrisks"
+          },
+          "sceneAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sceneassetid"
+          },
+          "environmentUse": {
+            "type": "string",
+            "enum": [
+              "recompose",
+              "preserve_layout"
+            ],
+            "title": "Environmentuse",
+            "default": "recompose"
+          },
+          "confirmedFrame": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfirmedShotFrame"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -13116,6 +14139,55 @@
           "transition"
         ],
         "title": "ShotSpec"
+      },
+      "ShotTake": {
+        "properties": {
+          "shotId": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Shotid"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sourceInFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sourceinframe"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotId",
+          "assetId",
+          "sourceInFrame"
+        ],
+        "title": "ShotTake"
+      },
+      "ShotTarget": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "shotId": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Shotid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "shotId"
+        ],
+        "title": "ShotTarget"
       },
       "StoryCreateCommand": {
         "properties": {
@@ -14518,6 +15590,16 @@
             ],
             "title": "Repairid"
           },
+          "placement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidatePlacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "idempotencyKey": {
             "type": "string",
             "maxLength": 96,
@@ -14557,6 +15639,16 @@
             ],
             "title": "Repairid"
           },
+          "placement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidatePlacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "idempotencyKey": {
             "type": "string",
             "maxLength": 96,
@@ -14564,7 +15656,30 @@
             "title": "Idempotencykey"
           },
           "edl": {
-            "$ref": "#/components/schemas/EditDecisionListV2"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditDecisionListV2"
+              },
+              {
+                "$ref": "#/components/schemas/EditDecisionListV3"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edl"
+          },
+          "previewJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previewjobid"
           }
         },
         "additionalProperties": false,
@@ -14572,8 +15687,7 @@
         "required": [
           "expectedEditVersionId",
           "expectedTimelineHash",
-          "idempotencyKey",
-          "edl"
+          "idempotencyKey"
         ],
         "title": "VideoDraftSaveCommand"
       },
@@ -14894,6 +16008,26 @@
       },
       "VideoReviewCreateCommand": {
         "properties": {
+          "audioChecks": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "warning",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "propertyNames": {
+              "enum": [
+                "soundIntent",
+                "sync",
+                "continuity"
+              ]
+            },
+            "type": "object",
+            "title": "Audiochecks"
+          },
           "assetId": {
             "type": "string",
             "format": "uuid",
@@ -14966,6 +16100,26 @@
       },
       "VideoReviewDto": {
         "properties": {
+          "audioChecks": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "warning",
+                "fail",
+                "not_applicable"
+              ]
+            },
+            "propertyNames": {
+              "enum": [
+                "soundIntent",
+                "sync",
+                "continuity"
+              ]
+            },
+            "type": "object",
+            "title": "Audiochecks"
+          },
           "assetId": {
             "type": "string",
             "format": "uuid",

@@ -983,6 +983,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/shot-production/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Shot Production Context */
+        post: operations["shot_production_context_api_v1_projects__project_id__shot_production_context_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-production/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Shot Media */
+        post: operations["preview_shot_media_api_v1_projects__project_id__shot_production_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-production/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Shot Media */
+        post: operations["generate_shot_media_api_v1_projects__project_id__shot_production_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-production/confirm-frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Shot Frame */
+        post: operations["confirm_shot_frame_api_v1_projects__project_id__shot_production_confirm_frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-production/extract-frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extract Shot Frame */
+        post: operations["extract_shot_frame_api_v1_projects__project_id__shot_production_extract_frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/shot-production/assemble": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Assemble Shots */
+        post: operations["assemble_shots_api_v1_projects__project_id__shot_production_assemble_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shot-plans": {
         parameters: {
             query?: never;
@@ -1755,6 +1857,25 @@ export interface components {
             /** File */
             file: string;
         };
+        /** CandidatePlacement */
+        CandidatePlacement: {
+            candidateSourceRange: components["schemas"]["FrameRange"];
+            /**
+             * Audiopolicy
+             * @enum {string}
+             */
+            audioPolicy: "preserve_current" | "use_candidate";
+            /**
+             * Fadeinms
+             * @default 0
+             */
+            fadeInMs: number;
+            /**
+             * Fadeoutms
+             * @default 0
+             */
+            fadeOutMs: number;
+        };
         /** CanonProfileDto */
         CanonProfileDto: {
             /**
@@ -1806,7 +1927,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board" | "style_source" | "previous_episode_last_frame" | "previous_episode_keyframe_1" | "previous_episode_keyframe_2";
+            role: "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board" | "style_source" | "shot_frame_1" | "shot_frame_2" | "shot_frame_3" | "shot_frame_4" | "shot_scene_1" | "shot_scene_2" | "shot_scene_3" | "shot_scene_4" | "previous_episode_last_frame" | "previous_episode_keyframe_1" | "previous_episode_keyframe_2";
             /** Sha256 */
             sha256: string;
             /** Priority */
@@ -1830,6 +1951,20 @@ export interface components {
             screenDirection: string;
             /** Eyeline */
             eyeLine: string;
+        };
+        /** ConfirmedShotFrame */
+        ConfirmedShotFrame: {
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256: string;
+            /** Designhash */
+            designHash: string;
+            /** Checks */
+            checks: ("identity_scale" | "placement_state" | "movement_space" | "action_start" | "continuity")[];
         };
         /** ContinuityDesign */
         ContinuityDesign: {
@@ -1931,6 +2066,47 @@ export interface components {
             /** Providervalue */
             providerValue?: unknown | null;
         };
+        /**
+         * EditAudioSegment
+         * @description An ordered audio interval; envelopes stay anchored when later edits split it.
+         */
+        EditAudioSegment: {
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256: string;
+            /** Sourceinframe */
+            sourceInFrame: number;
+            /** Durationframes */
+            durationFrames: number;
+            /** Repairid */
+            repairId?: string | null;
+            /**
+             * Requireaudio
+             * @default false
+             */
+            requireAudio: boolean;
+            /**
+             * Fadeinms
+             * @default 0
+             */
+            fadeInMs: number;
+            /**
+             * Fadeoutms
+             * @default 0
+             */
+            fadeOutMs: number;
+            /**
+             * Envelopestartframe
+             * @default 0
+             */
+            envelopeStartFrame: number;
+            /** Envelopedurationframes */
+            envelopeDurationFrames?: number | null;
+        };
         /** EditAudioV2 */
         EditAudioV2: {
             /**
@@ -1945,6 +2121,17 @@ export interface components {
             assetId: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** EditAudioV3 */
+        EditAudioV3: {
+            /**
+             * Policy
+             * @default segmented
+             * @constant
+             */
+            policy: "segmented";
+            /** Segments */
+            segments: components["schemas"]["EditAudioSegment"][];
         };
         /** EditCreateCommand */
         EditCreateCommand: {
@@ -1983,6 +2170,29 @@ export interface components {
             /** Transitions */
             transitions?: components["schemas"]["EditTransitionV2"][];
             audio: components["schemas"]["EditAudioV2"];
+            output: components["schemas"]["EditOutputV2"];
+        };
+        /** EditDecisionListV3 */
+        EditDecisionListV3: {
+            /**
+             * Format
+             * @default catflow-edl-v3
+             * @constant
+             */
+            format: "catflow-edl-v3";
+            frameRate: components["schemas"]["RationalFrameRate"];
+            /**
+             * Rootvideoassetid
+             * Format: uuid
+             */
+            rootVideoAssetId: string;
+            /** Rootvideosha256 */
+            rootVideoSha256: string;
+            /** Videosegments */
+            videoSegments: components["schemas"]["EditVideoSegment"][];
+            /** Transitions */
+            transitions?: components["schemas"]["EditTransitionV2"][];
+            audio: components["schemas"]["EditAudioV3"];
             output: components["schemas"]["EditOutputV2"];
         };
         /** EditOutputDto */
@@ -2089,7 +2299,7 @@ export interface components {
             /** Sourceselectionhash */
             sourceSelectionHash: string;
             /** Edl */
-            edl: components["schemas"]["EditDecisionListDto"] | components["schemas"]["EditDecisionListV2"];
+            edl: components["schemas"]["EditDecisionListDto"] | components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"];
             /**
              * Status
              * @enum {string}
@@ -2104,7 +2314,7 @@ export interface components {
              * @default 1
              * @enum {integer}
              */
-            formatVersion: 1 | 2;
+            formatVersion: 1 | 2 | 3;
             /**
              * Active
              * @default false
@@ -2458,6 +2668,11 @@ export interface components {
         };
         /** GenerationPreviewDto */
         GenerationPreviewDto: {
+            /**
+             * Generateaudio
+             * @default false
+             */
+            generateAudio: boolean;
             /** Inputhash */
             inputHash: string;
             /**
@@ -2536,6 +2751,11 @@ export interface components {
         };
         /** GenerationVideoSpecDto */
         GenerationVideoSpecDto: {
+            /**
+             * Generateaudio
+             * @default false
+             */
+            generateAudio: boolean;
             /** Durationseconds */
             durationSeconds: number;
             /**
@@ -3417,7 +3637,25 @@ export interface components {
         };
         /** SegmentEditInputDto */
         SegmentEditInputDto: {
-            baseEdl?: components["schemas"]["EditDecisionListV2"] | null;
+            /**
+             * Generationmode
+             * @default edit_existing
+             * @enum {string}
+             */
+            generationMode: "edit_existing" | "from_frame";
+            /** Audiomode */
+            audioMode?: ("preserve_current" | "generate_candidate") | null;
+            /**
+             * Sounddescription
+             * @default
+             */
+            soundDescription: string;
+            /** Anchorstartframe */
+            anchorStartFrame?: number | null;
+            /** Anchorendframe */
+            anchorEndFrame?: number | null;
+            /** Baseedl */
+            baseEdl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
             /**
              * Endstatepolicy
              * @default match_original
@@ -3460,6 +3698,23 @@ export interface components {
         /** SegmentRepairCreateCommand */
         SegmentRepairCreateCommand: {
             /**
+             * Generationmode
+             * @default edit_existing
+             * @enum {string}
+             */
+            generationMode: "edit_existing" | "from_frame";
+            /** Audiomode */
+            audioMode?: ("preserve_current" | "generate_candidate") | null;
+            /**
+             * Sounddescription
+             * @default
+             */
+            soundDescription: string;
+            /** Anchorstartframe */
+            anchorStartFrame?: number | null;
+            /** Anchorendframe */
+            anchorEndFrame?: number | null;
+            /**
              * Basevideoassetid
              * Format: uuid
              */
@@ -3493,7 +3748,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "anchor_in" | "anchor_out" | "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board";
+            role: "first_frame" | "last_frame" | "anchor_in" | "anchor_out" | "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board";
             /** Assetid */
             assetId?: string | null;
             /** Sha256 */
@@ -3508,6 +3763,23 @@ export interface components {
         };
         /** SegmentRepairPreviewCommand */
         SegmentRepairPreviewCommand: {
+            /**
+             * Generationmode
+             * @default edit_existing
+             * @enum {string}
+             */
+            generationMode: "edit_existing" | "from_frame";
+            /** Audiomode */
+            audioMode?: ("preserve_current" | "generate_candidate") | null;
+            /**
+             * Sounddescription
+             * @default
+             */
+            soundDescription: string;
+            /** Anchorstartframe */
+            anchorStartFrame?: number | null;
+            /** Anchorendframe */
+            anchorEndFrame?: number | null;
             /**
              * Basevideoassetid
              * Format: uuid
@@ -3534,6 +3806,23 @@ export interface components {
         };
         /** SegmentRepairPreviewDto */
         SegmentRepairPreviewDto: {
+            /**
+             * Generationmode
+             * @default edit_existing
+             * @enum {string}
+             */
+            generationMode: "edit_existing" | "from_frame";
+            /** Audiomode */
+            audioMode?: ("preserve_current" | "generate_candidate") | null;
+            /**
+             * Sounddescription
+             * @default
+             */
+            soundDescription: string;
+            /** Anchorstartframe */
+            anchorStartFrame?: number | null;
+            /** Anchorendframe */
+            anchorEndFrame?: number | null;
             /**
              * Projectid
              * Format: uuid
@@ -3568,7 +3857,7 @@ export interface components {
             negativePrompt: string;
             /** Imagereferences */
             imageReferences: components["schemas"]["SegmentRepairImageReferenceDto"][];
-            videoReference: components["schemas"]["SegmentRepairVideoReferenceDto"];
+            videoReference?: components["schemas"]["SegmentRepairVideoReferenceDto"] | null;
             /** Expectedcostmicros */
             expectedCostMicros?: number | null;
             /**
@@ -3581,7 +3870,8 @@ export interface components {
             inputSnapshot?: components["schemas"]["GenerationInputSnapshotDto"] | null;
             /** Editdraftid */
             editDraftId?: string | null;
-            baseEdl?: components["schemas"]["EditDecisionListV2"] | null;
+            /** Baseedl */
+            baseEdl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
             /**
              * Endstatepolicy
              * @default match_original
@@ -4266,6 +4556,90 @@ export interface components {
             /** Suggestedaction */
             suggestedAction?: string | null;
         };
+        /** ShotAssemblyCommand */
+        ShotAssemblyCommand: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Takes */
+            takes: components["schemas"]["ShotTake"][];
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** ShotFrameConfirmCommand */
+        ShotFrameConfirmCommand: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Shotid */
+            shotId: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Expecteddesignhash */
+            expectedDesignHash: string;
+            /** Checks */
+            checks: ("identity_scale" | "placement_state" | "movement_space" | "action_start" | "continuity")[];
+        };
+        /** ShotFrameExtractCommand */
+        ShotFrameExtractCommand: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Shotid */
+            shotId: string;
+            /**
+             * Sourcevideoassetid
+             * Format: uuid
+             */
+            sourceVideoAssetId: string;
+            /** Frame */
+            frame: number;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** ShotMediaCommand */
+        ShotMediaCommand: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Shotid */
+            shotId: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "shot_frame" | "shot_video";
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** ShotMediaPreviewCommand */
+        ShotMediaPreviewCommand: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Shotid */
+            shotId: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "shot_frame" | "shot_video";
+        };
         /** ShotPlanActivationCommand */
         ShotPlanActivationCommand: {
             /** Expectedactiveshotplanversionid */
@@ -4509,6 +4883,37 @@ export interface components {
             directorIntent?: string | null;
             /** Generationrisks */
             generationRisks?: components["schemas"]["GenerationRisk"][];
+            /** Sceneassetid */
+            sceneAssetId?: string | null;
+            /**
+             * Environmentuse
+             * @default recompose
+             * @enum {string}
+             */
+            environmentUse: "recompose" | "preserve_layout";
+            confirmedFrame?: components["schemas"]["ConfirmedShotFrame"] | null;
+        };
+        /** ShotTake */
+        ShotTake: {
+            /** Shotid */
+            shotId: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sourceinframe */
+            sourceInFrame: number;
+        };
+        /** ShotTarget */
+        ShotTarget: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Shotid */
+            shotId: string;
         };
         /** StoryCreateCommand */
         StoryCreateCommand: {
@@ -5070,6 +5475,7 @@ export interface components {
             expectedTimelineHash: string;
             /** Repairid */
             repairId?: string | null;
+            placement?: components["schemas"]["CandidatePlacement"] | null;
             /** Idempotencykey */
             idempotencyKey: string;
         };
@@ -5084,9 +5490,13 @@ export interface components {
             expectedTimelineHash: string;
             /** Repairid */
             repairId?: string | null;
+            placement?: components["schemas"]["CandidatePlacement"] | null;
             /** Idempotencykey */
             idempotencyKey: string;
-            edl: components["schemas"]["EditDecisionListV2"];
+            /** Edl */
+            edl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
+            /** Previewjobid */
+            previewJobId?: string | null;
         };
         /** VideoEditDraftCreateCommand */
         VideoEditDraftCreateCommand: {
@@ -5218,6 +5628,10 @@ export interface components {
         };
         /** VideoReviewCreateCommand */
         VideoReviewCreateCommand: {
+            /** Audiochecks */
+            audioChecks?: {
+                [key: string]: "pass" | "warning" | "fail" | "not_applicable";
+            };
             /**
              * Assetid
              * Format: uuid
@@ -5243,6 +5657,10 @@ export interface components {
         };
         /** VideoReviewDto */
         VideoReviewDto: {
+            /** Audiochecks */
+            audioChecks?: {
+                [key: string]: "pass" | "warning" | "fail" | "not_applicable";
+            };
             /**
              * Assetid
              * Format: uuid
@@ -7424,6 +7842,220 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoryVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    shot_production_context_api_v1_projects__project_id__shot_production_context_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotTarget"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_shot_media_api_v1_projects__project_id__shot_production_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotMediaPreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_shot_media_api_v1_projects__project_id__shot_production_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotMediaCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_shot_frame_api_v1_projects__project_id__shot_production_confirm_frame_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotFrameConfirmCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlanVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extract_shot_frame_api_v1_projects__project_id__shot_production_extract_frame_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotFrameExtractCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assemble_shots_api_v1_projects__project_id__shot_production_assemble_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotAssemblyCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditDraftDto"];
                 };
             };
             /** @description Validation Error */

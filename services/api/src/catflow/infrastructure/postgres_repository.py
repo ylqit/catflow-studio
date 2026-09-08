@@ -41,6 +41,7 @@ from catflow.application.service import (
     CanonRevisionCreateCommand,
     EditDecisionListDto,
     EditDecisionListV2,
+    EditDecisionListV3,
     EditVersionDto,
     FixedCanonRole,
     GenerationInputSnapshotDto,
@@ -2115,6 +2116,15 @@ class PostgresStudioRepository:
             session.scalar(
                 select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
             )
+            if draft.expected_active_shot_plan_version_id is not None:
+                current_active_id = session.scalar(
+                    select(ShotPlanVersionRecord.id).where(
+                        ShotPlanVersionRecord.project_id == project_id,
+                        ShotPlanVersionRecord.active.is_(True),
+                    )
+                )
+                if current_active_id != draft.expected_active_shot_plan_version_id:
+                    raise StudioConflictError("分镜版本已变化，请刷新后再保存。")
             revision = session.scalar(
                 select(func.coalesce(func.max(ShotPlanVersionRecord.revision), 0)).where(
                     ShotPlanVersionRecord.project_id == project_id
@@ -2477,7 +2487,11 @@ class PostgresStudioRepository:
 
     def create_job(self, job: JobDto) -> JobDto:
         with self._sessions.begin() as session:
-            if job.kind == "plan_shots":
+            shot_media = (
+                job.frozen_input.get("purpose") in {"shot_frame", "shot_video"}
+                and job.provider != "local_ffmpeg"
+            )
+            if job.kind == "plan_shots" or shot_media:
                 session.scalar(
                     select(ProjectRecord)
                     .where(ProjectRecord.id == job.project_id)
@@ -2507,6 +2521,20 @@ class PostgresStudioRepository:
                 )
                 if running is not None:
                     raise StudioConflictError("a shot plan generation job is already running")
+            if shot_media:
+                running = session.scalar(
+                    select(JobRecord.id).where(
+                        JobRecord.project_id == job.project_id,
+                        JobRecord.frozen_input_json["purpose"].astext
+                        == job.frozen_input["purpose"],
+                        JobRecord.frozen_input_json["targetShotId"].astext
+                        == job.frozen_input["targetShotId"],
+                        JobRecord.provider != "local_ffmpeg",
+                        JobRecord.status.not_in({"succeeded", "failed", "cancelled"}),
+                    )
+                )
+                if running is not None:
+                    raise StudioConflictError("此镜头仍有未终结任务，不能重复付费提交。")
             record = _new_job_record(job)
             session.add(record)
             session.flush()
@@ -2755,7 +2783,7 @@ class PostgresStudioRepository:
                 edl_json=edit.edl.model_dump(mode="json", by_alias=True),
                 status="draft",
                 parent_edit_version_id=parent.id,
-                format_version=2,
+                format_version=edit.format_version,
                 active=False,
                 timeline_hash=edit.timeline_hash,
                 edit_draft_id=draft.id,
@@ -3601,7 +3629,9 @@ def _job_by_idempotency(session: Session, key: str) -> JobRecord | None:
 
 def _edit_dto(record: EditVersionRecord) -> EditVersionDto:
     edl = (
-        EditDecisionListV2.model_validate(record.edl_json)
+        EditDecisionListV3.model_validate(record.edl_json)
+        if record.format_version == 3
+        else EditDecisionListV2.model_validate(record.edl_json)
         if record.format_version == 2
         else EditDecisionListDto.model_validate(record.edl_json)
     )

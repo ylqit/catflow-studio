@@ -1149,7 +1149,7 @@ class EditVersionRecord(Base):
         CheckConstraint(
             "status IN ('draft','rendered','approved')", name="ck_edit_versions_status"
         ),
-        CheckConstraint("format_version IN (1,2)", name="ck_edit_versions_format_version"),
+        CheckConstraint("format_version IN (1,2,3)", name="ck_edit_versions_format_version"),
         Index(
             "uq_edit_versions_active",
             "project_id",

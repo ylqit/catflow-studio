@@ -112,6 +112,15 @@ class AssetMediaResolver:
             source = self._media_store.resolve(asset.storage_key)
             project_id = job.project_id
             frozen_timeline = job.frozen_input_json.get("baseEdl")
+            from_frame = job.frozen_input_json.get("generationMode") == "from_frame"
+            anchor_start = (
+                job.frozen_input_json.get("anchorStartFrame") if from_frame else issue_start_frame
+            )
+            anchor_end = (
+                job.frozen_input_json.get("anchorEndFrame") if from_frame else issue_end_frame - 1
+            )
+            if from_frame and not isinstance(anchor_start, int):
+                raise ValueError("strict frame generation requires a selected start")
         if not source.is_file():
             raise ValueError("segment media source file is missing")
 
@@ -133,76 +142,80 @@ class AssetMediaResolver:
                 job_id, frozen_timeline, source, allow_draft=True
             )
 
-        context_frames = generation_end_frame - generation_start_frame
-        pad_seconds = max(0.0, provider_duration_seconds - context_frames / 24)
-        context_filter = (
-            f"fps=24,trim=start_frame={generation_start_frame}:"
-            f"end_frame={generation_end_frame},setpts=PTS-STARTPTS"
-        )
-        if pad_seconds:
-            context_filter += f",tpad=stop_mode=clone:stop_duration={pad_seconds:.6f}"
-        context_filter += (
-            f",trim=duration={provider_duration_seconds},"
-            "scale=480:854:force_original_aspect_ratio=decrease,"
-            "pad=480:854:(ow-iw)/2:(oh-ih)/2:color=0x1F1C1A,setsar=1,format=yuv420p"
-        )
-        self._render_atomic(
-            context,
-            [
-                str(self._ffmpeg_path),
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-i",
-                str(source),
-                "-vf",
-                context_filter,
-                "-an",
-                "-r",
-                "24",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-movflags",
-                "+faststart",
-            ],
-        )
-        self._extract_exact_frame(source, issue_start_frame, anchor_in)
-        self._extract_exact_frame(source, issue_end_frame - 1, anchor_out)
+        if not from_frame:
+            context_frames = generation_end_frame - generation_start_frame
+            pad_seconds = max(0.0, provider_duration_seconds - context_frames / 24)
+            context_filter = (
+                f"fps=24,trim=start_frame={generation_start_frame}:"
+                f"end_frame={generation_end_frame},setpts=PTS-STARTPTS"
+            )
+            if pad_seconds:
+                context_filter += f",tpad=stop_mode=clone:stop_duration={pad_seconds:.6f}"
+            context_filter += (
+                f",trim=duration={provider_duration_seconds},"
+                "scale=480:854:force_original_aspect_ratio=decrease,"
+                "pad=480:854:(ow-iw)/2:(oh-ih)/2:color=0x1F1C1A,setsar=1,format=yuv420p"
+            )
+            self._render_atomic(
+                context,
+                [
+                    str(self._ffmpeg_path),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-vf",
+                    context_filter,
+                    "-an",
+                    "-r",
+                    "24",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-movflags",
+                    "+faststart",
+                ],
+            )
+        self._extract_exact_frame(source, anchor_start, anchor_in)
+        if anchor_end is not None:
+            self._extract_exact_frame(source, anchor_end, anchor_out)
 
-        self._persist_prepared_asset(
-            job_id,
-            project_id,
-            role="repair_context",
-            storage_key=context_key,
-            path=context,
-            metadata={
-                "frameRateNumerator": 24,
-                "frameRateDenominator": 1,
-                "sourceStartFrame": generation_start_frame,
-                "sourceEndFrame": generation_end_frame,
-                "durationFrames": provider_duration_seconds * 24,
-                "paddedTailFrames": provider_duration_seconds * 24 - context_frames,
-            },
-        )
+        if not from_frame:
+            self._persist_prepared_asset(
+                job_id,
+                project_id,
+                role="repair_context",
+                storage_key=context_key,
+                path=context,
+                metadata={
+                    "frameRateNumerator": 24,
+                    "frameRateDenominator": 1,
+                    "sourceStartFrame": generation_start_frame,
+                    "sourceEndFrame": generation_end_frame,
+                    "durationFrames": provider_duration_seconds * 24,
+                    "paddedTailFrames": provider_duration_seconds * 24 - context_frames,
+                },
+            )
         self._persist_prepared_asset(
             job_id,
             project_id,
             role="repair_anchor_in",
             storage_key=anchor_in_key,
             path=anchor_in,
-            metadata={"sourceFrame": issue_start_frame},
+            metadata={"sourceFrame": anchor_start},
         )
-        self._persist_prepared_asset(
-            job_id,
-            project_id,
-            role="repair_anchor_out",
-            storage_key=anchor_out_key,
-            path=anchor_out,
-            metadata={"sourceFrame": issue_end_frame - 1},
-        )
+        if anchor_end is not None:
+            self._persist_prepared_asset(
+                job_id,
+                project_id,
+                role="repair_anchor_out",
+                storage_key=anchor_out_key,
+                path=anchor_out,
+                metadata={"sourceFrame": anchor_end},
+            )
         return context, anchor_in, anchor_out
 
     def _extract_exact_frame(self, source: Path, frame_number: int, destination: Path) -> None:

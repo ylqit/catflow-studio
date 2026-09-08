@@ -117,6 +117,14 @@ from catflow.application.service import (
     VideoReviewCreateCommand,
     VideoReviewDto,
 )
+from catflow.application.shot_production import (
+    ShotAssemblyCommand,
+    ShotFrameConfirmCommand,
+    ShotFrameExtractCommand,
+    ShotMediaCommand,
+    ShotMediaPreviewCommand,
+    ShotTarget,
+)
 from catflow.application.story_imports import (
     StoryImportConfirmCommand,
     StoryImportCreateCommand,
@@ -865,6 +873,49 @@ def create_app(
         _payload: dict[str, Any] = Body(default={}),
     ) -> StoryVersionDto:
         return service.activate_story(project_id, story_version_id)
+
+    @app.post("/api/v1/projects/{project_id}/shot-production/context")
+    def shot_production_context(project_id: uuid.UUID, command: ShotTarget) -> dict[str, Any]:
+        return service.shot_production_context(project_id, command)
+
+    @app.post("/api/v1/projects/{project_id}/shot-production/preview")
+    def preview_shot_media(
+        project_id: uuid.UUID, command: ShotMediaPreviewCommand
+    ) -> dict[str, Any]:
+        return service.preview_shot_media(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-production/generations",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def generate_shot_media(project_id: uuid.UUID, command: ShotMediaCommand) -> JobDto:
+        return service.create_shot_media_job(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-production/confirm-frame",
+        response_model=ShotPlanVersionDto,
+    )
+    def confirm_shot_frame(
+        project_id: uuid.UUID, command: ShotFrameConfirmCommand
+    ) -> ShotPlanVersionDto:
+        return service.confirm_shot_frame(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-production/extract-frame",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def extract_shot_frame(project_id: uuid.UUID, command: ShotFrameExtractCommand) -> JobDto:
+        return service.extract_shot_frame(project_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/shot-production/assemble", response_model=VideoEditDraftDto
+    )
+    def assemble_shots(project_id: uuid.UUID, command: ShotAssemblyCommand) -> VideoEditDraftDto:
+        return service.assemble_shot_draft(project_id, command)
 
     @app.get("/api/v1/projects/{project_id}/shot-plans", response_model=list[ShotPlanVersionDto])
     def shot_plans(project_id: uuid.UUID) -> list[ShotPlanVersionDto]:

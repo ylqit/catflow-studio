@@ -1,4 +1,6 @@
 import type {
+  ShotProductionContextDto,
+  ShotMediaPreviewDto,
   AssetDto,
   AssetGenerationKind,
   AssetGenerationPreviewDto,
@@ -430,6 +432,25 @@ export class CatFlowClient {
 
   assets(projectId: string): Promise<AssetDto[]> {
     return this.request(`/api/v1/projects/${projectId}/assets`);
+  }
+
+  shotProductionContext(projectId: string, shotPlanVersionId: string, shotId: string): Promise<ShotProductionContextDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-production/context`, "POST", { shotPlanVersionId, shotId });
+  }
+  previewShotMedia(projectId: string, shotPlanVersionId: string, shotId: string, purpose: 'shot_frame' | 'shot_video'): Promise<ShotMediaPreviewDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-production/preview`, "POST", { shotPlanVersionId, shotId, purpose });
+  }
+  generateShotMedia(projectId: string, command: { shotPlanVersionId: string; shotId: string; purpose: 'shot_frame' | 'shot_video'; expectedInputHash: string; idempotencyKey: string }): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-production/generations`, "POST", command);
+  }
+  confirmShotFrame(projectId: string, command: { shotPlanVersionId: string; shotId: string; assetId: string; expectedDesignHash: string; checks: string[] }): Promise<ShotPlanVersionDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-production/confirm-frame`, "POST", command);
+  }
+  extractShotFrame(projectId: string, command: { shotPlanVersionId: string; shotId: string; sourceVideoAssetId: string; frame: number; idempotencyKey: string }): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-production/extract-frame`, "POST", command);
+  }
+  assembleShots(projectId: string, command: { shotPlanVersionId: string; takes: Array<{ shotId: string; assetId: string; sourceInFrame: number }>; idempotencyKey: string }): Promise<VideoEditDraftDto> {
+    return this.json(`/api/v1/projects/${projectId}/shot-production/assemble`, "POST", command);
   }
 
   shotPlans(projectId: string): Promise<ShotPlanVersionDto[]> {

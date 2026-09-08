@@ -47,7 +47,7 @@ class SegmentVideoGenerationRequest:
     instruction: str
     prompt: str
     negative_prompt: str
-    context_video_url: str
+    context_video_url: str | None
     issue_start_seconds: float
     issue_end_seconds: float
     anchor_in_path: Path
@@ -58,6 +58,8 @@ class SegmentVideoGenerationRequest:
     resolution: Literal["480p"]
     ratio: Literal["9:16"]
     prompt_compiler_revision: str = "segment-edit-v2"
+    generation_mode: Literal["edit_existing", "from_frame"] = "edit_existing"
+    generate_audio: bool = False
 
     def __post_init__(self) -> None:
         if not self.instruction.strip():
@@ -66,6 +68,16 @@ class SegmentVideoGenerationRequest:
             raise ValueError("segment generation issue time range is invalid")
         if not 4 <= self.duration_seconds <= 15:
             raise ValueError("segment generation duration must be between 4 and 15 seconds")
+        if self.generation_mode == "from_frame":
+            if (
+                self.context_video_url is not None
+                or self.canon_reference_paths
+                or self.canon_reference_roles
+            ):
+                raise ValueError("strict frame mode cannot include video or omni references")
+            return
+        if self.generation_mode != "edit_existing":
+            raise ValueError("unknown segment generation mode")
         if len(self.canon_reference_paths) != 5:
             raise ValueError("segment generation requires all five Canon references")
         if self.canon_reference_roles != (
@@ -87,7 +99,7 @@ class PlanningGateway(Protocol):
     ) -> StructuredProviderResult: ...
 
     def plan_shots(
-        self, *, prompt: str, output_schema: dict[str, object]
+        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = ()
     ) -> StructuredProviderResult: ...
 
     def plan_series(
@@ -134,6 +146,8 @@ class VideoGenerationGateway(Protocol):
         reference_video_url: str | None = None,
         duration_seconds: int,
         resolution: str,
+        generate_audio: bool = False,
+        generation_mode: str = "references",
     ) -> VideoSubmissionResult: ...
 
     def submit_segment_video(

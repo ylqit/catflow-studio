@@ -311,9 +311,7 @@ def test_ark_result_landing_downloads_image_and_removes_signed_url_from_job(
             )
         downloader = ProviderMediaDownloader(
             client=httpx.Client(
-                transport=httpx.MockTransport(
-                    lambda _request: httpx.Response(200, content=payload)
-                )
+                transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=payload))
             ),
             resolve_host=lambda _host: ("8.8.8.8",),
         )
@@ -414,13 +412,9 @@ def test_video_diagnosis_landing_keeps_its_provider_ids_separate_from_video_ids(
             persisted = session.get(AssetRecord, video_asset.id)
             assert persisted is not None
             assert persisted.metadata_json["videoDiagnosisJobId"] == str(diagnosis_job_id)
+            assert persisted.metadata_json["videoDiagnosisProviderTaskId"] == "diagnosis-task-1"
             assert (
-                persisted.metadata_json["videoDiagnosisProviderTaskId"]
-                == "diagnosis-task-1"
-            )
-            assert (
-                persisted.metadata_json["videoDiagnosisProviderRequestId"]
-                == "diagnosis-request-1"
+                persisted.metadata_json["videoDiagnosisProviderRequestId"] == "diagnosis-request-1"
             )
     finally:
         with sessions.begin() as session:
@@ -428,8 +422,10 @@ def test_video_diagnosis_landing_keeps_its_provider_ids_separate_from_video_ids(
         engine.dispose()
 
 
+@pytest.mark.parametrize("requested_audio", [False, True])
 def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
     tmp_path: Path,
+    requested_audio: bool,
 ) -> None:
     class SegmentDownloader:
         def download_video(
@@ -449,6 +445,13 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
                 height=854,
                 duration_ms=expected_duration_seconds * 1000,
                 codec="h264",
+                media_facts={
+                    "durationFrames": expected_duration_seconds * 24,
+                    "frameRateNumerator": 24,
+                    "frameRateDenominator": 1,
+                    "hasAudio": False,
+                    "audioState": "absent",
+                },
             )
 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
@@ -488,6 +491,7 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
                 baseVideoAssetId=base.id,
                 issueRange={"startFrame": 96, "endFrame": 192},
                 instruction="只重拍擦爪动作。",
+                audioMode="generate_candidate" if requested_audio else None,
             ),
         )
         job = service.create_video_repair_job(
@@ -496,6 +500,7 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
                 baseVideoAssetId=base.id,
                 issueRange={"startFrame": 96, "endFrame": 192},
                 instruction="只重拍擦爪动作。",
+                audioMode="generate_candidate" if requested_audio else None,
                 expectedInputHash=preview.input_hash,
                 idempotencyKey=f"ark-segment-landing-{project.id}",
             ),
@@ -530,6 +535,8 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
         assert candidate.role == "repair_candidate"
         assert candidate.metadata["providerTaskId"] == "segment-task-1"
         assert candidate.metadata["durationFrames"] == 144
+        assert candidate.metadata["audioRequestMissing"] is requested_audio
+        assert candidate.metadata["hasAudio"] is False
         assert service.list_edits(project.id) == []
         assert "videoUrl" not in service.get_job(job.id).provider_result
     finally:

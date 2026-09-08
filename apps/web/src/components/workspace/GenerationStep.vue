@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from "vue-router";
 
 import { api } from "../../api/client";
+import ShotSequenceProduction from "./ShotSequenceProduction.vue";
+const productionMode = ref("whole");
 import type { AssetDto, GenerationPreviewDto, JobDto, ProjectUsageSummaryDto, WorkspaceDto } from "../../api/types";
 import { buildAcceptanceEvidence } from "../../acceptanceEvidence";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
@@ -22,6 +24,9 @@ const reviewVideoJob = ref<JobDto | null>(null);
 const diagnosisJob = ref<JobDto | null>(null);
 const videos = ref<AssetDto[]>([]);
 const usageSummary = ref<ProjectUsageSummaryDto | null>(null);
+const loadingRecords = ref(false);
+const recordsError = ref("");
+const usageError = ref("");
 const includePreviousEpisodeVideo = ref(false);
 const loadingPreview = ref(false);
 const submitting = ref(false);
@@ -33,6 +38,7 @@ const currentTime = ref(0);
 const totalDuration = ref(0);
 const playing = ref(false);
 let events: EventSource | null = null;
+let disposed = false;
 const videoElements = new Map<string, HTMLVideoElement>();
 const videoErrors = reactive<Record<string, string>>({});
 const candidateJobs = reactive<Record<string, JobDto>>({});
@@ -53,7 +59,9 @@ const verdictOptions = ["pass", "warning", "fail"] as const;
 const quality = reactive<Record<QualityKey, Verdict>>(Object.fromEntries(
   qualityItems.map(([key]) => [key, ""]),
 ) as Record<QualityKey, Verdict>);
-const allPass = computed(() => qualityItems.every(([key]) => quality[key] === "pass"));
+const audioItems = [['soundIntent', '声音符合创作意图'], ['sync', '声音与动作同步'], ['continuity', '声音连续性']] as const;
+const audioQuality = reactive<Record<string, Verdict>>({ soundIntent: '', sync: '', continuity: '' });
+const allPass = computed(() => qualityItems.every(([key]) => quality[key] === 'pass') && (!activeAsset.value?.metadata.requestedAudio || (!activeAsset.value.metadata.audioRequestMissing && audioItems.every(([key]) => audioQuality[key] === 'pass'))));
 const activeAsset = computed(() => videos.value.find((asset) => asset.id === reviewAssetId.value));
 const activeAssetId = computed(() => activeAsset.value?.id ?? "");
 const activeInputSnapshot = computed(() => reviewVideoJob.value?.inputSnapshot ?? null);
@@ -141,10 +149,27 @@ function setVideoElement(assetId: string, element: HTMLVideoElement | null) {
 }
 
 async function load() {
-  [videos.value, usageSummary.value] = await Promise.all([
-    api.assets(props.projectId).then((items) => items.filter((asset) => asset.mediaType === "video")),
-    api.projectUsageSummary(props.projectId),
+  if (disposed || loadingRecords.value) return;
+  loadingRecords.value = true;
+  recordsError.value = "";
+  usageError.value = "";
+  const results = await Promise.allSettled([
+    api.assets(props.projectId).then(async (items) => {
+      if (disposed) return;
+      videos.value = items.filter((asset) => asset.mediaType === "video" && asset.role === "video");
+      await Promise.all(videos.value.map(async (asset) => {
+        if (!asset.producingJobId || candidateJobs[asset.id]) return;
+        candidateJobs[asset.id] = await api.job(asset.producingJobId);
+      }));
+    }),
+    api.projectUsageSummary(props.projectId).then((summary) => {
+      if (!disposed) usageSummary.value = summary;
+    }),
   ]);
+  loadingRecords.value = false;
+  if (disposed) return;
+  if (results[0].status === "rejected") recordsError.value = errorPresentation(results[0].reason, "候选与生成记录读取失败，请重新读取。").message;
+  if (results[1].status === "rejected") usageError.value = errorPresentation(results[1].reason, "费用读取失败，请重新读取；这不代表没有费用。").message;
   const latestVideoJob = props.workspace.latestVideoJob;
   if (
     latestVideoJob
@@ -156,10 +181,6 @@ async function load() {
   ) {
     currentJob.value = latestVideoJob;
   }
-  await Promise.all(videos.value.map(async (asset) => {
-    if (!asset.producingJobId || candidateJobs[asset.id]) return;
-    candidateJobs[asset.id] = await api.job(asset.producingJobId);
-  }));
 }
 
 async function refreshPreview() {
@@ -274,6 +295,7 @@ async function startReview(asset: AssetDto) {
   diagnosisJob.value = null;
   reviewNotes.value = "";
   for (const [key] of qualityItems) quality[key] = "";
+  for (const [key] of audioItems) audioQuality[key] = "";
   await nextTick();
   const element = videoElements.get(asset.id);
   element?.pause();
@@ -295,6 +317,7 @@ async function startReview(asset: AssetDto) {
   if (reviewAssetId.value === asset.id && reviews[0]) {
     reviewNotes.value = reviews[0].notes;
     for (const [key] of qualityItems) quality[key] = reviews[0].checks[key] ?? "";
+    for (const [key] of audioItems) { const value = reviews[0].audioChecks?.[key]; audioQuality[key] = value === "not_applicable" ? "" : value ?? ""; }
   }
 }
 
@@ -367,6 +390,7 @@ function persistReview() {
   const frames = Number(activeAsset.value?.metadata.durationFrames ?? 0);
   return api.createVideoReview(props.projectId, {
     assetId: reviewAssetId.value!, notes: reviewNotes.value,
+    audioChecks: Object.fromEntries(Object.entries(audioQuality).filter(([, value]) => value !== "")) as Record<typeof audioItems[number][0], "pass" | "warning" | "fail">,
     checks: Object.fromEntries(Object.entries(quality).filter(([, value]) => value !== "")) as Record<string, "pass" | "warning" | "fail">,
     issues: reviewNotes.value.trim() && frames > 0 ? [{ range: { startFrame: Math.min(frame, frames - 1), endFrame: frames }, note: reviewNotes.value }] : [],
     idempotencyKey: crypto.randomUUID(),
@@ -426,8 +450,8 @@ function exportMarkdown() {
   download(`${props.workspace.project.theme}-acceptance.md`, `# ${document.theme} 验收记录\n\n- Asset: ${document.videoAssetId}\n- SHA256: ${document.mediaSha256}\n- Video Job: ${document.providerJobId ?? "-"}\n- Provider Task: ${document.providerTaskId ?? "-"}\n- Provider Request: ${document.providerRequestId ?? "-"}\n- Diagnosis Job: ${document.diagnosisJobId ?? "-"}\n- Diagnostic Task: ${document.diagnosisProviderTaskId ?? "-"}\n- Diagnostic Request: ${document.diagnosisProviderRequestId ?? "-"}\n- Passed: ${document.passed}\n\n| 项目 | 判定 |\n|---|---|\n${rows}\n\n## 备注\n\n${document.notes}\n`, "text/markdown");
 }
 
-onMounted(async () => { await load(); await refreshPreview(); connectEvents(); });
-onBeforeUnmount(() => events?.close());
+onMounted(() => { void load(); void refreshPreview(); connectEvents(); });
+onBeforeUnmount(() => { disposed = true; events?.close(); });
 watch(
   () => [props.workspace.activeStory?.id, props.workspace.activeShotPlan?.id, props.workspace.selectionHash],
   () => { void refreshPreview(); },
@@ -446,7 +470,9 @@ watch(
 </script>
 
 <template>
-  <section class="generation-layout">
+  <section class="card production-mode"><label>视频生成方式<select v-model="productionMode"><option value="whole">整片一次生成（默认）</option><option value="shots">逐镜头生成（每镜头单独付费）</option></select></label><p>{{ productionMode === 'whole' ? '默认整片一次调用。已确认镜头图作为普通构图参考；不宣称多个严格首帧。' : '需要各镜头起点和机位更明确时使用。每个镜头需先在分镜画布确认起始画面。' }}</p></section>
+  <ShotSequenceProduction v-if="productionMode === 'shots'" :project-id="projectId" :workspace="workspace" :runtime="runtime" />
+  <section v-else class="generation-layout">
     <div class="generation-main">
       <div class="preview-card card">
         <header><div><p class="eyebrow">本次生成</p><h2>生成视频</h2><p class="paid-hint"><b v-if="generationBlockedReason">{{ generationBlockedReason }}<br></b>{{ generationProviderNotice }}<br>生成任务会自动保存，可以放心离开此页面。</p></div><button class="primary" :disabled="loadingPreview || submitting || !preview || Boolean(generationBlockedReason)" @click="generateVideo"><span v-if="loadingPreview || submitting" class="spinner" />{{ generationButtonLabel }}</button></header>
@@ -471,7 +497,7 @@ watch(
               <p v-if="previousVideoBlockedReason" class="notice warn">{{ previousVideoBlockedReason }}</p>
               <p v-else class="video-reference-status">{{ includePreviousEpisodeVideo ? "已加入本次输入" : "当前未使用" }}<span v-if="previousVideoReference.durationSeconds"> · {{ previousVideoReference.durationSeconds }} 秒</span></p>
             </details>
-            <details><summary>查看完整生成指令</summary><div class="prompt-actions"><button class="secondary" @click="copyText(preview.prompt)">复制生成指令</button><button class="secondary" @click="copyText(preview.negativePrompt)">复制需要避免的问题</button></div><div v-if="preview.promptSections?.length" class="prompt-sections"><section v-for="section in preview.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><div v-else class="legacy-prompt"><label>完整生成指令</label><p>{{ preview.prompt }}</p></div><label>需要避免的问题</label><p>{{ preview.negativePrompt }}</p><div class="reference-list"><div v-for="reference in preview.references" :key="reference.role" :class="{ omitted: !reference.included }"><span class="priority">{{ reference.priority }}</span><b>{{ referenceLabels[reference.role] ?? reference.role }}</b><span>{{ reference.included ? "已使用" : `未使用：${reference.omittedReason}` }}</span></div><div v-for="reference in preview.videoReferences" :key="reference.assetId" :class="{ omitted: !reference.included }"><span class="priority">V</span><b>上一集完整成片</b><span>{{ reference.included ? "已使用" : "默认不使用" }}</span></div></div><details class="technical-details"><summary>技术详情</summary><p>模型服务：{{ preview.provider }} · {{ preview.model }}</p><div class="hash-row"><span>输入标识</span><code>{{ preview.inputHash }}</code></div><p>能力版本 {{ preview.capabilityRevision }} · 故事 {{ preview.storyVersionId }} · 分镜 {{ preview.shotPlanVersionId }} · 选择 {{ preview.selectionHash }}</p><div class="reference-technical"><p v-for="reference in preview.references" :key="`technical-${reference.assetId}`">{{ referenceLabels[reference.role] ?? reference.role }} · {{ reference.assetId }} · {{ reference.sha256 }}</p><p v-for="reference in preview.videoReferences" :key="`technical-video-${reference.assetId}`">上一集完整成片 · {{ reference.assetId }} · {{ reference.sha256 }}</p></div></details></details>
+            <p>声音请求：{{ preview.generateAudio ? "生成原生环境、物件、动作声音；音乐和对白沿用分镜中的明确设计。" : "历史输入未要求生成声音。" }}</p><details><summary>查看完整生成指令</summary><div class="prompt-actions"><button class="secondary" @click="copyText(preview.prompt)">复制生成指令</button><button class="secondary" @click="copyText(preview.negativePrompt)">复制需要避免的问题</button></div><div v-if="preview.promptSections?.length" class="prompt-sections"><section v-for="section in preview.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><div v-else class="legacy-prompt"><label>完整生成指令</label><p>{{ preview.prompt }}</p></div><label>需要避免的问题</label><p>{{ preview.negativePrompt }}</p><div class="reference-list"><div v-for="reference in preview.references" :key="reference.role" :class="{ omitted: !reference.included }"><span class="priority">{{ reference.priority }}</span><b>{{ referenceLabels[reference.role] ?? reference.role }}</b><span>{{ reference.included ? "已使用" : `未使用：${reference.omittedReason}` }}</span></div><div v-for="reference in preview.videoReferences" :key="reference.assetId" :class="{ omitted: !reference.included }"><span class="priority">V</span><b>上一集完整成片</b><span>{{ reference.included ? "已使用" : "默认不使用" }}</span></div></div><details class="technical-details"><summary>技术详情</summary><p>模型服务：{{ preview.provider }} · {{ preview.model }}</p><div class="hash-row"><span>输入标识</span><code>{{ preview.inputHash }}</code></div><p>能力版本 {{ preview.capabilityRevision }} · 故事 {{ preview.storyVersionId }} · 分镜 {{ preview.shotPlanVersionId }} · 选择 {{ preview.selectionHash }}</p><div class="reference-technical"><p v-for="reference in preview.references" :key="`technical-${reference.assetId}`">{{ referenceLabels[reference.role] ?? reference.role }} · {{ reference.assetId }} · {{ reference.sha256 }}</p><p v-for="reference in preview.videoReferences" :key="`technical-video-${reference.assetId}`">上一集完整成片 · {{ reference.assetId }} · {{ reference.sha256 }}</p></div></details></details>
           </div>
         </template>
       </div>
@@ -483,7 +509,8 @@ watch(
           <button v-if="currentJob.error?.code === 'result_storage_failed'" class="secondary" @click="resumeStorage">继续保存结果</button>
           <details data-testid="video-job-details" class="job-record"><summary>查看生成记录</summary><dl><div><dt>任务编号</dt><dd><code>{{ currentJob.id }}</code></dd></div><div><dt>原始状态</dt><dd>{{ currentJob.status }}</dd></div><div v-if="currentJob.providerTaskId"><dt>模型任务</dt><dd><code>{{ currentJob.providerTaskId }}</code></dd></div><div v-if="currentJob.providerRequestId || currentJob.error?.requestId"><dt>请求编号</dt><dd><code>{{ currentJob.providerRequestId || currentJob.error?.requestId }}</code></dd></div><div v-if="currentJob.actualUsage"><dt>实际用量</dt><dd><code>{{ JSON.stringify(currentJob.actualUsage) }}</code></dd></div><div v-if="currentBillingPresentation"><dt>费用</dt><dd>{{ currentBillingPresentation.detail }}</dd></div><div v-if="currentJob.error?.code"><dt>错误代码</dt><dd>{{ currentJob.error.code }}</dd></div><div><dt>输入标识</dt><dd><code>{{ currentJob.inputHash }}</code></dd></div></dl></details>
         </section>
-        <div v-if="!videos.length" class="empty">{{ currentJob && !['failed', 'cancelled', 'submission_unknown'].includes(currentJob.status) ? "任务执行中，尚无视频候选。" : "尚无视频候选。" }}</div>
+        <div v-if="recordsError || usageError" class="notice error"><p v-if="recordsError">{{ recordsError }}</p><p v-if="usageError">{{ usageError }} 请重新读取后核对费用。</p><button class="secondary" :disabled="loadingRecords" @click="load">重新读取候选与费用（免费）</button></div>
+        <div v-if="!videos.length" class="empty">{{ loadingRecords ? "正在读取已有候选与费用……" : recordsError ? "候选读取暂未完成。" : currentJobBlocksGeneration ? "任务执行中，尚无视频候选。" : "尚无视频候选。" }}</div>
         <div v-else class="video-grid">
           <article v-for="asset in videos" :key="asset.id" :class="{ chosen: workspace.selections.video?.id === asset.id, reviewing: reviewAssetId === asset.id }">
             <video v-if="reviewAssetId !== asset.id" controls preload="metadata" :src="`/api/v1/assets/${asset.id}/content`" />
@@ -503,6 +530,8 @@ watch(
         <details class="technical"><summary>查看视频技术信息</summary><div><span>文件校验值 <code>{{ activeAsset.sha256 }}</code></span><span>规格 {{ activeAsset.metadata.resolution ?? "读取中" }} · {{ activeAsset.metadata.ratio ?? "读取中" }}</span><span>尺寸 {{ activeAsset.metadata.width }} × {{ activeAsset.metadata.height }}</span><span>时长 {{ Number(activeAsset.metadata.durationMs ?? 0) / 1000 }}s</span><span>编码 {{ activeAsset.metadata.codec ?? "读取中" }}</span></div></details>
         <section class="submitted-prompt"><b>该候选使用的生成指令 · {{ candidateInputState(reviewVideoJob ?? undefined) }}</b><div v-if="activeInputSnapshot?.promptSections?.length" class="prompt-sections"><section v-for="section in activeInputSnapshot.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><template v-else-if="activeInputSnapshot"><p>{{ activeInputSnapshot.prompt }}</p><small>旧任务未记录分段展示，以上为当时实际提交的完整指令。</small></template><p v-else>旧任务未记录完整生成指令，系统不会用当前内容推测。</p><details v-if="activeInputSnapshot"><summary>查看需要避免的问题与技术信息</summary><p>{{ activeInputSnapshot.negativePrompt }}</p><code>{{ activeInputSnapshot.inputHash }}</code></details></section>
         <div class="quality-grid"><fieldset v-for="[key, label] in qualityItems" :key="key"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="quality[key]" type="radio" :name="key" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
+        <p>实际声音：{{ activeAsset.metadata.audioRequestMissing ? '请求声音但未返回音轨，素材已保留，不会自动重试。' : activeAsset.metadata.audioState === 'silent' ? '存在静音音轨' : activeAsset.metadata.hasAudio ? (activeAsset.metadata.audioChannels === 1 ? '原生单声道混合音轨' : '有声音轨') : activeAsset.metadata.hasAudio === false ? '无音轨' : '历史记录未检测' }}</p>
+        <div v-if="activeAsset.metadata.requestedAudio" class="quality-grid"><fieldset v-for="[key, label] in audioItems" :key="key"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="audioQuality[key]" type="radio" :name="`audio-${key}`" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
         <label class="notes"><span>验收备注</span><textarea v-model="reviewNotes" rows="4" placeholder="记录失败时间点、角色漂移、结构或主动结尾情况。" /></label>
         <label class="edit-reference-consent"><input v-model="confirmEditReferences" type="checkbox" />仅在历史视频缺少参考时，确认使用当前五张参考建立新的编辑绑定。</label>
         <div class="review-actions"><button class="secondary" :disabled="savingReview" @click="saveReviewOnly">保存问题与验收记录</button><button class="primary" :disabled="savingReview" @click="enterEditing">进入编辑草稿</button><button class="secondary" @click="exportJson">导出 JSON</button><button class="secondary" @click="exportMarkdown">导出 Markdown</button><button class="primary" :disabled="!allPass || savingReview" @click="chooseVideo">验收通过并选择此视频</button></div>
@@ -566,3 +595,5 @@ header h2 { margin-bottom: 0; font-size: 20px; }
 .usage-card { padding: 20px; }.usage-card h2 { margin: 0 0 12px; }.usage-card dl { display: grid; margin: 0; }.usage-card dl div { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 10px; }.usage-card dd { margin: 0; font-weight: 700; }.usage-card details { margin-top: 10px; }.usage-card summary { cursor: pointer; color: var(--muted); font-size: 10px; }.usage-card small { display: block; margin-top: 8px; color: var(--muted); line-height: 1.5; }
 .job-status { display: grid; gap: 9px; margin: 16px 0; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #faf7f2; }.job-status.good { background: var(--sage-soft); }.job-status.warn, .job-status.danger { border-color: #d8aaa2; background: #fff3f1; }.job-summary { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font-size: 11px; }.job-summary > span { color: var(--muted); }.billing-summary { font-weight: 700; }.job-record summary, .candidate-input-summary summary { cursor: pointer; font-size: 10px; font-weight: 700; }.job-record dl { display: grid; gap: 6px; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }.job-record dl div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; font-size: 10px; }.job-record dt { color: var(--muted); }.job-record dd { margin: 0; overflow-wrap: anywhere; }.prompt-summary { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }.reference-technical { overflow-wrap: anywhere; }
 </style>
+
+<style scoped>.production-mode { padding: 16px 22px; margin-bottom: 16px; }.production-mode label { display: flex; align-items: center; gap: 12px; }.production-mode select { width: auto; }.production-mode p { margin-bottom: 0; color: var(--muted); font-size: 13px; }</style>

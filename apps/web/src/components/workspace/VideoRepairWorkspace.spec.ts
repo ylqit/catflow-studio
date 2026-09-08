@@ -59,14 +59,51 @@ describe("persistent video edit drafts", () => {
     view.unmount();
   });
   it("renders a complete local preview but never automatically applies a candidate", async () => {
-    client.videoRepairs.mockResolvedValue([{ id: "repair-1", baseEditVersionId: "edit-1", status: "candidate_ready", issueRange: preview.issueRange, instruction: preview.instruction, preview }]);
+    client.videoRepairs.mockResolvedValue([{ id: "repair-1", baseEditVersionId: "edit-1", status: "candidate_ready", candidateAssetId: "candidate-1", issueRange: preview.issueRange, instruction: preview.instruction, preview }]);
+    client.assets.mockResolvedValue([source, { ...source, id: "candidate-1", role: "repair_candidate", metadata: { durationFrames: 193, hasAudio: false } }]);
     const view = mount(VideoRepairWorkspace, { props: { projectId: "project-1", workspace } });
     await flushPromises();
-    await view.findAll("button").find(button => button.text() === "生成完整合成对比（免费）")!.trigger("click");
+    await view.findAll("button").find(button => button.text() === "准备试装对比（本地免费）")!.trigger("click");
     await flushPromises();
-    expect(client.renderDraftPreview).toHaveBeenCalledWith("project-1", "draft-1", expect.objectContaining({ repairId: "repair-1", expectedEditVersionId: "edit-1" }));
+    expect(client.renderDraftPreview).toHaveBeenCalledWith("project-1", "draft-1", expect.objectContaining({ repairId: "repair-1", expectedEditVersionId: "edit-1", placement: { candidateSourceRange: { startFrame: 24, endFrame: 169 }, audioPolicy: "preserve_current", fadeInMs: 0, fadeOutMs: 0 } }));
     expect(client.saveVideoDraft).not.toHaveBeenCalled();
     expect(client.createVideoRepair).not.toHaveBeenCalled();
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("views a returned candidate without locking the next edit or creating any job", async () => {
+    client.videoRepairs.mockResolvedValue([{ id: 'repair-1', baseEditVersionId: 'edit-1', candidateAssetId: 'candidate-1', status: 'candidate_ready', issueRange: preview.issueRange, instruction: preview.instruction, preview }]);
+    client.assets.mockResolvedValue([source, { ...source, id: 'candidate-1', role: 'repair_candidate', metadata: { durationFrames: 193, hasAudio: false } }]);
+    const view = mount(VideoRepairWorkspace, { props: { projectId: 'project-1', workspace } });
+    await flushPromises();
+    expect(view.get('input[aria-label="入点帧（包含）"]').attributes('disabled')).toBeUndefined();
+    await view.get('.candidate-card').trigger('click');
+    await flushPromises();
+    expect(view.get('video').attributes('src')).toContain('candidate-1');
+    expect(view.text()).toContain('模型实际返回 193 帧');
+    expect(client.renderDraftPreview).not.toHaveBeenCalled();
+    expect(client.createVideoRepair).not.toHaveBeenCalled();
+    expect(client.saveVideoDraft).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('binds apply to the completed trial and marks a changed take as stale', async () => {
+    client.videoRepairs.mockResolvedValue([{ id: 'repair-1', baseEditVersionId: 'edit-1', candidateAssetId: 'candidate-1', status: 'candidate_ready', issueRange: preview.issueRange, instruction: preview.instruction, preview }]);
+    client.assets.mockResolvedValue([source, { ...source, id: 'candidate-1', role: 'repair_candidate', metadata: { durationFrames: 193, hasAudio: false } }, { ...source, id: 'trial-video', role: 'edit_preview', producingJobId: 'trial-1', metadata: { repairId: 'repair-1' } }]);
+    client.videoDraftJobs.mockResolvedValue([{ id: 'trial-1', kind: 'render_edit_preview', status: 'succeeded', createdAt: '2026-09-05T00:00:00Z', resultAssetIds: ['trial-video'], frozenInput: { repairId: 'repair-1', placement: { candidateSourceRange: { startFrame: 24, endFrame: 169 }, audioPolicy: 'preserve_current', fadeInMs: 0, fadeOutMs: 0 } } }]);
+    const view = mount(VideoRepairWorkspace, { props: { projectId: 'project-1', workspace } });
+    await flushPromises();
+    const apply = view.findAll('button').find(button => button.text().startsWith('应用此试装'))!;
+    expect(apply.attributes('disabled')).toBeUndefined();
+    const take = view.get('.trial-fields input[type="number"]');
+    await take.setValue(25);
+    expect(view.text()).toContain('对应上一份试装');
+    expect(apply.attributes('disabled')).toBeDefined();
+    await take.setValue(24);
+    await apply.trigger('click'); await flushPromises();
+    expect(client.saveVideoDraft).toHaveBeenCalledWith('project-1', 'draft-1', expect.objectContaining({ previewJobId: 'trial-1', expectedEditVersionId: 'edit-1' }));
+    expect(client.saveVideoDraft.mock.calls[0][2]).not.toHaveProperty('edl');
     expect(client.selectAsset).not.toHaveBeenCalled();
     view.unmount();
   });

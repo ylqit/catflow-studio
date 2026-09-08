@@ -101,6 +101,7 @@ def _run_worker(*, once: bool, poll_interval: float) -> None:
         studio_service=service,
         downloader=ProviderMediaDownloader(),
         ffprobe_path=ffprobe_path,
+        ffmpeg_path=ffmpeg_path,
         poster_generator=poster_generator,
     )
     worker_id = f"{socket.gethostname()}-{os.getpid()}"

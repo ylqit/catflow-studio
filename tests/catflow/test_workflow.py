@@ -153,9 +153,7 @@ def _director_payload() -> DirectorPlanPayload:
                         "musicIntent": "轻柔木琴",
                     },
                     "directorIntent": "通过动作闭合呈现照顾感",
-                    "generationRisks": [
-                        {"code": "paw_contact", "message": "避免手爪融合"}
-                    ],
+                    "generationRisks": [{"code": "paw_contact", "message": "避免手爪融合"}],
                 }
             ],
         }
@@ -369,7 +367,9 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert first_video_job.input_snapshot.state == "submitted"
     assert first_video_job.input_snapshot.prompt == preview.prompt
     assert first_video_job.input_snapshot.schema_version == 2
-    assert first_video_job.input_snapshot.prompt_compiler_revision == "seedance-professional-v4"
+    assert (
+        first_video_job.input_snapshot.prompt_compiler_revision == "seedance-professional-v5-audio"
+    )
     assert first_video_job.input_snapshot.prompt_summary == preview.prompt_summary
     assert first_video_job.input_snapshot.prompt_sections == preview.prompt_sections
     assert first_video_job.frozen_input["compiledProviderPrompt"] == (
@@ -475,9 +475,7 @@ def test_repository_idempotency_input_conflict_has_a_stable_error_code() -> None
     repository.create_job(first)
 
     with pytest.raises(StudioConflictError) as caught:
-        repository.create_job(
-            first.model_copy(update={"id": uuid.uuid4(), "input_hash": "b" * 64})
-        )
+        repository.create_job(first.model_copy(update={"id": uuid.uuid4(), "input_hash": "b" * 64}))
 
     assert getattr(caught.value, "code", None) == "idempotency_input_conflict"
 
@@ -553,9 +551,7 @@ def test_director_completion_creates_a_candidate_without_replacing_the_current_p
     )
     assert adopted.active is True
     assert adopted.review_status == "accepted"
-    historical = next(
-        plan for plan in service.list_shot_plans(project.id) if plan.id == base.id
-    )
+    historical = next(plan for plan in service.list_shot_plans(project.id) if plan.id == base.id)
     assert historical.active is False
 
 
@@ -918,9 +914,7 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
     assert proposal_draft.warm_ending not in prompt
     assert payload.director_treatment.logline not in prompt
     assert payload.director_treatment.ending_image not in prompt
-    assert preview.warnings == [
-        {"code": "paw_occlusion", "message": "避免手与猫爪融合。"}
-    ]
+    assert preview.warnings == [{"code": "paw_occlusion", "message": "避免手与猫爪融合。"}]
 
 
 def test_selected_environment_is_scoped_to_its_project() -> None:

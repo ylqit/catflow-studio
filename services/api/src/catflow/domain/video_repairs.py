@@ -116,6 +116,167 @@ class EditDecisionListV2(ContractModel):
         return sum(item.duration_frames for item in self.video_segments)
 
 
+class EditAudioSegment(ContractModel):
+    """An ordered audio interval; envelopes stay anchored when later edits split it."""
+
+    asset_id: uuid.UUID = Field(alias="assetId")
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_in_frame: int = Field(alias="sourceInFrame", ge=0)
+    duration_frames: int = Field(alias="durationFrames", gt=0)
+    repair_id: uuid.UUID | None = Field(alias="repairId", default=None)
+    # A source without audio represents silence only when requireAudio is false.
+    require_audio: bool = Field(alias="requireAudio", default=False)
+    fade_in_ms: int = Field(alias="fadeInMs", default=0, ge=0)
+    fade_out_ms: int = Field(alias="fadeOutMs", default=0, ge=0)
+    envelope_start_frame: int = Field(alias="envelopeStartFrame", default=0, ge=0)
+    envelope_duration_frames: int | None = Field(alias="envelopeDurationFrames", default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> EditAudioSegment:
+        if self.fade_in_ms or self.fade_out_ms:
+            if self.envelope_duration_frames is None:
+                raise ValueError("audio fades require their original envelope interval")
+            if (self.fade_in_ms + self.fade_out_ms) * 24 > self.envelope_duration_frames * 1000:
+                raise ValueError("audio fades exceed their interval")
+            if not (
+                self.envelope_start_frame <= self.source_in_frame
+                and self.source_in_frame + self.duration_frames
+                <= self.envelope_start_frame + self.envelope_duration_frames
+            ):
+                raise ValueError("audio interval exceeds its envelope")
+        return self
+
+
+class EditAudioV3(ContractModel):
+    policy: Literal["segmented"] = "segmented"
+    segments: list[EditAudioSegment] = Field(min_length=1)
+
+
+class EditDecisionListV3(ContractModel):
+    format: Literal["catflow-edl-v3"] = "catflow-edl-v3"
+    frame_rate: RationalFrameRate = Field(alias="frameRate")
+    root_video_asset_id: uuid.UUID = Field(alias="rootVideoAssetId")
+    root_video_sha256: str = Field(alias="rootVideoSha256", pattern=r"^[a-f0-9]{64}$")
+    video_segments: list[EditVideoSegment] = Field(alias="videoSegments", min_length=1)
+    transitions: list[EditTransitionV2] = Field(default_factory=list)
+    audio: EditAudioV3
+    output: EditOutputV2
+
+    @property
+    def total_frames(self) -> int:
+        return sum(item.duration_frames for item in self.video_segments)
+
+    @model_validator(mode="after")
+    def validate_timeline(self) -> EditDecisionListV3:
+        if (self.frame_rate.numerator, self.frame_rate.denominator) != (24, 1):
+            raise ValueError("EDL v3 requires a 24 fps timeline")
+        if sum(item.duration_frames for item in self.audio.segments) != self.total_frames:
+            raise ValueError("audio and video timelines must have identical durations")
+        if any(
+            item.after_segment_index >= len(self.video_segments) - 1 for item in self.transitions
+        ):
+            raise ValueError("transition refers to a missing segment boundary")
+        return self
+
+
+FrameEditTimeline = EditDecisionListV2 | EditDecisionListV3
+
+
+class CandidatePlacement(ContractModel):
+    candidate_source_range: FrameRange = Field(alias="candidateSourceRange")
+    audio_policy: Literal["preserve_current", "use_candidate"] = Field(alias="audioPolicy")
+    fade_in_ms: int = Field(alias="fadeInMs", default=0, ge=0)
+    fade_out_ms: int = Field(alias="fadeOutMs", default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_audio(self) -> CandidatePlacement:
+        if self.audio_policy == "preserve_current" and (self.fade_in_ms or self.fade_out_ms):
+            raise ValueError("preserving current audio cannot change its fades")
+        if (
+            self.fade_in_ms + self.fade_out_ms
+        ) * 24 > self.candidate_source_range.duration_frames * 1000:
+            raise ValueError("audio fades exceed the candidate interval")
+        return self
+
+
+def build_candidate_trial(
+    timeline: FrameEditTimeline,
+    *,
+    issue_range: FrameRange,
+    candidate_asset_id: uuid.UUID,
+    candidate_sha256: str,
+    repair_id: uuid.UUID,
+    placement: CandidatePlacement,
+) -> EditDecisionListV3:
+    """Construct the exact, duration-preserving video and audio trial on the server."""
+    replaced = splice_repair_candidate(
+        timeline,
+        issue_range=issue_range,
+        candidate_asset_id=candidate_asset_id,
+        candidate_sha256=candidate_sha256,
+        candidate_source_range=placement.candidate_source_range,
+        repair_id=repair_id,
+        transition=EditTransitionV2(afterSegmentIndex=0, type="cut", durationFrames=0),
+    )
+    audio = (
+        timeline.audio.segments
+        if isinstance(timeline, EditDecisionListV3)
+        else [
+            EditAudioSegment(
+                assetId=timeline.audio.asset_id,
+                sha256=timeline.audio.sha256,
+                sourceInFrame=0,
+                durationFrames=timeline.total_frames,
+            )
+        ]
+    )
+    if placement.audio_policy == "use_candidate":
+        result: list[EditAudioSegment] = []
+        cursor = 0
+        inserted = False
+        for segment in audio:
+            start, end = cursor, cursor + segment.duration_frames
+            cursor = end
+            if end <= issue_range.start_frame or start >= issue_range.end_frame:
+                result.append(segment)
+                continue
+            if start < issue_range.start_frame:
+                result.append(
+                    segment.model_copy(update={"duration_frames": issue_range.start_frame - start})
+                )
+            if not inserted:
+                result.append(
+                    EditAudioSegment(
+                        assetId=candidate_asset_id,
+                        sha256=candidate_sha256,
+                        sourceInFrame=placement.candidate_source_range.start_frame,
+                        durationFrames=issue_range.duration_frames,
+                        repairId=repair_id,
+                        requireAudio=True,
+                        fadeInMs=placement.fade_in_ms,
+                        fadeOutMs=placement.fade_out_ms,
+                        envelopeStartFrame=placement.candidate_source_range.start_frame,
+                        envelopeDurationFrames=issue_range.duration_frames,
+                    )
+                )
+                inserted = True
+            if end > issue_range.end_frame:
+                result.append(
+                    segment.model_copy(
+                        update={
+                            "source_in_frame": segment.source_in_frame
+                            + issue_range.end_frame
+                            - start,
+                            "duration_frames": end - issue_range.end_frame,
+                        }
+                    )
+                )
+        audio = result
+    document = replaced.model_dump(by_alias=True)
+    document.update(format="catflow-edl-v3", audio={"policy": "segmented", "segments": audio})
+    return EditDecisionListV3.model_validate(document)
+
+
 def expand_generation_window(
     issue_range: FrameRange,
     *,
@@ -184,7 +345,7 @@ def build_base_timeline(
 
 
 def splice_repair_candidate(
-    timeline: EditDecisionListV2,
+    timeline: FrameEditTimeline,
     *,
     issue_range: FrameRange,
     candidate_asset_id: uuid.UUID,
@@ -192,7 +353,7 @@ def splice_repair_candidate(
     candidate_source_range: FrameRange,
     repair_id: uuid.UUID,
     transition: EditTransitionV2,
-) -> EditDecisionListV2:
+) -> FrameEditTimeline:
     if issue_range.end_frame > timeline.total_frames:
         raise ValueError("repair range must be inside the timeline")
     if candidate_source_range.duration_frames != issue_range.duration_frames:

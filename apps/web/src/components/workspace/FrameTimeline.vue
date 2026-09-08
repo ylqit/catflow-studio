@@ -7,6 +7,8 @@ const props = withDefaults(defineProps<{
   totalFrames: number; modelValue: FrameRangeDto; currentFrame: number;
   disabled?: boolean; context?: FrameRangeDto | null;
   thumbnails?: Array<{ frame: number; url: string }>;
+  fixedLength?: boolean; compact?: boolean; label?: string; rate?: number;
+  segments?: Array<{ startFrame: number; endFrame: number; label: string }>;
 }>(), { disabled: false, context: null, thumbnails: () => [] });
 const emit = defineEmits<{ "update:modelValue": [FrameRangeDto]; seek: [number]; play: [] }>();
 const track = ref<HTMLElement>();
@@ -20,6 +22,12 @@ function frameAt(clientX: number) {
 }
 function update(mode: "in" | "out", value: number) {
   if (props.disabled || !Number.isFinite(value)) return;
+  if (props.fixedLength) {
+    const length = range.value.endFrame - range.value.startFrame;
+    const first = Math.max(0, Math.min(props.totalFrames - length, Math.trunc(value) - (mode === 'out' ? length : 0)));
+    emit('update:modelValue', { startFrame: first, endFrame: first + length });
+    return;
+  }
   const next = mode === "in"
     ? { ...range.value, startFrame: clampIssueStart(value, range.value.endFrame, props.totalFrames) }
     : { ...range.value, endFrame: clampIssueEnd(value, range.value.startFrame, props.totalFrames) };
@@ -40,7 +48,7 @@ function move(event: PointerEvent) {
     const length = drag.value.range.endFrame - drag.value.range.startFrame;
     const first = Math.max(0, Math.min(props.totalFrames - length, drag.value.range.startFrame + frame - drag.value.start));
     emit("update:modelValue", { startFrame: first, endFrame: first + length });
-    emit("seek", first);
+    if (!props.fixedLength) emit("seek", first);
   }
 }
 function key(event: KeyboardEvent, mode: "in" | "out") {
@@ -64,8 +72,8 @@ function timecode(mode: "in" | "out", input: HTMLInputElement) {
 </script>
 
 <template>
-  <section class="frame-editor" aria-label="精确帧时间轴">
-    <header><b>选区精确到帧 · 24 fps</b><label>时间轴缩放 <select v-model.number="zoom"><option :value="1">100%</option><option :value="2">200%</option><option :value="4">400%</option></select></label></header>
+  <section class="frame-editor" :class="{ compact }" :aria-label="label || '精确帧时间轴'">
+    <header><b>{{ label || '选区精确到帧' }} · {{ rate || 24 }} fps · [{{ range.startFrame }}, {{ range.endFrame }})</b><label>时间轴缩放 <select v-model.number="zoom"><option :value="1">100%</option><option :value="2">200%</option><option :value="4">400%</option></select></label></header>
     <div class="scroll-viewport">
       <div ref="track" class="frame-track" :style="{ width: `${zoom * 100}%` }" data-testid="frame-track" @pointerdown.self="emit('seek', Math.min(totalFrames - 1, frameAt($event.clientX)))">
         <div class="stills" @pointerdown="emit('seek', Math.min(totalFrames - 1, frameAt($event.clientX)))">
@@ -73,6 +81,7 @@ function timecode(mode: "in" | "out", input: HTMLInputElement) {
           <span v-if="!thumbnails.length">完整预览准备后显示对应帧的缩略图</span>
         </div>
         <div v-if="context" class="context-window" :style="style(context)" />
+        <div v-for="segment in segments" :key="segment.startFrame" class="applied-window" :style="style(segment)" :title="segment.label"><span>{{ segment.label }}</span></div>
         <div class="selected-window" data-testid="selected-window" :style="style(range)" @pointerdown="start($event, 'move')" @pointermove="move" @pointerup="drag = undefined" @lostpointercapture="drag = undefined" />
         <button v-for="mode in (['in', 'out'] as const)" :key="mode" type="button" class="handle" :data-testid="`${mode}-handle`"
           role="slider" :aria-label="mode === 'in' ? '选区入点' : '选区出点'" :aria-disabled="disabled" :aria-valuemin="0" :aria-valuemax="totalFrames"
@@ -81,7 +90,7 @@ function timecode(mode: "in" | "out", input: HTMLInputElement) {
         <i class="playhead" :style="{ left: `${currentFrame / totalFrames * 100}%` }" />
       </div>
     </div>
-    <div class="inputs">
+    <div class="inputs" v-if="!compact">
       <label>预览定位帧<input aria-label="预览定位帧" type="number" min="0" :max="totalFrames - 1" :value="currentFrame" @change="emit('seek', Number(($event.target as HTMLInputElement).value))" /></label>
       <label>入点时间码<input aria-label="入点时间码" :disabled="disabled" :value="formatFrameTimecode(range.startFrame)" @change="timecode('in', $event.target as HTMLInputElement)" /></label>
       <label>出点时间码<input aria-label="出点时间码" :disabled="disabled" :value="formatFrameTimecode(range.endFrame)" @change="timecode('out', $event.target as HTMLInputElement)" /></label>
@@ -90,12 +99,14 @@ function timecode(mode: "in" | "out", input: HTMLInputElement) {
       <p aria-live="polite">{{ range.endFrame - range.startFrame }} 帧 · {{ ((range.endFrame - range.startFrame) / 24).toFixed(3) }} 秒<br />当前呈现帧 {{ currentFrame }} / {{ totalFrames - 1 }}</p>
       <button type="button" class="secondary" @click="emit('play')">播放选区</button>
     </div>
-    <small>拖动两端调整，拖动色块整体移动；手柄获得焦点后，方向键逐帧调整，Shift 调整 10 帧。选区允许 1 帧，不代表模型能保证一帧级语义修复。</small>
+    <div v-else class="compact-inputs"><span>0 秒 / 0 帧</span><label v-if="fixedLength">取用起点<input aria-label="可视取用起点" type="number" min="0" :max="totalFrames - (range.endFrame - range.startFrame)" :value="range.startFrame" :disabled="disabled" @change="update('in', Number(($event.target as HTMLInputElement).value))" /></label><label v-else>定位帧<input aria-label="草稿定位帧" type="number" min="0" :max="totalFrames - 1" :value="currentFrame" @change="emit('seek', Number(($event.target as HTMLInputElement).value))" /></label><span>{{ (totalFrames / (rate || 24)).toFixed(3) }} 秒 / {{ totalFrames }} 帧</span></div>
+    <small v-if="!compact">拖动两端调整，拖动色块整体移动；手柄获得焦点后，方向键逐帧调整，Shift 调整 10 帧。选区允许 1 帧，不代表模型能保证一帧级语义修复。</small>
   </section>
 </template>
 
 <style scoped>
 .frame-editor { padding: 20px 24px; min-width: 0; }
+.frame-editor.compact { padding: 8px 16px; }.compact .frame-track { height: 46px; }.compact header { font-size: 12px; }.compact .scroll-viewport { padding-block: 5px; }.compact-inputs { display: flex; justify-content: space-between; align-items: center; font-size: 11px; gap: 8px; }.compact-inputs label { display: flex; align-items: center; gap: 6px; }.compact-inputs input { width: 80px; padding: 3px 6px; }.applied-window { position: absolute; bottom: 0; height: 16px; background: #26735fbb; color: white; font-size: 10px; pointer-events: none; overflow: hidden; }
 header,.inputs { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; justify-content: space-between; }
 header label { display: flex; gap: 8px; align-items: center; } select { width: 95px; }
 .scroll-viewport { overflow-x: auto; padding: 10px 14px; margin: 4px -14px; }
@@ -111,3 +122,5 @@ header label { display: flex; gap: 8px; align-items: center; } select { width: 9
 .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; transform: translateX(-50%); pointer-events: none; z-index: 4; }
 .inputs label { display: grid; gap: 4px; } input { width: 120px; } small { color: var(--muted); display: block; margin-top: 8px; line-height: 1.5; }
 </style>
+
+<style scoped>.frame-editor.compact { padding: 6px 16px; }.compact .frame-track { height: 34px; }.compact .scroll-viewport { padding-block: 3px; margin-block: 2px; }.compact header { gap: 6px; min-height: 20px; }.compact header select { padding: 0 3px; height: 22px; }.compact-inputs input { height: 22px; }.compact .handle { width: 12px; border-width: 2px; }</style>

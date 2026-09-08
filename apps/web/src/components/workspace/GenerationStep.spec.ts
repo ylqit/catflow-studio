@@ -279,7 +279,7 @@ describe("GenerationStep", () => {
         negativePrompt: "旧版需要避免的问题",
         references: [],
         videoReferences: [],
-        video: { durationSeconds: 12, resolution: "480p", aspectRatio: "9:16", frameRate: 24 },
+        video: { generateAudio: false, durationSeconds: 12, resolution: "480p", aspectRatio: "9:16", frameRate: 24 },
         source: {
           storyVersionId: "story-1",
           shotPlanVersionId: "shot-1",
@@ -366,7 +366,7 @@ describe("GenerationStep", () => {
           { key: "ending_constraints", title: "结尾与生成限制", content: "冻结的最终画面。" },
         ],
         references: [], videoReferences: [],
-        video: { durationSeconds: 12, resolution: "480p", aspectRatio: "9:16", frameRate: 24 },
+        video: { generateAudio: false, durationSeconds: 12, resolution: "480p", aspectRatio: "9:16", frameRate: 24 },
         source: {}, promptCompilerRevision: "seedance-professional-v4",
         createdAt: "2026-09-04T08:00:00Z",
       },

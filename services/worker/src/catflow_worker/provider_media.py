@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import json
 import socket
-import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from PIL import Image, UnidentifiedImageError
+
+from .media_probe import inspect_video
 
 
 class UnsafeProviderUrlError(ValueError):
@@ -26,6 +26,7 @@ class LandedProviderMedia:
     height: int
     duration_ms: int | None = None
     codec: str | None = None
+    media_facts: dict[str, object] = field(default_factory=dict)
 
 
 class ProviderMediaDownloader:
@@ -82,7 +83,7 @@ class ProviderMediaDownloader:
         partial.unlink(missing_ok=True)
         try:
             self._download(url, partial, maximum_bytes=self.VIDEO_LIMIT_BYTES)
-            metadata = _probe_video(partial, ffprobe_path)
+            metadata = inspect_video(partial, ffprobe_path)
             width = int(metadata["width"])
             height = int(metadata["height"])
             duration_ms = int(metadata["durationMs"])
@@ -108,6 +109,7 @@ class ProviderMediaDownloader:
                 height=height,
                 duration_ms=duration_ms,
                 codec=codec,
+                media_facts=metadata,
             )
         except Exception:
             partial.unlink(missing_ok=True)
@@ -146,8 +148,7 @@ class ProviderMediaDownloader:
             raise UnsafeProviderUrlError("provider URL must use HTTPS")
         host = parsed.hostname.rstrip(".").lower()
         if not any(
-            host == suffix or host.endswith(f".{suffix}")
-            for suffix in self.ALLOWED_HOST_SUFFIXES
+            host == suffix or host.endswith(f".{suffix}") for suffix in self.ALLOWED_HOST_SUFFIXES
         ):
             raise UnsafeProviderUrlError("provider URL is not an allowed Ark media host")
         addresses = self._resolve_host(host)
@@ -168,12 +169,7 @@ class ProviderMediaDownloader:
 
 def _resolve_host(host: str) -> tuple[str, ...]:
     return tuple(
-        sorted(
-            {
-                item[4][0]
-                for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-            }
-        )
+        sorted({item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
     )
 
 
@@ -183,37 +179,3 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-def _probe_video(path: Path, ffprobe_path: Path) -> dict[str, object]:
-    completed = subprocess.run(
-        [
-            str(ffprobe_path),
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height,codec_name:format=duration",
-            "-of",
-            "json",
-            str(path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if completed.returncode != 0:
-        raise ValueError("provider video failed ffprobe decode validation")
-    try:
-        document = json.loads(completed.stdout)
-        stream = document["streams"][0]
-        return {
-            "width": int(stream["width"]),
-            "height": int(stream["height"]),
-            "codec": str(stream["codec_name"]),
-            "durationMs": round(float(document["format"]["duration"]) * 1000),
-        }
-    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("provider video failed ffprobe metadata validation") from exc

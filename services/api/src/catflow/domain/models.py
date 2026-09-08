@@ -115,6 +115,15 @@ class GenerationRisk(ContractModel):
     message: str = Field(min_length=1, max_length=400)
 
 
+class ConfirmedShotFrame(ContractModel):
+    asset_id: uuid.UUID = Field(alias="assetId")
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    design_hash: str = Field(alias="designHash", pattern=r"^[a-f0-9]{64}$")
+    checks: list[
+        Literal["identity_scale", "placement_state", "movement_space", "action_start", "continuity"]
+    ] = Field(min_length=5, max_length=5)
+
+
 class ShotSpec(ContractModel):
     id: str = Field(min_length=1, max_length=80)
     order: int = Field(ge=1, le=4)
@@ -135,9 +144,12 @@ class ShotSpec(ContractModel):
     lighting: LightingDesign | None = None
     sound: ShotSoundDesign | None = None
     director_intent: str | None = Field(alias="directorIntent", default=None, max_length=500)
-    generation_risks: list[GenerationRisk] = Field(
-        alias="generationRisks", default_factory=list
+    generation_risks: list[GenerationRisk] = Field(alias="generationRisks", default_factory=list)
+    scene_asset_id: uuid.UUID | None = Field(alias="sceneAssetId", default=None)
+    environment_use: Literal["recompose", "preserve_layout"] = Field(
+        alias="environmentUse", default="recompose"
     )
+    confirmed_frame: ConfirmedShotFrame | None = Field(alias="confirmedFrame", default=None)
 
     @model_validator(mode="after")
     def validate_frame_duration(self) -> ShotSpec:
@@ -210,9 +222,7 @@ def _validate_professional_semantics(shots: list[ShotSpec]) -> None:
 class ShotPlanDraft(ContractModel):
     source_story_version_id: uuid.UUID = Field(alias="sourceStoryVersionId")
     source_selection_hash: str = Field(alias="sourceSelectionHash", pattern=r"^[a-f0-9]{64}$")
-    base_shot_plan_version_id: uuid.UUID | None = Field(
-        alias="baseShotPlanVersionId", default=None
-    )
+    base_shot_plan_version_id: uuid.UUID | None = Field(alias="baseShotPlanVersionId", default=None)
     expected_active_shot_plan_version_id: uuid.UUID | None = Field(
         alias="expectedActiveShotPlanVersionId", default=None
     )
@@ -308,9 +318,7 @@ class DirectorPlanPayload(ContractModel):
             if shot.duration_frames is None:
                 missing.append("duration_frames")
             if missing:
-                raise ValueError(
-                    f"professional shot {shot.order} is missing: {', '.join(missing)}"
-                )
+                raise ValueError(f"professional shot {shot.order} is missing: {', '.join(missing)}")
         _validate_professional_semantics(self.shots)
         return self
 
@@ -341,9 +349,7 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
             if shot.duration_frames is None:
                 missing.append("duration_frames")
             if missing:
-                raise ValueError(
-                    f"professional shot {shot.order} is missing: {', '.join(missing)}"
-                )
+                raise ValueError(f"professional shot {shot.order} is missing: {', '.join(missing)}")
         if sum(shot.duration_frames or 0 for shot in self.shots) != self.clip.duration_seconds * 24:
             raise ValueError("professional shot frames must equal the target duration at 24 fps")
         _validate_professional_semantics(self.shots)

@@ -666,7 +666,20 @@ export interface CanonProfileDto {
   createdAt: string;
 }
 
+export interface ShotProductionContextDto {
+  shotPlanVersionId: string; shotId: string; shot: ShotSpecDto; designHash: string; frameCurrent: boolean;
+  targetDurationFrames: number; environmentIntent: string; references: Array<{ assetId: string; role: string; sha256: string }>; jobs: JobDto[];
+}
+export interface ShotMediaPreviewDto {
+  purpose: 'shot_frame' | 'shot_video'; inputHash: string; shotPlanVersionId: string; targetShotId: string;
+  shotDesignHash: string; prompt: string; negativePrompt: string; model: string; generationMode: string;
+  durationSeconds: number | null; targetDurationFrames: number; generateAudio: boolean;
+  references: Array<{ assetId: string; role: string; sha256: string }>;
+}
 export interface ShotSpecDto {
+  sceneAssetId?: string | null;
+  environmentUse?: 'recompose' | 'preserve_layout';
+  confirmedFrame?: { assetId: string; sha256: string; designHash: string; checks: string[] } | null;
   id: string;
   order: number;
   durationSeconds: number;
@@ -760,6 +773,7 @@ export interface ShotPlanGenerationAttemptDto {
 }
 
 export interface GenerationPreviewDto {
+  generateAudio?: boolean;
   inputHash: string;
   provider: string;
   model: string;
@@ -833,17 +847,20 @@ export interface EditVersionDto {
   projectId: string;
   revision: number;
   sourceSelectionHash: string;
-  edl: EditDecisionListDto | EditDecisionListV2Dto;
+  edl: EditDecisionListDto | EditDecisionListV2Dto | EditDecisionListV3Dto;
   status: "draft" | "rendered" | "approved";
   renderedAssetId?: string;
   parentEditVersionId?: string;
-  formatVersion: 1 | 2;
+  formatVersion: 1 | 2 | 3;
   active: boolean;
   timelineHash?: string;
   createdAt: string;
 }
 
 export type FrameRangeDto = components["schemas"]["FrameRange"];
+export type CandidatePlacementDto = components["schemas"]["CandidatePlacement"];
+export type EditDecisionListV3Dto = components["schemas"]["EditDecisionListV3"];
+export type FrameEditTimelineDto = EditDecisionListV2Dto | EditDecisionListV3Dto;
 export type EditDecisionListV2Dto = components["schemas"]["EditDecisionListV2"];
 export type SegmentRepairPreviewCommand = components["schemas"]["SegmentRepairPreviewCommand"];
 export type SegmentRepairPreviewDto = components["schemas"]["SegmentRepairPreviewDto"];

@@ -54,7 +54,7 @@ class ArkProviderJobGateway:
         self._video_reference_publisher = publish_segment_reference
         self._prepared_video_references: dict[uuid.UUID, PublishedSegmentReference] = {}
         self._prepared_segment_media: dict[
-            uuid.UUID, tuple[Path, Path, Path, PublishedSegmentReference]
+            uuid.UUID, tuple[Path, Path, Path, PublishedSegmentReference | None]
         ] = {}
 
     def prepare_submission(
@@ -91,7 +91,8 @@ class ArkProviderJobGateway:
             return
         if self._prepare_segment_media is None:
             raise ValueError("segment media preparation is not configured")
-        if self._video_reference_publisher is None:
+        from_frame = frozen_input.get("generationMode") == "from_frame"
+        if not from_frame and self._video_reference_publisher is None:
             raise ProviderGatewayError(
                 code="segment_reference_publisher_unavailable",
                 message="Ark segment repair requires a configured HTTPS object publisher",
@@ -112,7 +113,9 @@ class ArkProviderJobGateway:
             duration_seconds,
         )
         try:
-            published = self._video_reference_publisher.publish(job_id, context)
+            published = (
+                None if from_frame else self._video_reference_publisher.publish(job_id, context)
+            )
         except ObjectPublisherError as exc:
             raise ProviderGatewayError(
                 code=exc.code,
@@ -144,6 +147,13 @@ class ArkProviderJobGateway:
             result = self._gateway.plan_shots(
                 prompt=_required_string(frozen_input, "prompt"),
                 output_schema=_required_dict(frozen_input, "outputSchema"),
+                image_paths=(
+                    self._resolve_asset_paths(
+                        _uuid_tuple(frozen_input.get("referenceAssetIds", []))
+                    )
+                    if frozen_input.get("referenceInputMode") == "vision"
+                    else ()
+                ),
             )
             return _structured_submission(result)
         if kind in {"plan_series", "plan_series_segment"}:
@@ -214,11 +224,17 @@ class ArkProviderJobGateway:
                 )
             result = self._gateway.submit_video(
                 prompt=compiled_prompt,
+                generation_mode=str(frozen_input.get("generationMode", "references")),
                 reference_paths=self._resolve_asset_paths(reference_ids),
                 reference_roles=reference_roles,
                 reference_video_url=(published_video.url if published_video is not None else None),
                 duration_seconds=int(frozen_input.get("durationSeconds", 12)),
                 resolution=_required_string(frozen_input, "resolution"),
+                **(
+                    {"generate_audio": bool(frozen_input["generateAudio"])}
+                    if "generateAudio" in frozen_input
+                    else {}
+                ),
             )
             metadata: dict[str, str] = {}
             if result.request_id:
@@ -252,6 +268,7 @@ class ArkProviderJobGateway:
                 str(item)
                 for item in frozen_input.get("referenceRoles", [])  # type: ignore[union-attr]
             )
+            from_frame = frozen_input.get("generationMode") == "from_frame"
             expected_roles = (
                 "anchor_in",
                 *(("anchor_out",) if frozen_input.get("endStatePolicy") != "replace" else ()),
@@ -261,15 +278,20 @@ class ArkProviderJobGateway:
                 "environment",
                 "style_board",
             )
+            if from_frame:
+                expected_roles = (
+                    "first_frame",
+                    *(("last_frame",) if frozen_input.get("anchorEndFrame") is not None else ()),
+                )
             if reference_roles != expected_roles:
                 raise ValueError("segment reference roles are incomplete or out of order")
             canon_ids = _uuid_tuple(frozen_input.get("referenceAssetIds", []))
-            if len(canon_ids) != 5:
+            if len(canon_ids) != (0 if from_frame else 5):
                 raise ValueError("segment repair requires exactly five stored references")
             compiler_revision = str(frozen_input.get("promptCompilerRevision", "segment-edit-v2"))
             time_origin = (
                 _required_frame_range(frozen_input, "generationRange")[0]
-                if compiler_revision == "segment-edit-v3"
+                if compiler_revision in {"segment-edit-v3", "segment-edit-v4"}
                 else 0
             )
             result = self._gateway.submit_segment_video(
@@ -277,7 +299,9 @@ class ArkProviderJobGateway:
                     instruction=_required_string(frozen_input, "instruction"),
                     prompt=_required_string(frozen_input, "prompt"),
                     negative_prompt=_required_string(frozen_input, "negativePrompt"),
-                    context_video_url=published.url,
+                    context_video_url=published.url if published else None,
+                    generation_mode="from_frame" if from_frame else "edit_existing",
+                    generate_audio=bool(frozen_input.get("generateAudio", False)),
                     issue_start_seconds=(
                         _required_frame_range(frozen_input, "issueRange")[0] - time_origin
                     )
@@ -287,16 +311,18 @@ class ArkProviderJobGateway:
                     )
                     / 24,
                     anchor_in_path=anchor_in,
-                    anchor_out_path=anchor_out if "anchor_out" in reference_roles else None,
+                    anchor_out_path=anchor_out
+                    if any(role in reference_roles for role in ("anchor_out", "last_frame"))
+                    else None,
                     canon_reference_paths=self._resolve_asset_paths(canon_ids),
-                    canon_reference_roles=reference_roles[-5:],
+                    canon_reference_roles=() if from_frame else reference_roles[-5:],
                     duration_seconds=duration_seconds,
                     resolution="480p",
                     ratio="9:16",
                     prompt_compiler_revision=compiler_revision,
                 )
             )
-            metadata = {"publicationId": str(published.publication_id)}
+            metadata = {"publicationId": str(published.publication_id)} if published else {}
             if result.request_id:
                 metadata["requestId"] = result.request_id
             return ProviderSubmission(taskId=result.task_id, metadata=metadata)

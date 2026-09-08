@@ -7,7 +7,13 @@ import pytest
 from catflow.application import service as contracts
 from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import SegmentRepairPreviewCommand
-from catflow.domain.video_repairs import FrameRange, validate_issue_range
+from catflow.domain.video_repairs import (
+    CandidatePlacement,
+    FrameRange,
+    build_base_timeline,
+    build_candidate_trial,
+    validate_issue_range,
+)
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
 
 
@@ -75,6 +81,245 @@ def repair_draft():
         ),
     )
     return service, repo, project, video, draft
+
+
+@pytest.mark.parametrize("start,end", [(0, 1), (288, 289), (144, 289)])
+def test_slipped_trial_preserves_length_and_audio_source_offsets(start, end):
+    root = build_base_timeline(asset_id=uuid.uuid4(), sha256="a" * 64, total_frames=289)
+    original = root.model_dump(mode="json", by_alias=True)
+    trial = build_candidate_trial(
+        root,
+        issue_range=FrameRange(startFrame=start, endFrame=end),
+        candidate_asset_id=uuid.uuid4(),
+        candidate_sha256="b" * 64,
+        repair_id=uuid.uuid4(),
+        placement=CandidatePlacement(
+            candidateSourceRange={"startFrame": 30, "endFrame": 30 + end - start},
+            audioPolicy="use_candidate",
+        ),
+    )
+    video = next(
+        segment for segment in trial.video_segments if segment.origin == "repair_candidate"
+    )
+    audio = next(segment for segment in trial.audio.segments if segment.repair_id)
+    assert (video.source_in_frame, audio.source_in_frame) == (30, 30)
+    assert (
+        trial.total_frames
+        == sum(segment.duration_frames for segment in trial.audio.segments)
+        == 289
+    )
+    assert root.model_dump(mode="json", by_alias=True) == original
+
+
+def test_second_audio_edit_splits_existing_envelope_without_restarting_fade():
+    root = build_base_timeline(asset_id=uuid.uuid4(), sha256="a" * 64, total_frames=289)
+    first = build_candidate_trial(
+        root,
+        issue_range=FrameRange(startFrame=48, endFrame=144),
+        candidate_asset_id=uuid.uuid4(),
+        candidate_sha256="b" * 64,
+        repair_id=uuid.uuid4(),
+        placement=CandidatePlacement(
+            candidateSourceRange={"startFrame": 24, "endFrame": 120},
+            audioPolicy="use_candidate",
+            fadeInMs=500,
+            fadeOutMs=750,
+        ),
+    )
+    second = build_candidate_trial(
+        first,
+        issue_range=FrameRange(startFrame=72, endFrame=96),
+        candidate_asset_id=uuid.uuid4(),
+        candidate_sha256="c" * 64,
+        repair_id=uuid.uuid4(),
+        placement=CandidatePlacement(
+            candidateSourceRange={"startFrame": 0, "endFrame": 24}, audioPolicy="use_candidate"
+        ),
+    )
+    retained = [segment for segment in second.audio.segments if segment.sha256 == "b" * 64]
+    assert [(segment.source_in_frame, segment.duration_frames) for segment in retained] == [
+        (24, 24),
+        (72, 48),
+    ]
+    assert all(
+        (segment.envelope_start_frame, segment.envelope_duration_frames, segment.fade_out_ms)
+        == (24, 96, 750)
+        for segment in retained
+    )
+    preserved = build_candidate_trial(
+        first,
+        issue_range=FrameRange(startFrame=288, endFrame=289),
+        candidate_asset_id=uuid.uuid4(),
+        candidate_sha256="c" * 64,
+        repair_id=uuid.uuid4(),
+        placement=CandidatePlacement(
+            candidateSourceRange={"startFrame": 0, "endFrame": 1}, audioPolicy="preserve_current"
+        ),
+    )
+    assert preserved.audio == first.audio
+
+
+def test_free_trials_are_immutable_and_application_is_bound_to_completed_preview():
+    service, repo, project, video, draft = repair_draft()
+    base = repo.get_edit(draft.head_edit_version_id)
+    inputs = contracts.SegmentRepairPreviewCommand(
+        baseVideoAssetId=video.id,
+        baseEditVersionId=base.id,
+        editDraftId=draft.id,
+        issueRange={"startFrame": 24, "endFrame": 72},
+        instruction="抬起手再放下",
+        audioMode="generate_candidate",
+    )
+    preview = service.preview_video_repair(project.id, inputs)
+    paid = service.create_video_repair_job(
+        project.id,
+        contracts.SegmentRepairCreateCommand(
+            **inputs.model_dump(by_alias=True),
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="paid-mock-only",
+        ),
+    )
+    candidate = service.register_asset(
+        project.id,
+        role="repair_candidate",
+        media_type="video",
+        sha256="b" * 64,
+        metadata={"durationFrames": 120, "hasAudio": True},
+    )
+    repo.set_video_repair_status(
+        paid.video_repair_id, status="candidate_ready", candidate_asset_id=candidate.id
+    )
+    repo._jobs[paid.id] = paid.model_copy(update={"status": "succeeded"})
+
+    def trial(start, key):
+        return service.create_draft_preview(
+            project.id,
+            draft.id,
+            contracts.VideoDraftPreviewCommand(
+                expectedEditVersionId=base.id,
+                expectedTimelineHash=base.timeline_hash,
+                repairId=paid.video_repair_id,
+                placement={
+                    "candidateSourceRange": {"startFrame": start, "endFrame": start + 48},
+                    "audioPolicy": "use_candidate",
+                },
+                idempotencyKey=key,
+            ),
+        )
+
+    first = trial(0, "trial-first")
+    second = trial(12, "trial-second")
+    assert first.frozen_input["edl"] != second.frozen_input["edl"]
+    assert (
+        service.get_video_repair(paid.video_repair_id).candidate_core_range
+        == preview.candidate_core_range
+    )
+    assert repo.get_video_edit_draft(draft.id).head_edit_version_id == base.id
+    apply = contracts.VideoDraftSaveCommand(
+        expectedEditVersionId=base.id,
+        expectedTimelineHash=base.timeline_hash,
+        repairId=paid.video_repair_id,
+        previewJobId=second.id,
+        idempotencyKey="apply-completed-only",
+    )
+    with pytest.raises(contracts.StudioConflictError, match="已完成"):
+        service.save_video_draft(project.id, draft.id, apply)
+    materialized = service.register_asset(
+        project.id,
+        role="edit_preview",
+        media_type="video",
+        sha256="c" * 64,
+        producing_job_id=second.id,
+        metadata={"timelineHash": second.frozen_input["timelineHash"]},
+    )
+    repo._jobs[second.id] = second.model_copy(
+        update={"status": "succeeded", "result_asset_ids": [materialized.id]}
+    )
+    saved = service.save_video_draft(project.id, draft.id, apply)
+    assert (
+        saved.format_version == 3
+        and saved.edl.model_dump(mode="json", by_alias=True) == second.frozen_input["edl"]
+    )
+    assert service.save_video_draft(project.id, draft.id, apply).id == saved.id
+    assert trial(1, "old-parent-still-viewable").provider == "local_ffmpeg"
+    with pytest.raises(contracts.StudioConflictError, match="草稿"):
+        service.save_video_draft(
+            project.id, draft.id, apply.model_copy(update={"idempotency_key": "conflicting-apply"})
+        )
+    assert len([job for job in repo._jobs.values() if job.provider == "ark"]) == 1
+
+    complete = service.register_asset(
+        project.id,
+        role="edit_preview",
+        media_type="video",
+        sha256="d" * 64,
+        metadata={
+            "editDraftId": str(draft.id),
+            "editVersionId": str(saved.id),
+            "timelineHash": saved.timeline_hash,
+            "hasAudio": True,
+        },
+    )
+    review_input = contracts.VideoReviewCreateCommand(
+        assetId=complete.id,
+        editVersionId=saved.id,
+        timelineHash=saved.timeline_hash,
+        checks=dict.fromkeys(contracts.VIDEO_REVIEW_KEYS, "pass"),
+        idempotencyKey="review-exact-audio-version",
+    )
+    visual_only = service.create_video_review(project.id, review_input)
+    with pytest.raises(contracts.StudioConflictError, match="声音意图"):
+        service.require_video_review(project.id, complete.id, visual_only.id)
+    with pytest.raises(contracts.StudioConflictError, match="rendered edit"):
+        service.create_video_review(
+            project.id, review_input.model_copy(update={"timeline_hash": base.timeline_hash})
+        )
+    sound_review = service.create_video_review(
+        project.id,
+        review_input.model_copy(
+            update={
+                "audio_checks": {"soundIntent": "pass", "sync": "pass", "continuity": "pass"},
+                "idempotency_key": "review-exact-audio-approved",
+            }
+        ),
+    )
+    service.require_video_review(project.id, complete.id, sound_review.id)
+    assert "video" not in repo.current_selections(project.id)
+
+
+def test_strict_frame_preview_and_create_freeze_only_the_actual_references():
+    service, repo, project, video, draft = repair_draft()
+    inputs = contracts.SegmentRepairPreviewCommand(
+        baseVideoAssetId=video.id,
+        baseEditVersionId=draft.head_edit_version_id,
+        editDraftId=draft.id,
+        issueRange={"startFrame": 144, "endFrame": 289},
+        instruction="保持手中物件",
+        generationMode="from_frame",
+        anchorStartFrame=130,
+        audioMode="generate_candidate",
+        soundDescription="衣物摩擦声",
+        endStatePolicy="replace",
+        desiredEndState="物件留在手中",
+    )
+    preview = service.preview_video_repair(project.id, inputs)
+    assert preview.video_reference is None
+    assert [reference.role for reference in preview.image_references] == ["first_frame"]
+    assert preview.image_references[0].frame_number == 130
+    assert preview.candidate_core_range.start_frame == 0
+    assert preview.input_snapshot.video.generate_audio is True
+    paid = service.create_video_repair_job(
+        project.id,
+        contracts.SegmentRepairCreateCommand(
+            **inputs.model_dump(by_alias=True),
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="strict-mode-mock-only",
+        ),
+    )
+    assert paid.frozen_input["referenceAssetIds"] == []
+    assert paid.frozen_input["generateAudio"] is True
+    assert paid.frozen_input["videoReference"] is None
+    assert paid.frozen_input["promptCompilerRevision"] == "segment-edit-v4"
 
 
 def test_unselected_video_creates_inactive_draft_and_replays_same_request():

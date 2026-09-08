@@ -314,6 +314,71 @@ def test_ark_video_poll_maps_succeeded_media_urls() -> None:
     assert "inputTokens" not in result.usage
 
 
+@pytest.mark.parametrize("with_end", [False, True])
+def test_strict_frame_generation_sends_no_omni_references_and_requests_audio(tmp_path, with_end):
+    tasks = Recorder(SimpleNamespace(id="strict-frame-mock"))
+    gateway = ArkTypedGateway(
+        _settings(), client=SimpleNamespace(content_generation=SimpleNamespace(tasks=tasks))
+    )
+    first = _image(tmp_path / "first.png", "red")
+    last = _image(tmp_path / "last.png", "blue") if with_end else None
+    request = SegmentVideoGenerationRequest(
+        instruction="手保持抬起",
+        prompt="从正确起点连续运动",
+        negative_prompt="错误动作",
+        context_video_url=None,
+        issue_start_seconds=0,
+        issue_end_seconds=2,
+        anchor_in_path=first,
+        anchor_out_path=last,
+        canon_reference_paths=(),
+        canon_reference_roles=(),
+        duration_seconds=4,
+        resolution="480p",
+        ratio="9:16",
+        generation_mode="from_frame",
+        generate_audio=True,
+        prompt_compiler_revision="segment-edit-v4",
+    )
+    gateway.submit_segment_video(request)
+    sent = tasks.calls[0]
+    assert sent["generate_audio"] is True
+    assert [item.get("role") for item in sent["content"]] == [
+        None,
+        "first_frame",
+        *(["last_frame"] if with_end else []),
+    ]
+    assert "omni_reference_task_type" not in sent
+    assert all(item["type"] != "video_url" for item in sent["content"])
+    from dataclasses import replace
+
+    with pytest.raises(ValueError, match="strict frame"):
+        replace(request, context_video_url="https://media.example.test/context.mp4")
+
+
+def test_native_audio_whole_generation_is_explicit_and_legacy_default_stays_silent(tmp_path):
+    tasks = Recorder(SimpleNamespace(id="audio-mock"))
+    gateway = ArkTypedGateway(
+        _settings(), client=SimpleNamespace(content_generation=SimpleNamespace(tasks=tasks))
+    )
+    gateway.submit_video(
+        prompt="环境与动作声",
+        reference_paths=(),
+        reference_roles=(),
+        duration_seconds=12,
+        resolution="480p",
+        generate_audio=True,
+    )
+    gateway.submit_video(
+        prompt="旧冻结输入",
+        reference_paths=(),
+        reference_roles=(),
+        duration_seconds=12,
+        resolution="480p",
+    )
+    assert [call["generate_audio"] for call in tasks.calls] == [True, False]
+
+
 def test_ark_usage_does_not_invent_zero_values_for_missing_provider_fields() -> None:
     responses = Recorder(
         SimpleNamespace(

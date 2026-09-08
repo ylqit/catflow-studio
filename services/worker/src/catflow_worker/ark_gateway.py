@@ -83,12 +83,12 @@ class ArkTypedGateway:
         )
 
     def plan_shots(
-        self, *, prompt: str, output_schema: dict[str, object]
+        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = ()
     ) -> StructuredProviderResult:
         return self._structured_response(
             model=self._settings.planning_model,
             prompt=prompt,
-            image_paths=(),
+            image_paths=image_paths,
             output_schema=output_schema,
             max_output_tokens=8000,
         )
@@ -196,7 +196,19 @@ class ArkTypedGateway:
         reference_video_url: str | None = None,
         duration_seconds: int,
         resolution: str,
+        generate_audio: bool = False,
+        generation_mode: str = "references",
     ) -> VideoSubmissionResult:
+        if generation_mode == "from_frame" and (
+            len(reference_paths) != 1
+            or reference_roles != ("first_frame",)
+            or reference_video_url is not None
+        ):
+            raise ValueError(
+                "strict first-frame mode accepts exactly one first frame and no other references"
+            )
+        if generation_mode not in {"from_frame", "references"}:
+            raise ValueError("unsupported video generation mode")
         if len(reference_paths) != len(reference_roles):
             raise ValueError("video reference paths and roles must have the same length")
         if len(reference_paths) > 9:
@@ -230,7 +242,7 @@ class ArkTypedGateway:
                 {
                     "type": "image_url",
                     "image_url": {"url": _image_data_url(path)},
-                    "role": "reference_image",
+                    "role": "first_frame" if generation_mode == "from_frame" else "reference_image",
                 }
             )
         if reference_video_url is not None:
@@ -246,7 +258,7 @@ class ArkTypedGateway:
                 model=self._settings.video_model,
                 content=content,
                 return_last_frame=True,
-                generate_audio=False,
+                generate_audio=generate_audio,
                 watermark=False,
                 resolution=resolution,
                 ratio="9:16",
@@ -334,7 +346,7 @@ class ArkTypedGateway:
                 "type": "text",
                 "text": (
                     f"{request.prompt}\n需要避免的问题：{request.negative_prompt}"
-                    if request.prompt_compiler_revision == "segment-edit-v3"
+                    if request.prompt_compiler_revision in {"segment-edit-v3", "segment-edit-v4"}
                     else (
                         f"本区间修改目标：{request.instruction}\n"
                         f"精确问题时间：{request.issue_start_seconds:.3f}–"
@@ -345,26 +357,31 @@ class ArkTypedGateway:
                     )
                 ),
             },
-            {
-                "type": "video_url",
-                "video_url": {"url": request.context_video_url},
-                "role": "reference_video",
-            },
         ]
+        if request.generation_mode == "edit_existing":
+            content.append(
+                {
+                    "type": "video_url",
+                    "video_url": {"url": request.context_video_url},
+                    "role": "reference_video",
+                }
+            )
         content.extend(
             {
                 "type": "image_url",
                 "image_url": {"url": _image_data_url(path)},
-                "role": "reference_image",
+                "role": ("first_frame" if index == 0 else "last_frame")
+                if request.generation_mode == "from_frame"
+                else "reference_image",
             }
-            for path in image_paths
+            for index, path in enumerate(image_paths)
         )
         try:
             response = self._client.content_generation.tasks.create(
                 model=self._settings.video_model,
                 content=content,
                 return_last_frame=True,
-                generate_audio=False,
+                generate_audio=request.generate_audio,
                 watermark=False,
                 resolution=request.resolution,
                 ratio=request.ratio,

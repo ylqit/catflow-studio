@@ -14,6 +14,7 @@ from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.media import LocalMediaStore
 from catflow.infrastructure.models import AssetRecord, JobRecord
 
+from .media_probe import inspect_video
 from .project_posters import ProjectPosterGenerator
 from .provider_media import LandedProviderMedia, ProviderMediaDownloader
 from .runner import JobResultError
@@ -30,6 +31,7 @@ class ArkResultLandingService:
         studio_service: StudioService,
         downloader: ProviderMediaDownloader,
         ffprobe_path: Path,
+        ffmpeg_path: Path | None = None,
         poster_generator: ProjectPosterGenerator | None = None,
     ) -> None:
         self._sessions = sessions
@@ -37,6 +39,7 @@ class ArkResultLandingService:
         self._studio_service = studio_service
         self._downloader = downloader
         self._ffprobe_path = ffprobe_path
+        self._ffmpeg_path = ffmpeg_path
         self._poster_generator = poster_generator
 
     def store_result(self, job_id: uuid.UUID) -> None:
@@ -126,21 +129,16 @@ class ArkResultLandingService:
                 beat.binding_order
                 for beat in self._studio_service.list_series_source_beats(job.series_id)
             },
-            start_episode_order=(
-                int(job.frozen_input["startEpisodeOrder"]) if is_segment else 1
-            ),
+            start_episode_order=(int(job.frozen_input["startEpisodeOrder"]) if is_segment else 1),
             require_complete_source_coverage=not is_segment,
         )
-        self._studio_service.record_series_plan_validation(
-            job_id, normalized.validation_document()
-        )
+        self._studio_service.record_series_plan_validation(job_id, normalized.validation_document())
         if normalized.disposition == "invalid" or normalized.plan is None:
             raise JobResultError(
                 code="series_plan_output_invalid",
                 message="模型没有返回可读取的整季方案，本次没有创建新方案。",
                 detail="; ".join(
-                    f"{issue.path or '<root>'}: {issue.message}"
-                    for issue in normalized.issues
+                    f"{issue.path or '<root>'}: {issue.message}" for issue in normalized.issues
                 ),
             )
         if is_segment:
@@ -177,6 +175,11 @@ class ArkResultLandingService:
                 return
             project_id = job.project_id
             role = str(job.frozen_input_json["role"])
+            shot_metadata = {
+                key: job.frozen_input_json[key]
+                for key in ("purpose", "targetShotId", "shotPlanVersionId", "shotDesignHash")
+                if key in job.frozen_input_json
+            }
             result = dict(job.provider_result_json or {})
         url = str(result.get("url", ""))
         if not url:
@@ -191,6 +194,7 @@ class ArkResultLandingService:
             landed=landed,
             metadata={
                 "provider": "ark",
+                **shot_metadata,
                 "responseId": result.get("responseId"),
                 "model": result.get("model"),
                 "width": landed.width,
@@ -204,10 +208,20 @@ class ArkResultLandingService:
             job = session.get(JobRecord, job_id)
             if job is None:
                 raise ValueError("job not found")
+            role = (
+                "repair_candidate"
+                if repair_candidate
+                else str(job.frozen_input_json.get("role", "video"))
+            )
+            shot_metadata = {
+                key: job.frozen_input_json[key]
+                for key in ("purpose", "targetShotId", "shotPlanVersionId", "shotDesignHash")
+                if key in job.frozen_input_json
+            }
             existing = session.scalar(
                 select(AssetRecord).where(
                     AssetRecord.producing_job_id == job_id,
-                    AssetRecord.role == ("repair_candidate" if repair_candidate else "video"),
+                    AssetRecord.role == role,
                 )
             )
             if existing is not None:
@@ -222,6 +236,7 @@ class ArkResultLandingService:
             provider_task_id = job.provider_task_id
             video_repair_id = job.video_repair_id
             expected_duration = int(job.frozen_input_json.get("durationSeconds", 12))
+            requested_audio = bool(job.frozen_input_json.get("generateAudio", False))
             result = dict(job.provider_result_json or {})
         url = str(result.get("videoUrl", ""))
         if not url:
@@ -239,12 +254,13 @@ class ArkResultLandingService:
         )
         asset_id = self._persist_asset(
             job_id,
-            role="repair_candidate" if repair_candidate else "video",
+            role=role,
             storage_key=storage_key,
             media_type="video",
             landed=landed,
             metadata={
                 "provider": "ark",
+                **shot_metadata,
                 "providerTaskId": provider_task_id,
                 "providerRequestId": result.get("requestId"),
                 "model": result.get("model"),
@@ -254,9 +270,19 @@ class ArkResultLandingService:
                 "codec": landed.codec,
                 "ratio": result.get("ratio"),
                 "resolution": result.get("resolution"),
-                "durationFrames": round((landed.duration_ms or 0) * 24 / 1000),
-                "frameRateNumerator": 24,
-                "frameRateDenominator": 1,
+                **landed.media_facts,
+                **(
+                    inspect_video(
+                        self._media_store.resolve(storage_key),
+                        self._ffprobe_path,
+                        ffmpeg_path=self._ffmpeg_path,
+                    )
+                    if self._ffmpeg_path
+                    else {}
+                ),
+                "requestedAudio": requested_audio,
+                "audioRequestMissing": requested_audio
+                and not landed.media_facts.get("hasAudio", False),
             },
         )
         self._sanitize_result(job_id, asset_id, result)

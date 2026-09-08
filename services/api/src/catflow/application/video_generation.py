@@ -6,7 +6,7 @@ from typing import Literal
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import BlockingDesign, DirectorStoryTreatment, ShotSpec
 
-VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v4"
+VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v6-scene"
 
 _BASE_VIDEO_EXCLUSIONS = (
     "真实摄影",
@@ -65,9 +65,7 @@ def _clean_fragment(value: str) -> str:
 
 def compile_prompt_sentence(*clauses: str) -> str:
     """Serialize field boundaries once, shared by whole-video and segment-edit compilers."""
-    content = "；".join(
-        normalized for clause in clauses if (normalized := _clean_fragment(clause))
-    )
+    content = "；".join(normalized for clause in clauses if (normalized := _clean_fragment(clause)))
     if not content or content.endswith(("……", "...")):
         return content
     return f"{content}。"
@@ -151,6 +149,28 @@ def _shot_execution(shot: ShotSpec) -> str:
                 f"透视意图：{shot.lens.perspective_intent}",
             )
         )
+    paragraphs.append(
+        compile_prompt_sentence(
+            "环境使用："
+            + (
+                "沿用参考布局"
+                if shot.environment_use == "preserve_layout"
+                else "保持场景外观与空间关系，允许镜头重新构图"
+            )
+        )
+    )
+    if shot.scene_asset_id:
+        paragraphs.append(
+            compile_prompt_sentence(
+                f"本镜头场景参考：shot_scene_{shot.order}（未另附时使用environment）"
+            )
+        )
+    if shot.confirmed_frame:
+        paragraphs.append(
+            compile_prompt_sentence(
+                f"shot_frame_{shot.order}为此镜头构图与起点的普通参考，不是多个严格首帧约束"
+            )
+        )
     if shot.composition is not None:
         paragraphs.append(
             compile_prompt_sentence(
@@ -216,6 +236,8 @@ def _shot_execution(shot: ShotSpec) -> str:
         if shot.sound.dialogue:
             sound_clauses.append(f"对白：{shot.sound.dialogue}")
         paragraphs.append(compile_prompt_sentence(*sound_clauses))
+    else:
+        paragraphs.append("声音：生成与可见动作同步的自然环境声、物件声和动作声。")
     if shot.director_intent:
         paragraphs.append(compile_prompt_sentence(f"导演意图：{shot.director_intent}"))
     return f"镜头 {shot.order}\n" + "\n".join(paragraph for paragraph in paragraphs if paragraph)
@@ -332,9 +354,7 @@ def compile_video_generation_prompt(
             ),
         ),
     )
-    prompt = "\n\n".join(
-        f"【{section.title}】\n{section.content}" for section in sections
-    )
+    prompt = "\n\n".join(f"【{section.title}】\n{section.content}" for section in sections)
     return CompiledVideoGenerationPrompt(
         prompt=prompt,
         negative_prompt=_negative_prompt(shots),
