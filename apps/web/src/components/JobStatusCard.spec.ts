@@ -3,8 +3,9 @@ import { beforeEach, expect, it, vi } from "vitest";
 import JobStatusCard from "./JobStatusCard.vue";
 
 const calls = vi.hoisted(() => ({ job: vi.fn(), jobResult: vi.fn(), jobEvents: vi.fn(), prepareJobReplacement: vi.fn(), replaceUnknownJob: vi.fn(), recoverJob: vi.fn() }));
+const subscription = vi.hoisted(() => ({ refresh: async () => {} }));
 vi.mock("../api/client", () => ({ api: calls }));
-vi.mock("../jobUpdates", () => ({ subscribeJobs: (_scope: unknown, refresh: () => Promise<unknown>) => { void refresh(); return () => {}; } }));
+vi.mock("../jobUpdates", () => ({ subscribeJobs: (_scope: unknown, refresh: () => Promise<void>) => { subscription.refresh = refresh; void refresh(); return () => {}; } }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -37,6 +38,46 @@ it("renders complete result facts while details load, and never fabricates a tas
   expect(wrapper.text()).toContain("完整回执");
   expect(wrapper.text()).not.toContain("没有收到正文");
   expect(wrapper.text()).toContain("未收到／此接口不提供");
+  wrapper.unmount();
+});
+
+it("blocks paid replacement while the environment editor contains unsaved input", async () => {
+  const wrapper = mount(JobStatusCard, { props: { jobId: 'unknown', preparationBlockedReason: '环境修改尚未保存' } });
+  await flushPromises();
+  expect(wrapper.get('.task-actions button').attributes('disabled')).toBeDefined();
+  await wrapper.get('.task-actions button').trigger('click');
+  expect(calls.prepareJobReplacement).not.toHaveBeenCalled();
+  await wrapper.setProps({ preparationBlockedReason: '' });
+  await wrapper.get('.task-actions button').trigger('click'); await flushPromises();
+  await wrapper.get('input[type="checkbox"]').setValue(true);
+  await wrapper.setProps({ preparationBlockedReason: '环境修改尚未保存' });
+  const submit = wrapper.get('dialog .task-actions button:last-child');
+  expect(submit.attributes('disabled')).toBeDefined();
+  await submit.trigger('click');
+  expect(calls.replaceUnknownJob).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it('does not render or fetch event history and only reloads a body when availability changes', async () => {
+  const current = { id: 'video', status: 'polling', revision: 1, providerTaskId: 'real-task-id', execution: { resultState: 'partial', providerStatus: 'running', availableActions: [] }, frozenInput: { internal: 'do-not-display' } };
+  calls.job.mockResolvedValue(current);
+  const wrapper = mount(JobStatusCard, { props: { jobId: 'video' } });
+  await flushPromises();
+  const details = wrapper.findAll('details').find(d => d.get('summary').text() === '任务详情与返回内容')!;
+  (details.element as HTMLDetailsElement).open = true;
+  await details.trigger('toggle'); await flushPromises();
+  expect(calls.jobResult).toHaveBeenCalledTimes(1);
+  calls.job.mockResolvedValue({ ...current, revision: 2 });
+  await subscription.refresh();
+  expect(calls.jobResult).toHaveBeenCalledTimes(1);
+  calls.job.mockResolvedValue({ ...current, status: 'succeeded', revision: 3, execution: { ...current.execution, resultState: 'complete', providerStatus: 'succeeded' } });
+  await subscription.refresh();
+  expect(calls.jobResult).toHaveBeenCalledTimes(2);
+  expect(calls.jobEvents).not.toHaveBeenCalled();
+  expect(wrapper.text()).not.toContain('冻结输入');
+  expect(wrapper.text()).not.toContain('do-not-display');
+  expect(wrapper.text()).not.toContain('job.polling');
+  expect(wrapper.text()).toContain('real-task-id');
   wrapper.unmount();
 });
 

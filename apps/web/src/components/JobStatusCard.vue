@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { api } from "../api/client";
-import type { JobDto, JobResultDto, JobEventsDto, GenerationPreparationDto } from "../api/types";
+import type { JobDto, JobResultDto, GenerationPreparationDto } from "../api/types";
 import { subscribeJobs } from "../jobUpdates";
 
-const props = defineProps<{ jobId: string; title?: string; resultSummary?: string }>();
+const props = defineProps<{ jobId: string; title?: string; resultSummary?: string; preparationBlockedReason?: string }>();
 const emit = defineEmits<{ changed: [job: JobDto]; replacement: [job: JobDto] }>();
 const job = ref<JobDto | null>(null);
 const result = ref<JobResultDto | null>(null);
-const history = ref<JobEventsDto | null>(null);
+let loadedResultKey = "";
+let pendingResultKey = "";
+let resultRequest = 0;
 const expanded = ref(false);
 const busy = ref(false);
 const error = ref("");
@@ -68,11 +70,20 @@ const stateText = computed(() => {
 });
 const time = (value?: string | null) => value ? new Date(value).toLocaleString() : "尚未取得";
 
-async function loadDetails() {
-  if (!expanded.value) return;
+async function loadDetails(force = false) {
+  if (!expanded.value || !job.value) return;
   const id = props.jobId;
-  const [body, events] = await Promise.all([api.jobResult(id), api.jobEvents(id)]);
-  if (id === props.jobId) { result.value = body; history.value = events; }
+  const current = job.value;
+  const key = JSON.stringify([id, current.execution?.resultState, current.execution?.providerStatus,
+    ['succeeded', 'failed', 'cancelled'].includes(current.status) ? current.status : 'active',
+    current.error?.code, current.execution?.queryError?.code]);
+  if (!force && (loadedResultKey === key || pendingResultKey === key)) return;
+  const request = ++resultRequest;
+  pendingResultKey = key;
+  try {
+    const body = await api.jobResult(id);
+    if (id === props.jobId && request === resultRequest) { result.value = body; loadedResultKey = key; }
+  } finally { if (request === resultRequest) pendingResultKey = ""; }
 }
 async function reload() {
   const id = props.jobId;
@@ -83,10 +94,14 @@ async function reload() {
   if (job.value && (current.revision ?? 0) < (job.value.revision ?? 0)) return;
   const changed = !job.value || current.revision !== job.value.revision || current.status !== job.value.status;
   job.value = current; error.value = "";
-  if (changed) { emit("changed", current); await loadDetails(); }
+  if (changed) {
+    emit("changed", current);
+    try { await loadDetails(); } catch (reason) { if (id === props.jobId) error.value = String(reason); }
+  }
 }
 watch(() => props.jobId, () => {
-  unsubscribe?.(); job.value = null; result.value = null; history.value = null; preparation.value = null;
+  unsubscribe?.(); job.value = null; result.value = null; preparation.value = null;
+  resultRequest += 1; loadedResultKey = ""; pendingResultKey = "";
   unsubscribe = subscribeJobs(() => ({ jobId: props.jobId }), reload, () => execution.value?.waitingForProvider ?? true);
 }, { immediate: true });
 onBeforeUnmount(() => unsubscribe?.());
@@ -98,30 +113,25 @@ async function toggle(event: Event) {
 async function recover(action: "query_provider" | "process_result") {
   if (!job.value || busy.value) return;
   busy.value = true; error.value = "";
-  try { job.value = await api.recoverJob(job.value.id, action, job.value.revision ?? 0, crypto.randomUUID()); emit("changed", job.value); }
+  try { job.value = await api.recoverJob(job.value.id, action, job.value.revision ?? 0, crypto.randomUUID()); emit("changed", job.value); await loadDetails(true); }
   catch (reason) { error.value = String(reason); await reload(); }
   finally { busy.value = false; }
 }
 async function prepareReplacement() {
-  if (busy.value) return;
+  if (busy.value || props.preparationBlockedReason) return;
   busy.value = true; error.value = ""; acknowledged.value = false;
   try { preparation.value = await api.prepareJobReplacement(props.jobId); replacementKey.value = crypto.randomUUID(); }
   catch (reason) { error.value = String(reason); }
   finally { busy.value = false; }
 }
 async function submitReplacement() {
-  if (!preparation.value || !acknowledged.value || busy.value) return;
+  if (!preparation.value || !acknowledged.value || busy.value || props.preparationBlockedReason) return;
   busy.value = true; error.value = "";
   try {
     const created = await api.replaceUnknownJob(props.jobId, preparation.value.executionInputHash, replacementKey.value);
     preparation.value = null; emit("replacement", created); await reload();
   } catch (reason) { error.value = String(reason); }
   finally { busy.value = false; }
-}
-async function moreHistory() {
-  if (!history.value?.hasMore) return;
-  const next = await api.jobEvents(props.jobId, history.value.nextCursor);
-  history.value = { ...next, items: [...history.value.items, ...next.items] };
 }
 </script>
 
@@ -135,14 +145,15 @@ async function moreHistory() {
     <div class="task-actions">
       <button v-if="actions.includes('query_provider')" class="secondary" :disabled="busy" @click="recover('query_provider')">重新核实外部进度</button>
       <button v-if="actions.includes('process_result')" class="secondary" :disabled="busy" @click="recover('process_result')">恢复本地结果处理</button>
-      <button v-if="actions.includes('prepare_replacement')" class="secondary" :disabled="busy" @click="prepareReplacement">保留此记录，重新准备一次生成</button>
+      <button v-if="actions.includes('prepare_replacement')" class="secondary" :disabled="busy || Boolean(preparationBlockedReason)" @click="prepareReplacement">保留此记录，重新准备一次生成</button>
     </div>
+    <p v-if="actions.includes('prepare_replacement') && preparationBlockedReason" class="attention">{{ preparationBlockedReason }}</p>
     <p v-if="error" class="attention" role="alert">{{ error }}</p>
     <details v-for="successorId in job?.successorJobIds" :key="successorId">
       <summary>查看后续任务 {{ successorId }}</summary>
       <JobStatusCard :job-id="successorId" title="后续生成任务" />
     </details>
-    <details @toggle="toggle"><summary>任务详情、返回内容与历史</summary>
+    <details @toggle="toggle"><summary>任务详情与返回内容</summary>
       <dl v-if="job">
         <dt>本地 Job</dt><dd><code>{{ job.id }}</code> · 修订 {{ job.revision ?? 0 }}</dd>
         <dt>火山 Task ID</dt><dd>{{ job.providerTaskId ?? '未收到／此接口不提供' }}</dd>
@@ -157,9 +168,6 @@ async function moreHistory() {
       <p v-if="result?.message">{{ result.message }}</p>
       <details v-if="result?.result"><summary>已收到的实际内容</summary><pre>{{ JSON.stringify(result.result, null, 2) }}</pre></details>
       <details v-if="result?.error || execution?.queryError"><summary>错误正文</summary><pre>{{ JSON.stringify({ error: result?.error, queryError: execution?.queryError }, null, 2) }}</pre></details>
-      <details v-if="job"><summary>冻结输入</summary><pre>{{ JSON.stringify(job.frozenInput, null, 2) }}</pre></details>
-      <ol><li v-for="item in history?.items" :key="item.id"><time>{{ time(item.createdAt) }}</time> {{ item.eventType }}<details><summary>记录内容</summary><pre>{{ JSON.stringify(item.payload, null, 2) }}</pre></details></li></ol>
-      <button v-if="history?.hasMore" class="secondary" @click="moreHistory">继续读取历史</button>
     </details>
     <dialog ref="replacementDialog" class="replacement-dialog" aria-label="重新生成准备" @cancel.prevent="!busy && (preparation = null)">
       <template v-if="preparation">
@@ -169,10 +177,11 @@ async function moreHistory() {
         <div v-if="preparedReferences.length" class="prepared-references">
           <figure v-for="reference in preparedReferences" :key="reference.id"><img :src="`/api/v1/assets/${reference.id}/content`" :alt="referenceNames[reference.role] ?? reference.role" /><figcaption>{{ referenceNames[reference.role] ?? reference.role }}</figcaption></figure>
         </div>
-        <details open><summary>本次生成指令</summary><pre>{{ preparedInput.prompt ?? preparedInput.text ?? '请展开冻结输入查看本次完整内容。' }}</pre></details>
-        <details><summary>完整输入、引用与执行配置</summary><pre>{{ JSON.stringify(preparation.input, null, 2) }}</pre></details>
+        <details open><summary>本次生成指令</summary><pre>{{ preparedInput.prompt ?? preparedInput.text ?? preparedInput.rawText ?? '本次任务未提供可展示的指令正文，请返回对应创作页面核对。' }}</pre></details>
+        <details v-if="preparedInput.negativePrompt"><summary>需要避免的问题</summary><pre>{{ preparedInput.negativePrompt }}</pre></details>
         <label><input v-model="acknowledged" type="checkbox" />我确认可能重复执行和收费；仅授权本次输入和本次提交。</label>
-        <div class="task-actions"><button class="secondary" :disabled="busy" @click="preparation = null">返回，不提交</button><button :disabled="!acknowledged || busy" @click="submitReplacement">确认并提交新的付费生成</button></div>
+        <p v-if="preparationBlockedReason" class="attention">{{ preparationBlockedReason }}</p>
+        <div class="task-actions"><button class="secondary" :disabled="busy" @click="preparation = null">返回，不提交</button><button :disabled="!acknowledged || busy || Boolean(preparationBlockedReason)" @click="submitReplacement">确认并提交新的付费生成</button></div>
       </template>
     </dialog>
   </section>

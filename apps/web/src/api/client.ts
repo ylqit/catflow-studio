@@ -16,7 +16,7 @@ import type {
   VideoReviewDto,
   GenerationPreviewDto,
   JobDto,
-  JobResultDto, JobEventsDto, GenerationPreparationDto,
+  JobResultDto, GenerationPreparationDto, EnvironmentGenerationDraft, EnvironmentGenerationInput,
   JobUsageDto,
   PlannerSnapshotDto,
   ObjectPublisherRuntimeDto,
@@ -549,9 +549,11 @@ export class CatFlowClient {
   previewAssetGeneration(
     projectId: string,
     kind: AssetGenerationKind,
+    draft?: { environmentDraftRevision: number; environmentInput?: EnvironmentGenerationInput },
   ): Promise<AssetGenerationPreviewDto> {
     return this.json(`/api/v1/projects/${projectId}/asset-generations/preview`, "POST", {
       kind,
+      ...draft,
     });
   }
 
@@ -559,6 +561,7 @@ export class CatFlowClient {
     projectId: string,
     command: {
       kind: AssetGenerationKind;
+      environmentDraftRevision?: number;
       expectedInputHash: string;
       idempotencyKey: string;
     },
@@ -611,8 +614,12 @@ export class CatFlowClient {
     }).finally(() => this.jobReads.delete(jobId));
     this.jobReads.set(jobId, reading); return reading;
   }
-  jobEvents(jobId: string, after = 0): Promise<JobEventsDto> {
-    return this.request(`/api/v1/jobs/${jobId}/events?after=${after}`);
+  environmentDraft(projectId: string): Promise<EnvironmentGenerationDraft> {
+    return this.request(`/api/v1/projects/${projectId}/environment-generation-draft`);
+  }
+
+  saveEnvironmentDraft(projectId: string, input: EnvironmentGenerationInput & { expectedRevision: number }): Promise<EnvironmentGenerationDraft> {
+    return this.json(`/api/v1/projects/${projectId}/environment-generation-draft`, "PUT", input);
   }
   jobResult(jobId: string): Promise<JobResultDto> { return this.request(`/api/v1/jobs/${jobId}/result`); }
   recoverJob(jobId: string, action: "query_provider" | "process_result", expectedRevision: number, idempotencyKey: string): Promise<JobDto> {

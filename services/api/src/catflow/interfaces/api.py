@@ -73,6 +73,8 @@ from catflow.application.service import (
     AssetGenerationCommand,
     AssetGenerationPreviewCommand,
     AssetGenerationPreviewDto,
+    EnvironmentGenerationDraft,
+    EnvironmentDraftSaveCommand,
     CanonProfileDto,
     CanonRevisionCreateCommand,
     EditCreateCommand,
@@ -1070,6 +1072,14 @@ def create_app(
         if command.slot == "video":
             service.require_video_review(project_id, command.asset_id, command.review_id)
         return service.select_asset(project_id, slot=command.slot, asset_id=command.asset_id)
+
+    @app.get("/api/v1/projects/{project_id}/environment-generation-draft", response_model=EnvironmentGenerationDraft)
+    def get_environment_draft(project_id: uuid.UUID) -> EnvironmentGenerationDraft:
+        return service.get_environment_draft(project_id)
+
+    @app.put("/api/v1/projects/{project_id}/environment-generation-draft", response_model=EnvironmentGenerationDraft)
+    def save_environment_draft(project_id: uuid.UUID, command: EnvironmentDraftSaveCommand) -> EnvironmentGenerationDraft:
+        return service.save_environment_draft(project_id, command)
 
     @app.post(
         "/api/v1/projects/{project_id}/asset-generations/preview",

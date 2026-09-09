@@ -90,6 +90,7 @@ class ProjectRecord(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    environment_generation_draft_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     theme: Mapped[str] = mapped_column(Text, nullable=False)
     target_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)

@@ -768,6 +768,7 @@ export interface ShotPlanGenerationAttemptDto {
   result?: {
     disposition: "candidate_ready" | "needs_input" | "invalid";
     normalizationRevision?: string | null;
+    rawText?: string | null;
     adjustments?: Array<{ code: string; path: string; message: string; providerValue?: unknown }>;
     resolution?: "unresolved" | "candidate" | "accepted" | "rejected" | "superseded";
     resultRevision?: number | null;
@@ -827,7 +828,21 @@ export interface GenerationPreviewDto {
   warnings: Array<{ code: string; message: string }>;
 }
 
+export interface EnvironmentGenerationInput {
+  mode: "description" | "custom";
+  sourceStoryVersionId: string;
+  description: string;
+  prompt: string | null;
+  negativePrompt: string | null;
+  sourceAssetId: string | null;
+}
+export interface EnvironmentGenerationDraft extends EnvironmentGenerationInput {
+  revision: number;
+  updatedAt?: string | null;
+}
+
 export interface AssetGenerationPreviewDto {
+  environmentDraft?: EnvironmentGenerationDraft | null;
   inputHash: string;
   kind: AssetGenerationKind;
   provider: string;
@@ -925,5 +940,4 @@ export interface JobExecutionDto {
   resultState: "missing" | "partial" | "complete"; historicalResult: boolean;
 }
 export interface JobResultDto { jobId: string; revision: number; state: string; result: Record<string, unknown> | null; error: Record<string, unknown> | null; assetIds: string[]; historical: boolean; message?: string | null }
-export interface JobEventsDto { items: { id: number; eventType: string; createdAt: string; payload: Record<string, unknown> }[]; nextCursor: number; hasMore: boolean }
 export interface GenerationPreparationDto { preparedOnly: true; kind: string; provider: string; model: string; inputHash: string; executionInputHash: string; input: Record<string, unknown>; expectedCostMicros: number | null; replacesJobId: string | null }

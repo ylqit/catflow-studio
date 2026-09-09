@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
         <PlannerStep v-if="step === 'planner'" :key="projectId" :project-id="projectId" :series-context="seriesContext" :runtime="runtime" @changed="loadWorkspace" />
         <AssetsStep v-else-if="step === 'assets'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
         <StoryboardStep v-else-if="step === 'storyboard'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
-        <GenerationStep v-else-if="step === 'generation'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
+        <GenerationStep v-else-if="step === 'generation'" :project-id="projectId" :workspace="workspace" :runtime="runtime" :series-context="seriesContext" @changed="loadWorkspace" />
         <DeliveryStep v-else :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
       </section>
     </template>

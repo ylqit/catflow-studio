@@ -56,6 +56,7 @@ from catflow.application.service import (
     PlannerMessageDto,
     PlannerSnapshotDto,
     ProjectCreate,
+    EnvironmentGenerationDraft,
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
@@ -1917,6 +1918,20 @@ class PostgresStudioRepository:
                 createdAt=record.created_at,
             )
 
+    def save_environment_draft(self, project_id: uuid.UUID, draft: EnvironmentGenerationDraft, expected_revision: int) -> EnvironmentGenerationDraft:
+        with self._sessions.begin() as session:
+            project = session.scalar(select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update())
+            if project is None:
+                raise StudioNotFoundError("project not found")
+            current = project.environment_generation_draft_json
+            if (current["revision"] if current else 0) != expected_revision:
+                raise StudioConflictError("环境草稿已在其他窗口更新，请重新读取并核对。")
+            story = session.get(StoryVersionRecord, draft.source_story_version_id)
+            if story is None or story.project_id != project_id or not story.active:
+                raise StudioConflictError("故事来源已变化，请重新核对环境草稿。")
+            project.environment_generation_draft_json = draft.model_dump(mode="json", by_alias=True)
+            return draft
+
     def update_project(self, project_id: uuid.UUID, patch: ProjectPatch) -> ProjectDto:
         with self._sessions.begin() as session:
             project = session.scalar(
@@ -2620,7 +2635,8 @@ class PostgresStudioRepository:
                 job.frozen_input.get("purpose") in {"shot_frame", "shot_video"}
                 and job.provider != "local_ffmpeg"
             )
-            if job.kind == "plan_shots" or shot_media or job.provider == "local_ffmpeg":
+            environment_job = job.kind == "generate_image" and job.frozen_input.get("role") == "environment"
+            if job.kind == "plan_shots" or shot_media or job.provider == "local_ffmpeg" or environment_job:
                 session.scalar(
                     select(ProjectRecord)
                     .where(ProjectRecord.id == job.project_id)
@@ -2630,6 +2646,17 @@ class PostgresStudioRepository:
             if existing is not None:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
+            if environment_job:
+                project = session.get(ProjectRecord, job.project_id)
+                saved = project.environment_generation_draft_json if project else None
+                snapshot = job.image_input_snapshot
+                revision = snapshot.environment_draft.revision if snapshot and snapshot.environment_draft else 0
+                if (saved["revision"] if saved else 0) != revision:
+                    raise StudioConflictError("环境草稿已变化，请重新预览后提交。")
+                if snapshot:
+                    story = session.get(StoryVersionRecord, snapshot.source_story_version_id)
+                    if story is None or not story.active or story.project_id != job.project_id:
+                        raise StudioConflictError("故事来源已变化，请重新预览后提交。")
             if job.kind == "plan_shots":
                 running = session.scalar(
                     select(JobRecord.id).where(
@@ -3303,6 +3330,7 @@ class PostgresStudioRepository:
 
 def _project_dto(record: ProjectRecord) -> ProjectDto:
     return ProjectDto(
+        environmentGenerationDraft=record.environment_generation_draft_json,
         id=record.id,
         title=record.title,
         theme=record.theme,

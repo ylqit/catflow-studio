@@ -9,6 +9,8 @@ const client = vi.hoisted(() => ({
   assets: vi.fn(),
   runtime: vi.fn(),
   previewAssetGeneration: vi.fn(),
+  environmentDraft: vi.fn(),
+  saveEnvironmentDraft: vi.fn(),
   createAssetGeneration: vi.fn(),
   diagnoseAsset: vi.fn(),
   uploadAsset: vi.fn(),
@@ -53,6 +55,7 @@ describe("AssetsStep", () => {
     vi.clearAllMocks();
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     client.assets.mockResolvedValue([]);
+    client.environmentDraft.mockResolvedValue({ revision: 0, mode: "description", sourceStoryVersionId: "story-1", description: "雨天玄关和吸水脚垫", prompt: null, negativePrompt: null, sourceAssetId: null });
     client.runtime.mockResolvedValue({ provider: { name: "ark", imageModel: "seedream" } });
     client.previewAssetGeneration.mockResolvedValue({
       inputHash: "b".repeat(64), kind: "environment", provider: "ark", model: "seedream",
@@ -81,18 +84,19 @@ describe("AssetsStep", () => {
     });
     await flushPromises();
 
-    expect(client.previewAssetGeneration).toHaveBeenCalledWith("project-1", "environment");
-    expect(wrapper.text()).toContain("雨天玄关和吸水脚垫");
-    expect(wrapper.text()).toContain("空场景，不含人物与猫咪");
+    expect(client.previewAssetGeneration).toHaveBeenCalledWith("project-1", "environment", { environmentDraftRevision: 0 });
+    expect((wrapper.get('textarea[aria-label="场景描述"]').element as HTMLTextAreaElement).value).toBe("雨天玄关和吸水脚垫");
+    expect(wrapper.text()).toContain("不包含人物与猫咪");
     expect(wrapper.text()).toContain("画风板");
     expect(wrapper.text()).toContain("本次会使用付费模型，完成后显示实际用量");
 
-    await wrapper.findAll("button").find((item) => item.text().includes("生成环境候选"))!.trigger("click");
+    await wrapper.get('.generate-candidate').trigger("click");
     await flushPromises();
 
-    expect(client.previewAssetGeneration).toHaveBeenCalledWith("project-1", "environment");
+    expect(client.previewAssetGeneration).toHaveBeenCalledWith("project-1", "environment", { environmentDraftRevision: 0 });
     expect(client.createAssetGeneration).toHaveBeenCalledWith("project-1", {
       kind: "environment",
+      environmentDraftRevision: 0,
       expectedInputHash: "b".repeat(64),
       idempotencyKey: expect.any(String),
     });
@@ -138,6 +142,49 @@ describe("AssetsStep", () => {
     await generateButton.trigger("click");
     expect(client.createAssetGeneration).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  it("saves description edits without generating and preserves text on a revision conflict", async () => {
+    const wrapper = mount(AssetsStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()] } });
+    await flushPromises();
+    await wrapper.get('textarea[aria-label="场景描述"]').setValue("风车平躺地板，手柄贴地");
+    expect(wrapper.get('.generate-candidate').attributes('disabled')).toBeDefined();
+    client.saveEnvironmentDraft.mockRejectedValueOnce(new Error("环境草稿已在其他窗口更新"));
+    await wrapper.findAll('button').find(b => b.text() === '保存修改')!.trigger('click');
+    await flushPromises();
+    expect((wrapper.get('textarea[aria-label="场景描述"]').element as HTMLTextAreaElement).value).toBe("风车平躺地板，手柄贴地");
+    expect(wrapper.text()).toContain("其他窗口更新");
+    client.saveEnvironmentDraft.mockImplementationOnce(async (_id, value) => ({ ...value, revision: 1 }));
+    await wrapper.findAll('button').find(b => b.text() === '保存修改')!.trigger('click');
+    await flushPromises();
+    expect(client.saveEnvironmentDraft).toHaveBeenLastCalledWith('project-1', expect.objectContaining({ description: '风车平躺地板，手柄贴地', expectedRevision: 0, mode: 'description', prompt: null }));
+    expect(client.previewAssetGeneration).toHaveBeenLastCalledWith('project-1', 'environment', { environmentDraftRevision: 1 });
+    expect(wrapper.text()).toContain('版本 1');
+    expect(client.createAssetGeneration).not.toHaveBeenCalled();
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps custom prompt edits until an explicit return to description mode", async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const wrapper = mount(AssetsStep, { props: { projectId: 'project-1', workspace, runtime }, global: { plugins: [createPinia()] } });
+    await flushPromises();
+    await wrapper.get('textarea[aria-label="完整 Prompt"]').setValue('只有平躺风车的空场景');
+    await wrapper.get('textarea[aria-label="需要避免的问题"]').setValue('不要竖立支架');
+    expect(wrapper.get('textarea[aria-label="场景描述"]').attributes('readonly')).toBeDefined();
+    const button = wrapper.findAll('button').find(b => b.text() === '返回场景描述模式')!;
+    await button.trigger('click');
+    expect((wrapper.get('textarea[aria-label="完整 Prompt"]').element as HTMLTextAreaElement).value).toBe('只有平躺风车的空场景');
+    client.saveEnvironmentDraft.mockImplementationOnce(async (_id, value) => ({ ...value, revision: 1 }));
+    await wrapper.findAll('button').find(b => b.text() === '保存修改')!.trigger('click');
+    await flushPromises();
+    expect(client.saveEnvironmentDraft).toHaveBeenCalledWith('project-1', expect.objectContaining({ mode: 'custom', prompt: '只有平躺风车的空场景', negativePrompt: '不要竖立支架' }));
+    confirm.mockReturnValue(true);
+    await button.trigger('click');
+    expect(wrapper.get('textarea[aria-label="场景描述"]').attributes('readonly')).toBeUndefined();
+    expect(wrapper.get('.generate-candidate').attributes('disabled')).toBeDefined();
+    expect(client.createAssetGeneration).not.toHaveBeenCalled();
+    confirm.mockRestore(); wrapper.unmount();
   });
 
   it("opens fixed assets and environment candidates in the image viewer", async () => {

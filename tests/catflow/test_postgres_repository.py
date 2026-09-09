@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import delete, make_url
 
 from catflow.application.service import (
+    EnvironmentDraftSaveCommand,
     JobDto,
     PlannerMessageCommand,
     ProjectCreate,
@@ -21,7 +22,7 @@ from catflow.infrastructure.database import (
     create_database_engine,
     create_session_factory,
 )
-from catflow.infrastructure.models import ProjectRecord
+from catflow.infrastructure.models import JobRecord, ProjectRecord
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 
 
@@ -50,6 +51,10 @@ def test_postgres_repository_persists_and_recovers_planner_workflow() -> None:
         assert same.id == first.id
         assert first.frozen_input["targetDurationSeconds"] == project.target_duration_seconds
 
+        # Offline completion starts after the worker's local storing transition.
+        with sessions.begin() as session:
+            session.get(JobRecord, first.id).status = "storing"
+
         proposal = service.complete_planner_job(
             first.id,
             LifeStoryProposalDraft(
@@ -68,6 +73,14 @@ def test_postgres_repository_persists_and_recovers_planner_workflow() -> None:
         )
         story = service.adopt_proposal(project.id, proposal.id)
 
+        draft_command = EnvironmentDraftSaveCommand(
+            expectedRevision=0, sourceStoryVersionId=story.id,
+            mode="custom", description="毛巾平放在玄关地面",
+            prompt="空玄关，毛巾平放地面，不画人物与猫咪。", negativePrompt="悬空毛巾",
+        )
+        saved_draft = service.save_environment_draft(project.id, draft_command)
+        assert saved_draft.revision == 1
+
         recovered_service = StudioService(PostgresStudioRepository(sessions))
         recovered_project = recovered_service.get_project(project.id)
         recovered_planner = recovered_service.get_planner(project.id)
@@ -79,6 +92,10 @@ def test_postgres_repository_persists_and_recovers_planner_workflow() -> None:
         assert recovered_service.list_stories(project.id)[0].id == story.id
         assert recovered_job.status == "succeeded"
         assert len(recovered_planner.messages) == 2
+        assert recovered_service.get_environment_draft(project.id) == saved_draft
+        with pytest.raises(StudioConflictError):
+            recovered_service.save_environment_draft(project.id, draft_command)
+        assert recovered_service.get_environment_draft(project.id) == saved_draft
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))

@@ -62,6 +62,7 @@ from catflow.application.service import (
     PlannerMessageDto,
     PlannerSnapshotDto,
     ProjectCreate,
+    EnvironmentGenerationDraft,
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
@@ -1701,6 +1702,17 @@ class MemoryStudioRepository:
             document.updated_at = now
         return materialization
 
+    def save_environment_draft(self, project_id: uuid.UUID, draft: EnvironmentGenerationDraft, expected_revision: int) -> EnvironmentGenerationDraft:
+        project = self._projects[project_id]
+        current = project.environment_generation_draft
+        if (current.revision if current else 0) != expected_revision:
+            raise StudioConflictError("环境草稿已在其他窗口更新，请重新读取并核对。")
+        story = self.active_story(project_id)
+        if story is None or story.id != draft.source_story_version_id:
+            raise StudioConflictError("故事来源已变化，请重新核对环境草稿。")
+        self._projects[project_id] = project.model_copy(update={"environment_generation_draft": draft})
+        return draft
+
     def update_project(self, project_id: uuid.UUID, patch: ProjectPatch) -> ProjectDto:
         project = self._projects.get(project_id)
         if project is None:
@@ -2132,6 +2144,15 @@ class MemoryStudioRepository:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
             return existing
+        if job.kind == "generate_image" and job.frozen_input.get("role") == "environment":
+            saved = self._projects[job.project_id].environment_generation_draft
+            snapshot = job.image_input_snapshot
+            revision = snapshot.environment_draft.revision if snapshot and snapshot.environment_draft else 0
+            if (saved.revision if saved else 0) != revision:
+                raise StudioConflictError("环境草稿已变化，请重新预览后提交。")
+            story = self.active_story(job.project_id)
+            if snapshot and (story is None or story.id != snapshot.source_story_version_id):
+                raise StudioConflictError("故事来源已变化，请重新预览后提交。")
         self._jobs[job.id] = job
         self._jobs_by_idempotency[job.idempotency_key] = job.id
         self._record_event(job, "job.queued")

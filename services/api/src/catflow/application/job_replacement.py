@@ -136,7 +136,8 @@ def replace_unknown_job(
         return service.create_asset_generation_job(
             project,
             AssetGenerationCommand(
-                kind=frozen["role"], expectedInputHash=preview.input_hash, **common
+                kind=frozen["role"], expectedInputHash=preview.input_hash,
+                environmentDraftRevision=preview.environment_draft.revision if preview.environment_draft else None, **common
             ),
         )
     if old.kind == "generate_video":

@@ -7,13 +7,13 @@ import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
 import ShotSequenceProduction from "./ShotSequenceProduction.vue";
 const productionMode = ref("whole");
-import type { AssetDto, GenerationPreviewDto, JobDto, ProjectUsageSummaryDto, WorkspaceDto } from "../../api/types";
+import type { AssetDto, GenerationPreviewDto, JobDto, ProjectSeriesContextDto, ProjectUsageSummaryDto, WorkspaceDto } from "../../api/types";
 import { buildAcceptanceEvidence } from "../../acceptanceEvidence";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 import { useUiStore } from "../../stores/ui";
 
-const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
+const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null; seriesContext?: ProjectSeriesContextDto | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const router = useRouter();
 const savingReview = ref(false);
@@ -33,6 +33,7 @@ const loadingPreview = ref(false);
 const submitting = ref(false);
 const error = ref("");
 const errorDetail = ref("");
+const continuityRequired = computed(() => errorDetail.value.includes("confirm the episode's incoming continuity"));
 const reviewAssetId = ref<string | null>(null);
 const reviewNotes = ref("");
 const loadingReview = ref(false);
@@ -475,9 +476,9 @@ watch(
     <div class="generation-main">
       <div class="preview-card card">
         <header><div><p class="eyebrow">本次生成</p><h2>生成视频</h2><p class="paid-hint"><b v-if="generationBlockedReason">{{ generationBlockedReason }}<br></b>{{ generationProviderNotice }}<br>生成任务会自动保存，可以放心离开此页面。</p></div><button class="primary" :disabled="loadingPreview || submitting || !preview || Boolean(generationBlockedReason)" @click="generateVideo"><span v-if="loadingPreview || submitting" class="spinner" />{{ generationButtonLabel }}</button></header>
-        <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
-        <div v-if="!preview" class="empty preview-empty"><div>▦</div><p>{{ loadingPreview ? "正在整理本次画面内容……" : "请先完成故事、分镜和五张参考图；完成后会自动生成画面描述。" }}</p></div>
-        <template v-else>
+        <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><button v-if="continuityRequired && seriesContext" class="secondary" @click="router.push('/series/' + seriesContext.series.id + '#continuity')">去系列确认连续性</button><button v-if="!preview" class="secondary" :disabled="loadingPreview" @click="refreshPreview">重新检查生成条件</button><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
+        <div v-if="!preview && !error" class="empty preview-empty"><div>▦</div><p>{{ loadingPreview ? "正在整理本次画面内容……" : "请先完成故事、分镜和五张参考图；完成后会自动生成画面描述。" }}</p></div>
+        <template v-if="preview">
           <div class="preview-status"><b>本次画面内容</b><span>预览不产生费用</span></div>
           <div class="model-strip"><span><small>视频规格</small><b>{{ preview.durationSeconds }} 秒 · 480p · 9:16</b></span><span><small>内容来源</small><b>故事版本 {{ workspace.activeStory?.revision }} · 分镜版本 {{ workspace.activeShotPlan?.revision }}</b></span><span><small>参考图</small><b>{{ preview.references.filter((item) => item.included).length }}/{{ preview.references.length }} 张</b></span><span><small>费用</small><b>{{ preview.costEstimateStatus === "unmetered_paid" ? "待核价付费调用" : `预计 ¥${((preview.expectedCostMicros ?? 0) / 1_000_000).toFixed(4)}` }}</b></span></div>
           <section v-if="preview.warnings.length" class="generation-warnings notice warn" data-testid="video-generation-warnings">

@@ -1291,6 +1291,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/environment-generation-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Environment Draft */
+        get: operations["get_environment_draft_api_v1_projects__project_id__environment_generation_draft_get"];
+        /** Save Environment Draft */
+        put: operations["save_environment_draft_api_v1_projects__project_id__environment_generation_draft_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/asset-generations/preview": {
         parameters: {
             query?: never;
@@ -1947,6 +1965,8 @@ export interface components {
              * @enum {string}
              */
             kind: "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board";
+            /** Environmentdraftrevision */
+            environmentDraftRevision?: number | null;
         };
         /** AssetGenerationPreviewCommand */
         AssetGenerationPreviewCommand: {
@@ -1955,9 +1975,13 @@ export interface components {
              * @enum {string}
              */
             kind: "episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board";
+            /** Environmentdraftrevision */
+            environmentDraftRevision?: number | null;
+            environmentInput?: components["schemas"]["EnvironmentGenerationInput"] | null;
         };
         /** AssetGenerationPreviewDto */
         AssetGenerationPreviewDto: {
+            environmentDraft?: components["schemas"]["EnvironmentGenerationDraft"] | null;
             /** Inputhash */
             inputHash: string;
             /**
@@ -2521,6 +2545,81 @@ export interface components {
             /** Resolution */
             resolution: string;
         };
+        /** EnvironmentDraftSaveCommand */
+        EnvironmentDraftSaveCommand: {
+            /**
+             * Mode
+             * @default description
+             * @enum {string}
+             */
+            mode: "description" | "custom";
+            /**
+             * Sourcestoryversionid
+             * Format: uuid
+             */
+            sourceStoryVersionId: string;
+            /** Description */
+            description: string;
+            /** Prompt */
+            prompt?: string | null;
+            /** Negativeprompt */
+            negativePrompt?: string | null;
+            /** Sourceassetid */
+            sourceAssetId?: string | null;
+            /** Expectedrevision */
+            expectedRevision: number;
+        };
+        /** EnvironmentGenerationDraft */
+        EnvironmentGenerationDraft: {
+            /**
+             * Mode
+             * @default description
+             * @enum {string}
+             */
+            mode: "description" | "custom";
+            /**
+             * Sourcestoryversionid
+             * Format: uuid
+             */
+            sourceStoryVersionId: string;
+            /** Description */
+            description: string;
+            /** Prompt */
+            prompt?: string | null;
+            /** Negativeprompt */
+            negativePrompt?: string | null;
+            /** Sourceassetid */
+            sourceAssetId?: string | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Updatedat */
+            updatedAt?: string | null;
+        };
+        /** EnvironmentGenerationInput */
+        EnvironmentGenerationInput: {
+            /**
+             * Mode
+             * @default description
+             * @enum {string}
+             */
+            mode: "description" | "custom";
+            /**
+             * Sourcestoryversionid
+             * Format: uuid
+             */
+            sourceStoryVersionId: string;
+            /** Description */
+            description: string;
+            /** Prompt */
+            prompt?: string | null;
+            /** Negativeprompt */
+            negativePrompt?: string | null;
+            /** Sourceassetid */
+            sourceAssetId?: string | null;
+        };
         /** EpisodeContinuityConfirmCommand */
         EpisodeContinuityConfirmCommand: {
             /**
@@ -2961,11 +3060,12 @@ export interface components {
         };
         /** ImageGenerationInputSnapshotDto */
         ImageGenerationInputSnapshotDto: {
+            environmentDraft?: components["schemas"]["EnvironmentGenerationDraft"] | null;
             /**
              * Schemaversion
-             * @constant
+             * @enum {integer}
              */
-            schemaVersion: 1;
+            schemaVersion: 1 | 2;
             /**
              * State
              * @enum {string}
@@ -3582,6 +3682,7 @@ export interface components {
         };
         /** ProjectDto */
         ProjectDto: {
+            environmentGenerationDraft?: components["schemas"]["EnvironmentGenerationDraft"] | null;
             /**
              * Id
              * Format: uuid
@@ -5235,6 +5336,8 @@ export interface components {
             /** Recoverable */
             recoverable: boolean;
             draft?: components["schemas"]["DirectorPlanDraftDto"] | null;
+            /** Rawtext */
+            rawText?: string | null;
             /** Issues */
             issues?: components["schemas"]["DirectorValidationIssueDto"][];
             /** Normalizationrevision */
@@ -9182,6 +9285,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectSelectionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_environment_draft_api_v1_projects__project_id__environment_generation_draft_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentGenerationDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_environment_draft_api_v1_projects__project_id__environment_generation_draft_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentDraftSaveCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentGenerationDraft"];
                 };
             };
             /** @description Validation Error */

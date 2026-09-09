@@ -28,6 +28,7 @@ from catflow.domain.director_results import (
     DIRECTOR_NORMALIZATION_REVISION,
     DIRECTOR_OUTPUT_CONTRACT,
     DirectorNormalizationResult,
+    completed_director_text,
     director_provider_output_schema,
     normalize_director_result,
 )
@@ -217,6 +218,34 @@ class ValidationRunDto(ValidationRunPreviewDto):
     authorized_at: datetime | None = Field(alias="authorizedAt", default=None)
 
 
+class EnvironmentGenerationInput(ContractModel):
+    mode: Literal["description", "custom"] = "description"
+    source_story_version_id: uuid.UUID = Field(alias="sourceStoryVersionId")
+    description: str = Field(min_length=1, max_length=2000)
+    prompt: str | None = Field(default=None, max_length=12000)
+    negative_prompt: str | None = Field(alias="negativePrompt", default=None, max_length=4000)
+    source_asset_id: uuid.UUID | None = Field(alias="sourceAssetId", default=None)
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> EnvironmentGenerationInput:
+        if not self.description.strip():
+            raise ValueError("环境描述不能为空")
+        if self.mode == "custom" and (not self.prompt or not self.prompt.strip()):
+            raise ValueError("自定义环境指令不能为空")
+        if self.mode == "description" and (self.prompt is not None or self.negative_prompt is not None):
+            raise ValueError("场景描述模式由系统编译完整指令")
+        return self
+
+
+class EnvironmentGenerationDraft(EnvironmentGenerationInput):
+    revision: int = Field(default=0, ge=0)
+    updated_at: datetime | None = Field(alias="updatedAt", default=None)
+
+
+class EnvironmentDraftSaveCommand(EnvironmentGenerationInput):
+    expected_revision: int = Field(alias="expectedRevision", ge=0)
+
+
 class ProjectCreate(ContractModel):
     title: str = Field(min_length=1, max_length=160)
     theme: str = Field(min_length=1, max_length=2_000)
@@ -238,6 +267,7 @@ class ProjectPatch(ContractModel):
 
 
 class ProjectDto(ContractModel):
+    environment_generation_draft: EnvironmentGenerationDraft | None = Field(alias="environmentGenerationDraft", default=None)
     id: uuid.UUID
     title: str
     theme: str
@@ -270,10 +300,13 @@ AssetGenerationKind = Literal[
 
 class AssetGenerationPreviewCommand(ContractModel):
     kind: AssetGenerationKind
+    environment_draft_revision: int | None = Field(alias="environmentDraftRevision", default=None, ge=0)
+    environment_input: EnvironmentGenerationInput | None = Field(alias="environmentInput", default=None)
 
 
 class AssetGenerationCommand(GenerationCommand):
     kind: AssetGenerationKind
+    environment_draft_revision: int | None = Field(alias="environmentDraftRevision", default=None, ge=0)
 
 
 class ImageDiagnosisCommand(PaidJobCommand):
@@ -540,6 +573,7 @@ class ShotPlanGenerationResultDto(ContractModel):
     )
     recoverable: bool
     draft: DirectorPlanDraftDto | None = None
+    raw_text: str | None = Field(alias="rawText", default=None)
     issues: list[DirectorValidationIssueDto] = Field(default_factory=list)
     normalization_revision: str | None = Field(alias="normalizationRevision", default=None)
     adjustments: list[DirectorValidationIssueDto] = Field(default_factory=list)
@@ -669,7 +703,8 @@ class GenerationInputSnapshotDto(ContractModel):
 
 
 class ImageGenerationInputSnapshotDto(ContractModel):
-    schema_version: Literal[1] = Field(alias="schemaVersion")
+    environment_draft: EnvironmentGenerationDraft | None = Field(alias="environmentDraft", default=None)
+    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
     state: Literal["preview", "submitted"]
     kind: Literal["environment"]
     subject_policy: Literal["empty_scene"] = Field(alias="subjectPolicy")
@@ -861,6 +896,7 @@ class GenerationPreviewDto(ContractModel):
 
 
 class AssetGenerationPreviewDto(ContractModel):
+    environment_draft: EnvironmentGenerationDraft | None = Field(alias="environmentDraft", default=None)
     input_hash: str = Field(alias="inputHash")
     kind: AssetGenerationKind
     provider: str
@@ -1261,6 +1297,8 @@ class StudioRepository(Protocol):
     def list_projects(self) -> list[ProjectDto]: ...
 
     def get_project(self, project_id: uuid.UUID) -> ProjectDto | None: ...
+
+    def save_environment_draft(self, project_id: uuid.UUID, draft: EnvironmentGenerationDraft, expected_revision: int) -> EnvironmentGenerationDraft: ...
 
     def create_story_series(
         self, command: SeriesCreateCommand, *, canon_profile_id: uuid.UUID
@@ -3122,6 +3160,7 @@ class StudioService:
                 else None
             )
             saved_validation = (job.provider_result or {}).get("validation")
+            raw_text = completed_director_text(job.provider_result) if error.get("code") == "invalid_structured_output" else None
             # GET preserves the original interpretation. New normalization is an
             # explicit recovery operation, never an incidental effect of reading history.
             validation = (
@@ -3129,6 +3168,12 @@ class StudioService:
                 else normalize_director_result(provider_payload, legacy=True).validation_document()
                 if provider_payload is not None else None
             )
+            if validation is None and raw_text is not None:
+                validation = {
+                    "disposition": "needs_input", "recoverable": False,
+                    "issues": [{"code": "invalid_structured_output", "severity": "blocking", "path": "$",
+                                "message": f"完整正文已返回，JSON 格式需要修订：{error.get('message', '')}"}],
+                }
             result_plan = plans_by_job.get(job.id)
             result_plan_id = result_plan.id if result_plan else None
             generation_result = None
@@ -3140,6 +3185,7 @@ class StudioService:
                     disposition=validation["disposition"],
                     resultShotPlanVersionId=result_plan_id,
                     recoverable=bool(validation.get("recoverable")),
+                    rawText=raw_text,
                     normalizationRevision=validation.get("normalizationRevision"),
                     adjustments=validation.get("adjustments", []),
                     resolution=result_plan.review_status if result_plan else "unresolved",
@@ -3256,9 +3302,9 @@ class StudioService:
         job = self.get_job(job_id)
         if job.project_id != project_id or job.kind != "plan_shots":
             raise StudioNotFoundError("shot plan generation result not found")
-        if not isinstance(job.provider_result, dict) or not isinstance(
-            job.provider_result.get("payload"), dict
-        ):
+        raw_text = completed_director_text(job.provider_result) if (job.error or {}).get("code") == "invalid_structured_output" else None
+        provider_payload = (job.provider_result or {}).get("payload")
+        if not isinstance(provider_payload, dict) and raw_text is None:
             raise StudioValidationError("director result payload is missing")
         existing = next(
             (
@@ -3278,9 +3324,15 @@ class StudioService:
         plan = self.complete_shot_plan_job(job_id, command.payload)
         # The version itself is durable if recording this annotation is interrupted.
         # Never replace the original validation or provider payload with user edits.
-        validation = dict(job.provider_result.get("validation") or normalize_director_result(
-            job.provider_result["payload"], legacy=True
-        ).validation_document())
+        validation = dict(job.provider_result.get("validation") or (
+            normalize_director_result(provider_payload, legacy=True).validation_document()
+            if isinstance(provider_payload, dict) else {
+                "disposition": "needs_input", "recoverable": False,
+                "rawTextHash": hashlib.sha256(raw_text.encode()).hexdigest(),
+                "issues": [{"code": "invalid_structured_output", "severity": "blocking", "path": "$",
+                            "message": (job.error or {}).get("message", "JSON 格式需要修订")}],
+            }
+        ))
         validation["manualResolution"] = {
             "resultShotPlanVersionId": str(plan.id),
             "payloadHash": _hash_document(command.payload.model_dump(mode="json", by_alias=True)),
@@ -3737,12 +3789,53 @@ class StudioService:
             }
         )
 
+    def get_environment_draft(self, project_id: uuid.UUID) -> EnvironmentGenerationDraft:
+        project = self._require_project(project_id)
+        if project.environment_generation_draft:
+            return project.environment_generation_draft
+        story = self._repository.active_story(project_id)
+        if story is None:
+            raise StudioValidationError("请先采用一个故事。")
+        return EnvironmentGenerationDraft(sourceStoryVersionId=story.id, description=story.environment_intent)
+
+    def _validate_environment_source(self, project_id: uuid.UUID, value: EnvironmentGenerationInput) -> None:
+        story = self._repository.active_story(project_id)
+        if story is None or story.id != value.source_story_version_id:
+            raise StudioConflictError("故事来源已变化，请确认继续使用环境草稿或恢复新故事默认描述。")
+        if value.source_asset_id:
+            asset = self.get_asset(value.source_asset_id)
+            if asset.project_id != project_id or asset.role != "environment" or asset.media_type != "image":
+                raise StudioValidationError("只能复用本项目环境图片的指令。")
+            job = self.get_job(asset.producing_job_id) if asset.producing_job_id else None
+            if job is None or job.image_input_snapshot is None:
+                raise StudioValidationError("该历史图片未保存生成指令，不能推测原指令。")
+
+    def save_environment_draft(self, project_id: uuid.UUID, command: EnvironmentDraftSaveCommand) -> EnvironmentGenerationDraft:
+        self._require_project(project_id)
+        self._validate_environment_source(project_id, command)
+        draft = EnvironmentGenerationDraft(
+            **command.model_dump(exclude={"expected_revision"}),
+            revision=command.expected_revision + 1, updatedAt=datetime.now(UTC),
+        )
+        return self._repository.save_environment_draft(project_id, draft, command.expected_revision)
+
     def preview_asset_generation(
         self, project_id: uuid.UUID, command: AssetGenerationPreviewCommand
     ) -> AssetGenerationPreviewDto:
         project = self._require_project(project_id)
         selections = self._repository.current_selections(project_id)
         story = self._repository.active_story(project_id)
+        environment_draft = None
+        if command.kind != "environment" and (command.environment_input is not None or command.environment_draft_revision is not None):
+            raise StudioValidationError("环境草稿仅适用于环境生成。")
+        if command.kind == "environment":
+            saved = project.environment_generation_draft
+            revision = saved.revision if saved else 0
+            if command.environment_draft_revision is not None and command.environment_draft_revision != revision:
+                raise StudioConflictError("环境草稿已在其他窗口更新，请重新读取并核对。")
+            environment_draft = EnvironmentGenerationDraft(**command.environment_input.model_dump(), revision=revision) if command.environment_input else saved
+            if environment_draft:
+                self._validate_environment_source(project_id, environment_draft)
         reference_roles: dict[str, tuple[str, ...]] = {
             "episode_child": ("episode_child", "style_board"),
             "episode_cat": ("episode_cat", "style_board"),
@@ -3772,8 +3865,12 @@ class StudioService:
                 maximum_references=1,
                 role_order=("style_board",),
             )
-            prompt = _environment_asset_prompt(project, story)
-            negative_prompt = _environment_negative_prompt()
+            if environment_draft and environment_draft.mode == "custom":
+                prompt = environment_draft.prompt
+                negative_prompt = environment_draft.negative_prompt or ""
+            else:
+                prompt = _environment_asset_prompt(project, story, environment_draft.description if environment_draft else None)
+                negative_prompt = _environment_negative_prompt()
         else:
             compiled = compile_references(references, maximum_references=4)
             prompt = _asset_prompt(project, command.kind)
@@ -3801,7 +3898,13 @@ class StudioService:
                 }
             )
         input_hash = _hash_document(document)
+        if environment_draft:
+            document["environmentDraft"] = environment_draft.model_dump(mode="json", by_alias=True, exclude={"updated_at"})
+            document["environmentIntent"] = environment_draft.description
+            document["promptCompilerRevision"] = "catflow-environment-v4"
+            input_hash = _hash_document(document)
         preview = AssetGenerationPreviewDto(
+            environmentDraft=environment_draft,
             inputHash=input_hash,
             kind=command.kind,
             provider=self._provider_runtime.provider,
@@ -3831,21 +3934,17 @@ class StudioService:
         self, project_id: uuid.UUID, command: AssetGenerationCommand
     ) -> JobDto:
         preview = self.preview_asset_generation(
-            project_id, AssetGenerationPreviewCommand(kind=command.kind)
+            project_id, AssetGenerationPreviewCommand(kind=command.kind, environmentDraftRevision=command.environment_draft_revision)
         )
+        if preview.environment_draft and command.environment_draft_revision != preview.environment_draft.revision:
+            raise StudioConflictError("请重新预览已保存的环境草稿后提交。")
         if preview.input_hash != command.expected_input_hash:
             raise StudioConflictError("generation input hash changed")
         self._require_paid_calls_enabled()
         now = datetime.now(UTC)
-        story = self._repository.active_story(project_id)
         image_input_snapshot = (
-            _image_generation_input_snapshot(
-                preview,
-                story=story,
-                state="submitted",
-                created_at=now,
-            )
-            if preview.kind == "environment" and story is not None
+            preview.image_input_snapshot.model_copy(update={"state": "submitted", "created_at": now})
+            if preview.image_input_snapshot is not None
             else None
         )
         return self._create_job(
@@ -6222,8 +6321,8 @@ def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind) -> str:
     )
 
 
-def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
-    environment_intent = story.environment_intent.rstrip("。！？!?；; \t\r\n")
+def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto, description: str | None = None) -> str:
+    environment_intent = (description if description is not None else story.environment_intent).rstrip("。！？!?；; \t\r\n")
     return (
         f"为《{project.title}》生成一张9:16、2K PNG的空场景环境设计图。"
         f"环境意图：{environment_intent}。"
@@ -6264,12 +6363,13 @@ def _image_generation_input_snapshot(
     if preview.kind != "environment":
         raise ValueError("only environment generation has an image input snapshot")
     return ImageGenerationInputSnapshotDto(
-        schemaVersion=1,
+        schemaVersion=2 if preview.environment_draft else 1,
+        environmentDraft=preview.environment_draft,
         state=state,
         kind="environment",
         subjectPolicy="empty_scene",
         sourceStoryVersionId=story.id,
-        environmentIntent=story.environment_intent,
+        environmentIntent=preview.environment_draft.description if preview.environment_draft else story.environment_intent,
         provider=preview.provider,
         model=preview.model,
         capabilityRevision=preview.capability_revision,
@@ -6282,6 +6382,6 @@ def _image_generation_input_snapshot(
             for reference in preview.references
         ],
         inputHash=preview.input_hash,
-        promptCompilerRevision="catflow-environment-v3",
+        promptCompilerRevision="catflow-environment-v4" if preview.environment_draft else "catflow-environment-v3",
         createdAt=created_at,
     )

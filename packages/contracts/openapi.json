@@ -4183,6 +4183,94 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/environment-generation-draft": {
+      "get": {
+        "summary": "Get Environment Draft",
+        "operationId": "get_environment_draft_api_v1_projects__project_id__environment_generation_draft_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentGenerationDraft"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save Environment Draft",
+        "operationId": "save_environment_draft_api_v1_projects__project_id__environment_generation_draft_put",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentDraftSaveCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentGenerationDraft"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/asset-generations/preview": {
       "post": {
         "summary": "Preview Asset Generation",
@@ -6231,6 +6319,18 @@
               "style_board"
             ],
             "title": "Kind"
+          },
+          "environmentDraftRevision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environmentdraftrevision"
           }
         },
         "additionalProperties": false,
@@ -6254,6 +6354,28 @@
               "style_board"
             ],
             "title": "Kind"
+          },
+          "environmentDraftRevision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environmentdraftrevision"
+          },
+          "environmentInput": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnvironmentGenerationInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -6265,6 +6387,16 @@
       },
       "AssetGenerationPreviewDto": {
         "properties": {
+          "environmentDraft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnvironmentGenerationDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "inputHash": {
             "type": "string",
             "title": "Inputhash"
@@ -7752,6 +7884,231 @@
         ],
         "title": "EmotionalArc"
       },
+      "EnvironmentDraftSaveCommand": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "description",
+              "custom"
+            ],
+            "title": "Mode",
+            "default": "description"
+          },
+          "sourceStoryVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sourcestoryversionid"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negativeprompt"
+          },
+          "sourceAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceassetid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expectedrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sourceStoryVersionId",
+          "description",
+          "expectedRevision"
+        ],
+        "title": "EnvironmentDraftSaveCommand"
+      },
+      "EnvironmentGenerationDraft": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "description",
+              "custom"
+            ],
+            "title": "Mode",
+            "default": "description"
+          },
+          "sourceStoryVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sourcestoryversionid"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negativeprompt"
+          },
+          "sourceAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceassetid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Revision",
+            "default": 0
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sourceStoryVersionId",
+          "description"
+        ],
+        "title": "EnvironmentGenerationDraft"
+      },
+      "EnvironmentGenerationInput": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "description",
+              "custom"
+            ],
+            "title": "Mode",
+            "default": "description"
+          },
+          "sourceStoryVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sourcestoryversionid"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "negativePrompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negativeprompt"
+          },
+          "sourceAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceassetid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sourceStoryVersionId",
+          "description"
+        ],
+        "title": "EnvironmentGenerationInput"
+      },
       "EpisodeContinuityConfirmCommand": {
         "properties": {
           "direction": {
@@ -8946,9 +9303,22 @@
       },
       "ImageGenerationInputSnapshotDto": {
         "properties": {
+          "environmentDraft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnvironmentGenerationDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "schemaVersion": {
             "type": "integer",
-            "const": 1,
+            "enum": [
+              1,
+              2
+            ],
             "title": "Schemaversion"
           },
           "state": {
@@ -10717,6 +11087,16 @@
       },
       "ProjectDto": {
         "properties": {
+          "environmentGenerationDraft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnvironmentGenerationDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -15207,6 +15587,17 @@
                 "type": "null"
               }
             ]
+          },
+          "rawText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rawtext"
           },
           "issues": {
             "items": {

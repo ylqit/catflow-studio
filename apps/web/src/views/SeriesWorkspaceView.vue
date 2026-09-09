@@ -38,14 +38,16 @@ const runtime = ref<RuntimeBootstrapDto | null>(null);
 const loading = ref(true);
 const actionBusy = ref(false);
 const error = ref("");
+const goalTitle = ref("");
 const goalCount = ref(3);
 const goalDuration = ref(15);
 const goalKeep = ref("");
 async function saveProductionGoal() {
-  if (!series.value || actionBusy.value) return;
+  if (!series.value || actionBusy.value || !goalTitle.value.trim()) return;
   actionBusy.value = true; error.value = "";
   try {
     await api.updateSeriesProductionTarget(seriesId, {
+      title: goalTitle.value.trim(),
       ...(series.value.lengthMode === "fixed" ? { plannedEpisodeCount: goalCount.value } : {}),
       defaultEpisodeDurationSeconds: goalDuration.value,
       mustKeep: goalKeep.value.split("\n").map(item => item.trim()).filter(Boolean),
@@ -203,6 +205,7 @@ async function load() {
       api.storySeriesDetail(seriesId), api.seriesPlans(seriesId), api.seriesPlanSegments(seriesId), api.seriesEpisodes(seriesId), api.seriesJobs(seriesId), api.runtime(), api.seriesSourceBeats(seriesId),
     ]);
     series.value = detail;
+    goalTitle.value = detail.title;
     goalCount.value = detail.plannedEpisodeCount ?? 3;
     goalDuration.value = detail.defaultEpisodeDurationSeconds;
     goalKeep.value = detail.mustKeep.join("\n");
@@ -532,11 +535,12 @@ watch(selectedPlanId, () => { editingPlan.value = false; editablePlan.value = nu
         <header><div><h2>系列设定</h2><p>{{ series.narrativeMode === "continuous" ? "连续剧情" : series.narrativeMode === "lightly_serialized" ? "轻连续" : "单元故事" }} · 每集 {{ series.defaultEpisodeDurationSeconds }} 秒</p></div></header>
         <details v-if="series.adaptationPolicy === 'condense_mainline' && !activePlan" class="goal-editor">
           <summary>调整生产目标（不重新分析原文）</summary>
+          <label>系列名称<input v-model="goalTitle" maxlength="160" required /></label>
           <label v-if="series.lengthMode === 'fixed'">计划集数<input v-model.number="goalCount" type="number" min="2" /></label>
           <label>每集时长（秒）<input v-model.number="goalDuration" type="number" min="8" max="15" /></label>
           <label>必须保留（每行一项）<textarea v-model="goalKeep" /></label>
           <p v-if="series.lengthMode === 'fixed'">{{ goalCount }} × {{ goalDuration }} 秒 = {{ goalCount * goalDuration }} 秒</p>
-          <button class="secondary" :disabled="actionBusy || jobRunning || segmentJobRunning || goalCount < 2 || goalDuration < 8 || goalDuration > 15" @click="saveProductionGoal">保存生产目标</button>
+          <button class="secondary" :disabled="actionBusy || jobRunning || segmentJobRunning || !goalTitle.trim() || goalCount < 2 || goalDuration < 8 || goalDuration > 15" @click="saveProductionGoal">保存生产目标</button>
         </details>
         <div class="setting-grid"><dl><dt>世界与环境</dt><dd>{{ series.worldSetting }}</dd></dl><dl><dt>情绪方向</dt><dd>{{ series.emotionalDirection }}</dd></dl><dl><dt>必须保留</dt><dd>{{ series.mustKeep.join("、") || "固定儿童、猫咪和画风" }}</dd></dl><dl><dt>必须避免</dt><dd>{{ series.mustAvoid.join("、") || "危险动作与身份变化" }}</dd></dl></div>
       </section>
@@ -640,7 +644,7 @@ watch(selectedPlanId, () => { editingPlan.value = false; editablePlan.value = nu
         <header><div><h2>连续性</h2><p>第 2 集起，生成视频前需要确认从上一集继承、调整或重置的状态。</p></div></header>
         <p v-if="!openContinuity" class="empty">在剧集列表中选择一集查看相邻状态。</p>
         <template v-else>
-          <div class="continuity-panel"><div><b>上一集结尾</b><p>{{ openContinuity.incoming?.state.childState }}</p></div><span>→</span><div><b>本集开场</b><p>{{ openContinuity.incoming?.state.endingImage }}</p></div><span v-if="openContinuity.incoming?.confirmed" class="pill good">已确认</span></div>
+          <div class="continuity-panel"><div><b>本集孩子状态</b><p>{{ openContinuity.incoming?.state.childState }}</p></div><span>→</span><div><b>本集开场</b><p>{{ openContinuity.incoming?.state.endingImage }}</p></div><span v-if="openContinuity.incoming?.confirmed" class="pill good">已确认</span></div>
           <div v-if="openContinuity.incoming && !openContinuity.incoming.confirmed && continuityDraft" class="continuity-editor">
             <p>逐项确认下一集如何承接。选择“调整”或“重置”后，可直接修改右侧状态。</p>
             <label v-for="field in continuityFields" :key="field.key" class="continuity-field">

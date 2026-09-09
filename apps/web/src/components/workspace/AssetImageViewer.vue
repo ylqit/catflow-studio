@@ -13,8 +13,9 @@ const props = defineProps<{
   negativePrompt?: string | null;
   promptUnavailable?: boolean;
   qualityReport?: Record<string, unknown> | null;
+  allowPromptReuse?: boolean;
 }>();
-const emit = defineEmits<{ close: []; assetChange: [asset: AssetDto] }>();
+const emit = defineEmits<{ close: []; assetChange: [asset: AssetDto]; reusePrompt: [asset: AssetDto] }>();
 
 const dialog = ref<HTMLElement | null>(null);
 const currentIndex = ref(0);
@@ -214,6 +215,7 @@ onBeforeUnmount(() => stopPan());
       </header>
 
       <nav class="viewer-tabs" aria-label="图片查看方式">
+        <button v-if="allowPromptReuse && currentAsset" :disabled="!prompt || promptUnavailable" @click="emit('reusePrompt', currentAsset)">基于此指令修改</button>
         <button data-view="image" :class="{ active: view === 'image' }" @click="view = 'image'">查看环境</button>
         <button
           v-if="comparisons.length"

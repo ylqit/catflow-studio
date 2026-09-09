@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -10,6 +11,8 @@ from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     AssetGenerationCommand,
     AssetGenerationPreviewCommand,
+    EnvironmentDraftSaveCommand,
+    EnvironmentGenerationInput,
     GenerationCommand,
     ImageDiagnosisCommand,
     JobDto,
@@ -23,6 +26,7 @@ from catflow.application.service import (
     StoryCreateCommand,
     StudioConflictError,
     StudioService,
+    StudioValidationError,
 )
 from catflow.domain.models import (
     BlockingDesign,
@@ -651,7 +655,8 @@ def test_paid_director_result_can_be_recovered_without_another_provider_job() ->
     assert len(repository.list_project_jobs(project.id)) == 2
 
 
-def test_incomplete_director_draft_can_be_corrected_without_another_provider_job() -> None:
+@pytest.mark.parametrize("raw_syntax_error,response_status", [(False, "completed"), (True, "completed"), (True, "incomplete")])
+def test_incomplete_director_draft_can_be_corrected_without_another_provider_job(raw_syntax_error: bool, response_status: str) -> None:
     repository = MemoryStudioRepository()
     service = StudioService(
         repository,
@@ -679,17 +684,31 @@ def test_incomplete_director_draft_can_be_corrected_without_another_provider_job
     )
     incomplete_payload = _director_payload().model_dump(mode="json", by_alias=True)
     del incomplete_payload["shots"][0]["catBlocking"]["endState"]
+    raw_text = json.dumps(incomplete_payload) + "}"
+    original_result = (
+        {"rawResponse": {"status": response_status, "output": [{"type": "message", "content": [{"type": "output_text", "text": raw_text}]}]}}
+        if raw_syntax_error else {"payload": incomplete_payload, "responseId": "response-paid-once"}
+    )
     repository._jobs[job.id] = job.model_copy(  # noqa: SLF001 - fixture controls persistence.
         update={
             "status": "succeeded",
-            "provider_result": {"payload": incomplete_payload, "responseId": "response-paid-once"},
+            "provider_result": original_result,
+            "error": {"code": "invalid_structured_output", "message": "Extra data"} if raw_syntax_error else None,
         }
     )
 
     attempt = service.list_shot_plan_generation_attempts(project.id)[0]
+    if response_status == "incomplete":
+        assert attempt.result is None
+        with pytest.raises(StudioValidationError, match="payload is missing"):
+            service.materialize_shot_plan_generation_result(project.id, job.id, ShotPlanGenerationMaterializeCommand(idempotencyKey="incomplete", payload=_director_payload()))
+        assert service.list_shot_plans(project.id) == []
+        return
     assert attempt.result is not None
     assert attempt.result.disposition == "needs_input"
     assert any(issue.severity == "blocking" for issue in attempt.result.issues)
+    if raw_syntax_error:
+        assert attempt.result.raw_text == raw_text
     original_job_count = len(repository.list_project_jobs(project.id))
 
     candidate = service.materialize_shot_plan_generation_result(
@@ -711,7 +730,7 @@ def test_incomplete_director_draft_can_be_corrected_without_another_provider_job
     assert resolved.result.resolution == "candidate"
     assert resolved.result.result_revision == candidate.revision
     saved = service.get_job(job.id).provider_result
-    assert saved["payload"] == incomplete_payload
+    assert all(saved[key] == value for key, value in original_result.items())
     assert saved["validation"]["manualResolution"]["resultShotPlanVersionId"] == str(candidate.id)
     before_events = len(repository._job_events)
     repeated = service.recover_shot_plan_generation_result(
@@ -1082,6 +1101,71 @@ def test_environment_preview_requires_an_active_story() -> None:
         service.preview_asset_generation(
             project.id, AssetGenerationPreviewCommand(kind="environment")
         )
+
+
+@pytest.mark.parametrize("mode", ["description", "custom"])
+def test_environment_draft_preview_submission_and_history_are_bound(mode: str) -> None:
+    service = _service()
+    project = _project(service)
+    service.create_story(project.id, StoryCreateCommand(
+        title="风车", body="孩子拿起平躺的风车", microEvent=_proposal().micro_event,
+        targetDurationSeconds=12, dialoguePolicy="none", environmentIntent="风扇旁边放风车",
+    ))
+    initial = service.get_environment_draft(project.id)
+    legacy = service.preview_asset_generation(project.id, AssetGenerationPreviewCommand(kind="environment"))
+    old_job = service.create_asset_generation_job(project.id, AssetGenerationCommand(
+        kind="environment", expectedInputHash=legacy.input_hash, idempotencyKey="old-environment-input",
+    ))
+    old_snapshot = old_job.model_dump_json()
+    original_selections = service.workspace(project.id)["selectionHash"]
+    value = EnvironmentGenerationInput(
+        mode=mode, sourceStoryVersionId=initial.source_story_version_id,
+        description="纸风车平躺在木地板上，手柄贴地，没有支架",
+        prompt="自定义空场景：风车平躺地板，唯一道具" if mode == "custom" else None,
+        negativePrompt="不要竖立、不要底座" if mode == "custom" else None,
+    )
+    unsaved = service.preview_asset_generation(project.id, AssetGenerationPreviewCommand(
+        kind="environment", environmentDraftRevision=0, environmentInput=value,
+    ))
+    assert service.get_environment_draft(project.id).revision == 0
+    assert unsaved.input_hash != legacy.input_hash
+    saved = service.save_environment_draft(project.id, EnvironmentDraftSaveCommand(**value.model_dump(), expectedRevision=0))
+    assert service.get_environment_draft(project.id) == saved
+    assert service.workspace(project.id)["selectionHash"] == original_selections
+    preview = service.preview_asset_generation(project.id, AssetGenerationPreviewCommand(kind="environment", environmentDraftRevision=1))
+    if mode == "custom":
+        assert preview.prompt == value.prompt
+        assert preview.negative_prompt == value.negative_prompt
+    else:
+        assert value.description in preview.prompt
+        assert "空场景" in preview.prompt
+    command = AssetGenerationCommand(kind="environment", environmentDraftRevision=1, expectedInputHash=preview.input_hash, idempotencyKey="edited-environment-input")
+    job = service.create_asset_generation_job(project.id, command)
+    assert job.image_input_snapshot.environment_draft.revision == 1
+    assert job.image_input_snapshot.environment_intent == value.description
+    assert job.image_input_snapshot.schema_version == 2
+    assert job.frozen_input["prompt"] == preview.prompt
+    assert old_job.model_dump_json() == old_snapshot
+    assert service.create_asset_generation_job(project.id, command).id == job.id
+    with pytest.raises(StudioConflictError, match="其他窗口"):
+        service.save_environment_draft(project.id, EnvironmentDraftSaveCommand(**value.model_dump(), expectedRevision=0))
+    saved2 = service.save_environment_draft(project.id, EnvironmentDraftSaveCommand(**value.model_dump(), expectedRevision=1))
+    assert saved2.revision == 2
+    with pytest.raises(StudioConflictError):
+        service.create_asset_generation_job(project.id, command.model_copy(update={"idempotency_key": "stale-preview-request"}))
+    with pytest.raises(StudioConflictError):
+        service.create_asset_generation_job(project.id, AssetGenerationCommand(kind="environment", expectedInputHash=preview.input_hash, idempotencyKey="old-client-without-revision"))
+    service.create_story(project.id, StoryCreateCommand(
+        title="新场景", body="转到窗边", microEvent=_proposal().micro_event,
+        targetDurationSeconds=12, dialoguePolicy="none", environmentIntent="新房间",
+    ))
+    assert service.get_environment_draft(project.id).source_story_version_id == initial.source_story_version_id
+    with pytest.raises(StudioConflictError, match="故事来源"):
+        service.preview_asset_generation(project.id, AssetGenerationPreviewCommand(kind="environment"))
+    with pytest.raises(StudioConflictError, match="故事来源"):
+        service.save_environment_draft(project.id, EnvironmentDraftSaveCommand(**value.model_dump(), expectedRevision=2))
+    another = _project(service)
+    assert another.environment_generation_draft is None
 
 
 def test_image_diagnosis_freezes_candidate_and_labeled_identity_style_references() -> None:

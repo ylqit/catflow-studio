@@ -31,6 +31,8 @@ const selectedPlanId = ref<string | null>(null);
 const originalShotsJson = ref("[]");
 const soundIntent = ref("");
 const originalSoundIntent = ref("");
+const spatialSetting = ref("");
+const originalSpatialSetting = ref("");
 const compareOpen = ref(false);
 const compareButton = ref<HTMLButtonElement | null>(null);
 const storyboardRoot = ref<HTMLElement | null>(null);
@@ -93,7 +95,8 @@ const workerReady = computed(() => props.runtime?.worker?.ready ?? true);
 const queuedWhileWorkerUnavailable = computed(() => Boolean(
   displayedDirectorJob.value?.status === "queued" && !workerReady.value,
 ));
-const shotsDirty = computed(() => JSON.stringify(shots) !== originalShotsJson.value || soundIntent.value !== originalSoundIntent.value);
+const shotsDirty = computed(() => JSON.stringify(shots) !== originalShotsJson.value
+  || soundIntent.value !== originalSoundIntent.value || spatialSetting.value !== originalSpatialSetting.value);
 const canEditSelected = computed(() => Boolean(
   selectedPlan.value && !selectedPlan.value.outdated
     && (selectedPlan.value.active || selectedPlan.value.reviewStatus === "candidate"),
@@ -382,6 +385,8 @@ function hydratePlan(plan: ShotPlanVersionDto | null) {
   originalShotsJson.value = JSON.stringify(cloned);
   soundIntent.value = typeof plan?.directorTreatment?.soundIntent === "string" ? plan.directorTreatment.soundIntent : "";
   originalSoundIntent.value = soundIntent.value;
+  spatialSetting.value = typeof plan?.directorTreatment?.spatialSetting === "string" ? plan.directorTreatment.spatialSetting : "";
+  originalSpatialSetting.value = spatialSetting.value;
 }
 
 async function loadVersionData(preferCandidate = false) {
@@ -421,10 +426,14 @@ watch(
     if (
       !attempt
       || result?.disposition !== "needs_input"
-      || !result.draft
+      || (!result.draft && !result.rawText)
       || draftEditorJobId.value === attempt.jobId
     ) return;
     draftEditorJobId.value = attempt.jobId;
+    if (!result.draft) {
+      draftEditorText.value = result.rawText ?? "";
+      return;
+    }
     draftEditorText.value = JSON.stringify({
       targetDurationSeconds: result.draft.targetDurationSeconds,
       directorTreatment: result.draft.directorTreatment,
@@ -607,7 +616,10 @@ async function save() {
         expectedActiveShotPlanVersionId: activePlan.value?.id ?? null,
         clip: plan.clip,
         shots: shots.map(synchronizedShot),
-        directorTreatment: plan.directorTreatment ? { ...plan.directorTreatment, soundIntent: soundIntent.value } : plan.directorTreatment,
+        directorTreatment: plan.directorTreatment ? {
+          ...plan.directorTreatment, soundIntent: soundIntent.value,
+          ...(spatialSetting.value !== originalSpatialSetting.value ? { spatialSetting: spatialSetting.value } : {}),
+        } : plan.directorTreatment,
         directorPromptRevision: plan.directorPromptRevision,
         directorModel: plan.directorModel,
         directorInputHash: plan.directorInputHash,
@@ -694,8 +706,10 @@ async function closeComparison() {
       <details v-if="selectedPlan?.directorTreatment" class="treatment">
         <summary>故事导演解析</summary>
         <label>整体声音方向<textarea v-model="soundIntent" aria-label="整体声音方向" :disabled="!canEditSelected" rows="4" maxlength="300" /></label>
+        <label>整体空间与道具<textarea v-model="spatialSetting" aria-label="整体空间与道具" :disabled="!canEditSelected" rows="4" maxlength="300" /></label>
+        <p>与逐镜的角色位置、道具起点保持一致。修改后保存为新分镜版本，历史版本保留。</p>
         <p>与各镜头的音乐、环境声和对白共同进入视频指令；修改后保存为新分镜版本。</p>
-        <details><summary>查看完整导演解析</summary><pre>{{ JSON.stringify({ ...selectedPlan.directorTreatment, soundIntent }, null, 2) }}</pre></details>
+        <details><summary>查看完整导演解析</summary><pre>{{ JSON.stringify({ ...selectedPlan.directorTreatment, soundIntent, ...(spatialSetting !== originalSpatialSetting ? { spatialSetting } : {}) }, null, 2) }}</pre></details>
       </details>
       <p v-if="selectedPlan?.outdated" class="notice error">故事、角色或环境已经更新，这版分镜仅作历史参考。</p>
     </aside>

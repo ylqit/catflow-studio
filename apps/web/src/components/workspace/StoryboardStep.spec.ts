@@ -65,8 +65,11 @@ describe("StoryboardStep", () => {
     client.shotPlanGenerationAttempts.mockResolvedValue([]);
   });
 
-  it("saves the edited overall sound direction without changing other treatment facts or calling a model", async () => {
-    const treatment = { soundIntent: "轻钢琴", theme: "一起回家", nested: { keep: "原始事实" } };
+  it.each([
+    ["soundIntent", "整体声音方向", "无配乐；仅林间环境声、塑料接触和脚步声，无对白。"],
+    ["spatialSetting", "整体空间与道具", "唯一杯子由手中放到右前方地面，小桌仅放夜灯。"],
+  ])("saves edited %s without changing other treatment facts or calling a model", async (field, label, value) => {
+    const treatment = { soundIntent: "轻钢琴", spatialSetting: "小桌放杯子与夜灯", theme: "一起回家", nested: { keep: "原始事实" } };
     const accepted = {
       id: "sound-plan", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
       clip: {}, shots: [professionalShot], totalDurationSeconds: 12, directorTreatment: treatment,
@@ -76,16 +79,17 @@ describe("StoryboardStep", () => {
     client.createShotPlan.mockResolvedValue({ ...accepted, id: "sound-plan-2", revision: 2 });
     const wrapper = mountStoryboard(accepted);
     await flushPromises();
-    await wrapper.get('textarea[aria-label="整体声音方向"]').setValue("无配乐；仅林间环境声、塑料接触和脚步声，无对白。");
+    await wrapper.get(`textarea[aria-label="${label}"]`).setValue(value);
     const saveButton = wrapper.findAll("button").find(button => button.text() === "保存新版本")!;
     expect(saveButton.attributes("disabled")).toBeUndefined();
     await saveButton.trigger("click");
     await flushPromises();
     expect(client.createShotPlan).toHaveBeenCalledWith("project-1", expect.objectContaining({
       baseShotPlanVersionId: "sound-plan",
-      directorTreatment: { ...treatment, soundIntent: "无配乐；仅林间环境声、塑料接触和脚步声，无对白。" },
+      directorTreatment: { ...treatment, [field]: value },
     }));
     expect(treatment.soundIntent).toBe("轻钢琴");
+    expect(treatment.spatialSetting).toBe("小桌放杯子与夜灯");
     expect(client.generateShotPlan).not.toHaveBeenCalled();
   });
 
@@ -649,7 +653,7 @@ describe("StoryboardStep", () => {
     expect(wrapper.text()).toContain("水流声、水壶轻碰声、水滴声、托盘摩擦声");
   });
 
-  it.each([true, false])("materializes a corrected blocking draft without calling the model again (existing plan: %s)", async (hasExistingPlan) => {
+  it.each([true, false, "raw"])("materializes a corrected blocking draft without calling the model again (existing plan: %s)", async (hasExistingPlan) => {
     const accepted = {
       id: "plan-1", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
       clip: {}, shots: [professionalShot], totalDurationSeconds: 12,
@@ -679,7 +683,8 @@ describe("StoryboardStep", () => {
       result: {
         disposition: "needs_input" as const,
         recoverable: true,
-        draft: { targetDurationSeconds: 12, directorTreatment: {}, shots: [{ id: "shot-1" }] },
+        draft: hasExistingPlan === "raw" ? null : { targetDurationSeconds: 12, directorTreatment: {}, shots: [{ id: "shot-1" }] },
+        rawText: hasExistingPlan === "raw" ? '{"shots": []}}' : null,
         issues: [
           { code: "missing_required_field", severity: "blocking" as const, path: "shots.0.catBlocking.endState", message: "请补充猫咪动作的结束状态。" },
         ],
@@ -709,6 +714,7 @@ describe("StoryboardStep", () => {
 
     expect(wrapper.text()).toContain("分镜已经返回，还需要补充 1 项重要内容");
     expect(wrapper.text()).toContain("本次结果已经保存，不需要重新调用模型");
+    if (hasExistingPlan === "raw") expect((wrapper.get('textarea[aria-label="待补充的分镜草稿"]').element as HTMLTextAreaElement).value).toBe('{"shots": []}}');
     const correctedPayload = { targetDurationSeconds: 12, directorTreatment: {}, shots: [professionalShot] };
     await wrapper.get('textarea[aria-label="待补充的分镜草稿"]').setValue(JSON.stringify(correctedPayload));
     await wrapper.get('[data-testid="materialize-director-result"]').trigger("click");

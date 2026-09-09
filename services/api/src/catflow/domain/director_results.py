@@ -17,6 +17,21 @@ DirectorResultDisposition = Literal["candidate_ready", "needs_input", "invalid"]
 DirectorValidationSeverity = Literal["fatal", "blocking", "warning"]
 
 
+def completed_director_text(provider_result: dict[str, Any] | None) -> str | None:
+    """Expose complete stored Responses text for explicit repair, never stream checkpoints."""
+    response = (provider_result or {}).get("rawResponse")
+    if not isinstance(response, dict) or response.get("status") != "completed":
+        return None
+    parts = [
+        content["text"]
+        for item in response.get("output", []) if isinstance(item, dict) and item.get("type") == "message"
+        for content in item.get("content", [])
+        if isinstance(content, dict) and content.get("type") == "output_text" and isinstance(content.get("text"), str)
+    ]
+    text = "".join(parts) or response.get("output_text")
+    return text if isinstance(text, str) and text.strip() and len(text.encode()) <= 2 * 1024 * 1024 else None
+
+
 @dataclass(frozen=True, slots=True)
 class DirectorValidationIssue:
     code: str

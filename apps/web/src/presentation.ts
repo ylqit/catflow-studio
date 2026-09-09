@@ -128,6 +128,10 @@ export interface ErrorPresentation {
 
 const ERROR_MESSAGES: Array<{ matches: string; message: string }> = [
   {
+    matches: "confirm the episode's incoming continuity",
+    message: "请先确认本集连续性：决定哪些角色状态、地点和道具需要继承、调整或重置。此条件尚未满足，视频请求未提交。",
+  },
+  {
     matches: "director_output_validation_failed",
     message: "模型返回的分镜结构不完整，本次没有生成新版本；当前版本保持不变。",
   },
@@ -159,6 +163,11 @@ const ERROR_MESSAGES: Array<{ matches: string; message: string }> = [
 
 export function errorPresentation(reason: unknown, fallback: string): ErrorPresentation {
   const message = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : fallback;
+  if (message.startsWith("环境草稿已在其他窗口更新")) return {
+    message: "环境草稿已在其他窗口更新。本窗口文字已保留，请先复制需要的修改，再读取最新草稿核对。",
+    technicalMessage: message,
+  };
+  if (message.startsWith("故事来源已变化")) return { message, technicalMessage: message };
   const normalized = message.toLowerCase();
   const known = ERROR_MESSAGES.find((item) => normalized.includes(item.matches));
   return {

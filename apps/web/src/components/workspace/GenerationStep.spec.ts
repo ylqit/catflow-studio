@@ -2,7 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { JobDto, WorkspaceDto } from "../../api/types";
+import type { JobDto, ProjectSeriesContextDto, WorkspaceDto } from "../../api/types";
 import GenerationStep from "./GenerationStep.vue";
 
 const client = vi.hoisted(() => ({
@@ -118,6 +118,22 @@ describe("GenerationStep", () => {
     expect(client.createVideoReview).toHaveBeenCalledWith("project-1", expect.objectContaining({ notes: "补记：切镜提前", checks: {}, audioChecks: {} }));
     expect(wrapper.text()).toContain("问题与验收记录已保存");
     expect(client.selectAsset).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("routes a continuity precondition to the series without submitting a video", async () => {
+    client.previewVideo.mockRejectedValue(new Error("confirm the episode's incoming continuity before video generation"));
+    const seriesContext = { series: { id: "series-1" }, episode: { order: 2 } } as ProjectSeriesContextDto;
+    const wrapper = mount(GenerationStep, {
+      props: { projectId: "project-1", workspace, runtime, seriesContext },
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("请先确认本集连续性");
+    expect(wrapper.text()).not.toContain("请先完成故事、分镜和五张参考图");
+    await wrapper.findAll("button").find(button => button.text() === "去系列确认连续性")!.trigger("click");
+    expect(navigation.push).toHaveBeenCalledWith("/series/series-1#continuity");
+    expect(client.createVideoJob).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
