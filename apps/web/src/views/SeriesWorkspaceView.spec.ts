@@ -282,7 +282,7 @@ describe("SeriesWorkspaceView", () => {
     expect(wrapper.text()).toContain("等待后台任务领取");
   });
 
-  it("shows a project-scoped episode story job and prevents a duplicate paid submission", async () => {
+  it("opens the episode workspace without submitting a duplicate story from the series page", async () => {
     const materializedEpisodes = [
       { ...episodes[0], projectId: "project-1", status: "story_review" },
       ...episodes.slice(1),
@@ -314,12 +314,8 @@ describe("SeriesWorkspaceView", () => {
     await wrapper.get(".episode-list article button.secondary").trigger("click");
     await flushPromises();
 
-    const panel = wrapper.get(".episode-story-panel");
-    expect(panel.text()).toContain("正在生成本集故事");
-    expect(panel.text()).toContain("当前任务完成前不会创建第二条任务");
-    const button = panel.get("button.primary");
-    expect(button.attributes("disabled")).toBeDefined();
-    await button.trigger("click");
+    expect(router.push).toHaveBeenCalledWith("/projects/project-1/planner");
+    expect(client.materializeSeriesEpisode).not.toHaveBeenCalled();
     expect(client.generateSeriesEpisodeStory).not.toHaveBeenCalled();
   });
 

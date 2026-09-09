@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
+import JobStatusCard from "../JobStatusCard.vue";
+import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
 import ShotSequenceProduction from "./ShotSequenceProduction.vue";
 const productionMode = ref("whole");
@@ -9,7 +11,6 @@ import type { AssetDto, GenerationPreviewDto, JobDto, ProjectUsageSummaryDto, Wo
 import { buildAcceptanceEvidence } from "../../acceptanceEvidence";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
-import { projectJobEvent } from "../../projectJobEvents";
 import { useUiStore } from "../../stores/ui";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null }>();
@@ -34,10 +35,15 @@ const error = ref("");
 const errorDetail = ref("");
 const reviewAssetId = ref<string | null>(null);
 const reviewNotes = ref("");
+const loadingReview = ref(false);
+const reviewLoadError = ref("");
+const reviewSaved = ref(false);
+const reviewReady = computed(() => !loadingReview.value && !reviewLoadError.value);
+let reviewLoadRevision = 0;
 const currentTime = ref(0);
 const totalDuration = ref(0);
 const playing = ref(false);
-let events: EventSource | null = null;
+let unsubscribeJobs: (() => void) | undefined;
 let disposed = false;
 const videoElements = new Map<string, HTMLVideoElement>();
 const videoErrors = reactive<Record<string, string>>({});
@@ -175,8 +181,7 @@ async function load() {
     latestVideoJob
     && (
       !currentJob.value
-      || currentJob.value.id !== latestVideoJob.id
-      || Date.parse(latestVideoJob.updatedAt) >= Date.parse(currentJob.value.updatedAt)
+      || (currentJob.value.id === latestVideoJob.id && (latestVideoJob.revision ?? 0) >= (currentJob.value.revision ?? 0) && Date.parse(latestVideoJob.updatedAt) >= Date.parse(currentJob.value.updatedAt))
     )
   ) {
     currentJob.value = latestVideoJob;
@@ -267,29 +272,15 @@ async function resumeStorage() {
 }
 
 function connectEvents() {
-  events = new EventSource(api.eventsUrl(store.lastEventId));
-  const refresh = async (event: Event) => {
-    const message = event as MessageEvent;
-    if (message.lastEventId) store.lastEventId = Number(message.lastEventId);
-    const jobEvent = projectJobEvent(message, props.projectId);
-    if (!jobEvent) return;
-    if (currentJob.value && jobEvent.jobId === currentJob.value.id) {
-      currentJob.value = await api.job(currentJob.value.id);
-    }
-    if (reviewVideoJob.value && jobEvent.jobId === reviewVideoJob.value.id) {
-      reviewVideoJob.value = await api.job(reviewVideoJob.value.id);
-    }
-    if (diagnosisJob.value && jobEvent.jobId === diagnosisJob.value.id) {
-      diagnosisJob.value = await api.job(diagnosisJob.value.id);
-    }
-    if (jobEvent.eventType === "job.succeeded") await load();
-  };
-  for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.storing", "job.succeeded", "job.failed", "job.submission_unknown", "job.cancel_requested", "job.cancelled"]) {
-    events.addEventListener(type, refresh);
-  }
+  unsubscribeJobs?.();
+  unsubscribeJobs = subscribeJobs(() => ({ projectId: props.projectId }), async () => { if (currentJob.value) currentJob.value = await api.job(currentJob.value.id); if (reviewVideoJob.value) reviewVideoJob.value = await api.job(reviewVideoJob.value.id); if (diagnosisJob.value) diagnosisJob.value = await api.job(diagnosisJob.value.id); await load(); }, () => currentJob.value?.execution?.waitingForProvider ?? false);
 }
 
 async function startReview(asset: AssetDto) {
+  const revision = ++reviewLoadRevision;
+  loadingReview.value = true;
+  reviewLoadError.value = "";
+  reviewSaved.value = false;
   reviewAssetId.value = asset.id;
   reviewVideoJob.value = null;
   diagnosisJob.value = null;
@@ -307,17 +298,24 @@ async function startReview(asset: AssetDto) {
   const diagnosisJobId = typeof asset.metadata.videoDiagnosisJobId === "string"
     ? asset.metadata.videoDiagnosisJobId
     : undefined;
-  const [videoJob, persistedDiagnosisJob] = await Promise.all([
-    asset.producingJobId ? api.job(asset.producingJobId) : Promise.resolve(null),
-    diagnosisJobId ? api.job(diagnosisJobId) : Promise.resolve(null),
-  ]);
-  reviewVideoJob.value = videoJob;
-  diagnosisJob.value = persistedDiagnosisJob;
-  const reviews = await api.videoReviews(props.projectId, asset.id);
-  if (reviewAssetId.value === asset.id && reviews[0]) {
-    reviewNotes.value = reviews[0].notes;
-    for (const [key] of qualityItems) quality[key] = reviews[0].checks[key] ?? "";
-    for (const [key] of audioItems) { const value = reviews[0].audioChecks?.[key]; audioQuality[key] = value === "not_applicable" ? "" : value ?? ""; }
+  try {
+    const [videoJob, persistedDiagnosisJob, reviews] = await Promise.all([
+      asset.producingJobId ? api.job(asset.producingJobId) : Promise.resolve(null),
+      diagnosisJobId ? api.job(diagnosisJobId) : Promise.resolve(null),
+      api.videoReviews(props.projectId, asset.id),
+    ]);
+    if (revision !== reviewLoadRevision) return;
+    reviewVideoJob.value = videoJob;
+    diagnosisJob.value = persistedDiagnosisJob;
+    if (reviews[0]) {
+      reviewNotes.value = reviews[0].notes;
+      for (const [key] of qualityItems) quality[key] = reviews[0].checks[key] ?? "";
+      for (const [key] of audioItems) { const value = reviews[0].audioChecks?.[key]; audioQuality[key] = value === "not_applicable" ? "" : value ?? ""; }
+    }
+  } catch (reason) {
+    if (revision === reviewLoadRevision) reviewLoadError.value = errorPresentation(reason, "验收记录暂未读取，请重新点击检查视频。").message;
+  } finally {
+    if (revision === reviewLoadRevision) loadingReview.value = false;
   }
 }
 
@@ -375,7 +373,7 @@ async function diagnoseVideo() {
 }
 
 async function chooseVideo() {
-  if (!reviewAssetId.value || !allPass.value || savingReview.value) return;
+  if (!reviewAssetId.value || !reviewReady.value || !allPass.value || savingReview.value) return;
   savingReview.value = true;
   try {
     const review = await persistReview();
@@ -397,13 +395,14 @@ function persistReview() {
   });
 }
 async function saveReviewOnly() {
-  if (!reviewAssetId.value || savingReview.value) return;
+  if (!reviewAssetId.value || !reviewReady.value || savingReview.value) return;
   savingReview.value = true;
-  try { await persistReview(); } catch (reason) { error.value = errorPresentation(reason, "问题记录未能保存").message; }
+  reviewSaved.value = false;
+  try { await persistReview(); reviewSaved.value = true; } catch (reason) { error.value = errorPresentation(reason, "问题记录未能保存").message; }
   finally { savingReview.value = false; }
 }
 async function enterEditing() {
-  if (!reviewAssetId.value || savingReview.value) return;
+  if (!reviewAssetId.value || !reviewReady.value || savingReview.value) return;
   savingReview.value = true;
   const scope = `edit-draft:${props.projectId}`;
   const fingerprint = `${reviewAssetId.value}:${confirmEditReferences.value}`;
@@ -451,7 +450,7 @@ function exportMarkdown() {
 }
 
 onMounted(() => { void load(); void refreshPreview(); connectEvents(); });
-onBeforeUnmount(() => { disposed = true; events?.close(); });
+onBeforeUnmount(() => { disposed = true; unsubscribeJobs?.(); });
 watch(
   () => [props.workspace.activeStory?.id, props.workspace.activeShotPlan?.id, props.workspace.selectionHash],
   () => { void refreshPreview(); },
@@ -504,11 +503,7 @@ watch(
 
       <div class="candidates-card card">
         <header><div><p class="eyebrow">视频候选</p><h2>选择视频</h2></div><span v-if="currentJobPresentation" class="pill" :class="{ good: currentJobPresentation.tone === 'good', warn: ['warn', 'danger'].includes(currentJobPresentation.tone) }">{{ currentJobPresentation.label }}</span></header>
-        <section v-if="currentJob && currentJobPresentation" class="job-status" :class="currentJobPresentation.tone">
-          <div data-testid="video-job-summary" class="job-summary"><b>生成进度：{{ currentJobPresentation.label }}</b><span>{{ currentJob.error?.message || currentJobPresentation.description }}</span><span v-if="currentBillingPresentation" class="billing-summary">{{ currentBillingPresentation.label }}</span></div>
-          <button v-if="currentJob.error?.code === 'result_storage_failed'" class="secondary" @click="resumeStorage">继续保存结果</button>
-          <details data-testid="video-job-details" class="job-record"><summary>查看生成记录</summary><dl><div><dt>任务编号</dt><dd><code>{{ currentJob.id }}</code></dd></div><div><dt>原始状态</dt><dd>{{ currentJob.status }}</dd></div><div v-if="currentJob.providerTaskId"><dt>模型任务</dt><dd><code>{{ currentJob.providerTaskId }}</code></dd></div><div v-if="currentJob.providerRequestId || currentJob.error?.requestId"><dt>请求编号</dt><dd><code>{{ currentJob.providerRequestId || currentJob.error?.requestId }}</code></dd></div><div v-if="currentJob.actualUsage"><dt>实际用量</dt><dd><code>{{ JSON.stringify(currentJob.actualUsage) }}</code></dd></div><div v-if="currentBillingPresentation"><dt>费用</dt><dd>{{ currentBillingPresentation.detail }}</dd></div><div v-if="currentJob.error?.code"><dt>错误代码</dt><dd>{{ currentJob.error.code }}</dd></div><div><dt>输入标识</dt><dd><code>{{ currentJob.inputHash }}</code></dd></div></dl></details>
-        </section>
+        <JobStatusCard v-if="currentJob" :job-id="currentJob.id" title="视频生成任务" @replacement="currentJob = $event" />
         <div v-if="recordsError || usageError" class="notice error"><p v-if="recordsError">{{ recordsError }}</p><p v-if="usageError">{{ usageError }} 请重新读取后核对费用。</p><button class="secondary" :disabled="loadingRecords" @click="load">重新读取候选与费用（免费）</button></div>
         <div v-if="!videos.length" class="empty">{{ loadingRecords ? "正在读取已有候选与费用……" : recordsError ? "候选读取暂未完成。" : currentJobBlocksGeneration ? "任务执行中，尚无视频候选。" : "尚无视频候选。" }}</div>
         <div v-else class="video-grid">
@@ -529,12 +524,15 @@ watch(
         <div class="checkpoints"><button class="secondary" @click="togglePlayback">{{ playing ? "暂停" : "播放" }}</button><button v-for="time in [0.5, 3, 6, 9, 11.5]" :key="time" class="secondary" @click="jumpTo(time)">跳到 {{ time }}s</button><button class="secondary" @click="videoElements.get(activeAssetId)?.requestFullscreen()">全屏查看</button></div>
         <details class="technical"><summary>查看视频技术信息</summary><div><span>文件校验值 <code>{{ activeAsset.sha256 }}</code></span><span>规格 {{ activeAsset.metadata.resolution ?? "读取中" }} · {{ activeAsset.metadata.ratio ?? "读取中" }}</span><span>尺寸 {{ activeAsset.metadata.width }} × {{ activeAsset.metadata.height }}</span><span>时长 {{ Number(activeAsset.metadata.durationMs ?? 0) / 1000 }}s</span><span>编码 {{ activeAsset.metadata.codec ?? "读取中" }}</span></div></details>
         <section class="submitted-prompt"><b>该候选使用的生成指令 · {{ candidateInputState(reviewVideoJob ?? undefined) }}</b><div v-if="activeInputSnapshot?.promptSections?.length" class="prompt-sections"><section v-for="section in activeInputSnapshot.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><template v-else-if="activeInputSnapshot"><p>{{ activeInputSnapshot.prompt }}</p><small>旧任务未记录分段展示，以上为当时实际提交的完整指令。</small></template><p v-else>旧任务未记录完整生成指令，系统不会用当前内容推测。</p><details v-if="activeInputSnapshot"><summary>查看需要避免的问题与技术信息</summary><p>{{ activeInputSnapshot.negativePrompt }}</p><code>{{ activeInputSnapshot.inputHash }}</code></details></section>
-        <div class="quality-grid"><fieldset v-for="[key, label] in qualityItems" :key="key"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="quality[key]" type="radio" :name="key" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
+        <p v-if="loadingReview" role="status">正在读取已保存的验收记录…</p>
+        <p v-if="reviewLoadError" role="alert">{{ reviewLoadError }}</p>
+        <div class="quality-grid"><fieldset v-for="[key, label] in qualityItems" :key="key" :disabled="!reviewReady || savingReview"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="quality[key]" type="radio" :name="key" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
         <p>实际声音：{{ activeAsset.metadata.audioRequestMissing ? '请求声音但未返回音轨，素材已保留，不会自动重试。' : activeAsset.metadata.audioState === 'silent' ? '存在静音音轨' : activeAsset.metadata.hasAudio ? (activeAsset.metadata.audioChannels === 1 ? '原生单声道混合音轨' : '有声音轨') : activeAsset.metadata.hasAudio === false ? '无音轨' : '历史记录未检测' }}</p>
-        <div v-if="activeAsset.metadata.requestedAudio" class="quality-grid"><fieldset v-for="[key, label] in audioItems" :key="key"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="audioQuality[key]" type="radio" :name="`audio-${key}`" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
-        <label class="notes"><span>验收备注</span><textarea v-model="reviewNotes" rows="4" placeholder="记录失败时间点、角色漂移、结构或主动结尾情况。" /></label>
+        <div v-if="activeAsset.metadata.requestedAudio" class="quality-grid"><fieldset v-for="[key, label] in audioItems" :key="key" :disabled="!reviewReady || savingReview"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="audioQuality[key]" type="radio" :name="`audio-${key}`" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
+        <label class="notes"><span>验收备注</span><textarea v-model="reviewNotes" :disabled="!reviewReady || savingReview" @input="reviewSaved = false" rows="4" placeholder="记录失败时间点、角色漂移、结构或主动结尾情况。" /></label>
+        <p v-if="reviewSaved" role="status">问题与验收记录已保存。</p>
         <label class="edit-reference-consent"><input v-model="confirmEditReferences" type="checkbox" />仅在历史视频缺少参考时，确认使用当前五张参考建立新的编辑绑定。</label>
-        <div class="review-actions"><button class="secondary" :disabled="savingReview" @click="saveReviewOnly">保存问题与验收记录</button><button class="primary" :disabled="savingReview" @click="enterEditing">进入编辑草稿</button><button class="secondary" @click="exportJson">导出 JSON</button><button class="secondary" @click="exportMarkdown">导出 Markdown</button><button class="primary" :disabled="!allPass || savingReview" @click="chooseVideo">验收通过并选择此视频</button></div>
+        <div class="review-actions"><button class="secondary" :disabled="!reviewReady || savingReview" @click="saveReviewOnly">保存问题与验收记录</button><button class="primary" :disabled="!reviewReady || savingReview" @click="enterEditing">进入编辑草稿</button><button class="secondary" :disabled="!reviewReady" @click="exportJson">导出 JSON</button><button class="secondary" :disabled="!reviewReady" @click="exportMarkdown">导出 Markdown</button><button class="primary" :disabled="!reviewReady || !allPass || savingReview" @click="chooseVideo">验收通过并选择此视频</button></div>
       </section>
     </div>
     <aside v-if="usageSummary" class="generation-aside"><section class="usage-card card"><p class="eyebrow">本项目费用</p><h2>用量概览</h2><dl><div v-for="(value, metric) in usageSummary.totals" :key="metric"><dt>{{ usageLabels[String(metric)] ?? metric }}</dt><dd>{{ value }}</dd></div><div><dt>{{ hasCalculatedCost ? "已计算费用" : "费用状态" }}</dt><dd>{{ projectCostSummary }}</dd></div><div><dt>待处理计费任务</dt><dd>{{ unresolvedCostJobs.length }}</dd></div></dl><details><summary>费用说明</summary><small>本地剪辑不计入模型费用；只有已完成核价的任务才会计入金额，最终账单可能由模型服务调整。</small></details></section></aside>

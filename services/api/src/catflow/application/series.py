@@ -10,10 +10,12 @@ from typing import Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
+from catflow.application.job_execution import PaidJobCommand
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import LifeStoryProposalDraft
 
 SeriesNarrativeMode = Literal["continuous", "lightly_serialized", "anthology"]
+AdaptationPolicy = Literal["preserve_all", "condense_mainline"]
 SeriesLengthMode = Literal["fixed", "ongoing"]
 SeriesPlanStatus = Literal["candidate", "accepted", "rejected", "superseded"]
 SeriesPlanDisposition = Literal["candidate_ready", "needs_input", "invalid"]
@@ -23,6 +25,7 @@ DEFAULT_ONGOING_PLANNING_BATCH = 12
 
 
 class SeriesCreateCommand(ContractModel):
+    adaptation_policy: AdaptationPolicy = Field(alias="adaptationPolicy", default="preserve_all")
     title: str = Field(min_length=1, max_length=160)
     premise: str = Field(min_length=1, max_length=4_000)
     narrative_mode: SeriesNarrativeMode = Field(alias="narrativeMode")
@@ -52,6 +55,12 @@ class SeriesCreateCommand(ContractModel):
 
 
 class SeriesPatchCommand(ContractModel):
+    planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None, ge=2)
+    default_episode_duration_seconds: int | None = Field(
+        alias="defaultEpisodeDurationSeconds", default=None, ge=8, le=15
+    )
+    must_keep: list[str] | None = Field(alias="mustKeep", default=None, max_length=30)
+
     title: str | None = Field(default=None, min_length=1, max_length=160)
     premise: str | None = Field(default=None, min_length=1, max_length=4_000)
     world_setting: str | None = Field(alias="worldSetting", default=None, max_length=2_000)
@@ -126,9 +135,7 @@ class EpisodeSourceCoverageDto(ContractModel):
 class SeriesEpisodeOutlineDraft(ContractModel):
     order: int = Field(default=0, ge=0)
     title: str = Field(default="", max_length=160)
-    target_duration_seconds: int = Field(
-        alias="targetDurationSeconds", default=0, ge=0, le=15
-    )
+    target_duration_seconds: int = Field(alias="targetDurationSeconds", default=0, ge=0)
     premise: str = Field(default="", max_length=1_000)
     opening_state: str = Field(alias="openingState", default="", max_length=1_000)
     trigger: str = Field(default="", max_length=800)
@@ -146,7 +153,35 @@ class SeriesEpisodeOutlineDraft(ContractModel):
     )
 
 
+class SourceTreatmentDraft(ContractModel):
+    source_unit_ordinal: int = Field(alias="sourceUnitOrdinal", ge=1)
+    treatment: Literal["retained", "merged", "simplified", "omitted"]
+    episode_orders: list[int] = Field(alias="episodeOrders", default_factory=list)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class AdaptationRiskDraft(ContractModel):
+    message: str = Field(min_length=1, max_length=2000)
+    blocking: bool = True
+
+
+class PreservedRequirementDraft(ContractModel):
+    requirement: str = Field(min_length=1)
+    handling: str = Field(min_length=1)
+    episode_orders: list[int] = Field(alias="episodeOrders", default_factory=list)
+
+
 class SeriesPlanDraft(ContractModel):
+    source_treatments: list[SourceTreatmentDraft] = Field(
+        alias="sourceTreatments", default_factory=list
+    )
+    adaptation_risks: list[AdaptationRiskDraft] = Field(
+        alias="adaptationRisks", default_factory=list
+    )
+    preserved_requirements: list[PreservedRequirementDraft] = Field(
+        alias="preservedRequirements", default_factory=list
+    )
+
     series_bible: SeriesBibleDraft = Field(alias="seriesBible")
     episodes: list[SeriesEpisodeOutlineDraft] = Field(min_length=1)
 
@@ -250,16 +285,14 @@ class SeriesPlanPreviewDto(ContractModel):
     prompt: str
     output_schema: dict[str, Any] = Field(alias="outputSchema")
     planned_episode_count: int = Field(alias="plannedEpisodeCount")
-    total_planned_episode_count: int | None = Field(
-        alias="totalPlannedEpisodeCount", default=None
-    )
+    total_planned_episode_count: int | None = Field(alias="totalPlannedEpisodeCount", default=None)
     remaining_episode_count: int | None = Field(alias="remainingEpisodeCount", default=None)
     length_mode: SeriesLengthMode = Field(alias="lengthMode")
     default_episode_duration_seconds: int = Field(alias="defaultEpisodeDurationSeconds")
     prompt_revision: str = Field(alias="promptRevision")
 
 
-class SeriesPlanGenerationCommand(ContractModel):
+class SeriesPlanGenerationCommand(PaidJobCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -269,18 +302,14 @@ class SeriesPlanSegmentCommand(ContractModel):
     requested_episode_count: int = Field(
         alias="requestedEpisodeCount", ge=1, le=MAX_SERIES_PLANNING_BATCH
     )
-    expected_series_plan_version_id: uuid.UUID = Field(
-        alias="expectedSeriesPlanVersionId"
-    )
+    expected_series_plan_version_id: uuid.UUID = Field(alias="expectedSeriesPlanVersionId")
     expected_previous_segment_version_id: uuid.UUID | None = Field(
         alias="expectedPreviousSegmentVersionId", default=None
     )
 
 
-class SeriesPlanSegmentGenerationCommand(SeriesPlanSegmentCommand):
-    expected_input_hash: str = Field(
-        alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$"
-    )
+class SeriesPlanSegmentGenerationCommand(SeriesPlanSegmentCommand, PaidJobCommand):
+    expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
@@ -289,9 +318,7 @@ class SeriesPlanSegmentPreviewDto(ContractModel):
     start_episode_order: int = Field(alias="startEpisodeOrder")
     requested_episode_count: int = Field(alias="requestedEpisodeCount")
     remaining_episode_count: int | None = Field(alias="remainingEpisodeCount", default=None)
-    expected_series_plan_version_id: uuid.UUID = Field(
-        alias="expectedSeriesPlanVersionId"
-    )
+    expected_series_plan_version_id: uuid.UUID = Field(alias="expectedSeriesPlanVersionId")
     expected_previous_segment_version_id: uuid.UUID | None = Field(
         alias="expectedPreviousSegmentVersionId", default=None
     )
@@ -317,9 +344,7 @@ class SeriesPlanSegmentVersionDto(ContractModel):
     plan: SeriesPlanDraft
     issues: list[SeriesValidationIssueDto] = Field(default_factory=list)
     producing_job_id: uuid.UUID | None = Field(alias="producingJobId", default=None)
-    expected_series_plan_version_id: uuid.UUID = Field(
-        alias="expectedSeriesPlanVersionId"
-    )
+    expected_series_plan_version_id: uuid.UUID = Field(alias="expectedSeriesPlanVersionId")
     previous_segment_version_id: uuid.UUID | None = Field(
         alias="previousSegmentVersionId", default=None
     )
@@ -330,9 +355,7 @@ class SeriesPlanSegmentVersionDto(ContractModel):
 
 
 class SeriesPlanSegmentActivationCommand(ContractModel):
-    expected_series_plan_version_id: uuid.UUID = Field(
-        alias="expectedSeriesPlanVersionId"
-    )
+    expected_series_plan_version_id: uuid.UUID = Field(alias="expectedSeriesPlanVersionId")
     expected_previous_segment_version_id: uuid.UUID | None = Field(
         alias="expectedPreviousSegmentVersionId", default=None
     )
@@ -356,7 +379,7 @@ class SeriesEpisodeMaterializeCommand(ContractModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
-class SeriesEpisodeStoryGenerationCommand(ContractModel):
+class SeriesEpisodeStoryGenerationCommand(PaidJobCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     additional_notes: str | None = Field(alias="additionalNotes", default=None, max_length=4_000)
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
@@ -382,7 +405,13 @@ class SeriesEpisodeStoryPreviewDto(ContractModel):
     prompt_revision: str = Field(alias="promptRevision")
 
 
-_SERIES_PLAN_KEYS = {"seriesBible", "episodes"}
+_SERIES_PLAN_KEYS = {
+    "seriesBible",
+    "episodes",
+    "sourceTreatments",
+    "adaptationRisks",
+    "preservedRequirements",
+}
 _SERIES_BIBLE_KEYS = {
     "logline",
     "centralTheme",
@@ -441,9 +470,7 @@ def _normalize_series_plan_shape(
     episodes = normalized.get("episodes")
     if not isinstance(bible, dict) or not isinstance(episodes, list) or not episodes:
         return None
-    clean_bible = _retain_known_fields(
-        bible, _SERIES_BIBLE_KEYS, path="seriesBible", extras=extras
-    )
+    clean_bible = _retain_known_fields(bible, _SERIES_BIBLE_KEYS, path="seriesBible", extras=extras)
     emotional_arc = clean_bible.get("emotionalArc")
     if emotional_arc is not None:
         if not isinstance(emotional_arc, dict):
@@ -508,6 +535,9 @@ def normalize_series_plan_result(
     source_unit_ordinals: set[int] | None = None,
     start_episode_order: int = 1,
     require_complete_source_coverage: bool = True,
+    adaptation_policy: AdaptationPolicy = "preserve_all",
+    expected_duration_seconds: int | None = None,
+    must_keep: list[str] | None = None,
 ) -> SeriesPlanNormalizationResult:
     """Preserve paid Provider output while separating parseability from adoption rules."""
 
@@ -551,6 +581,9 @@ def normalize_series_plan_result(
         source_unit_ordinals=source_unit_ordinals,
         start_episode_order=start_episode_order,
         require_complete_source_coverage=require_complete_source_coverage,
+        adaptation_policy=adaptation_policy,
+        expected_duration_seconds=expected_duration_seconds,
+        must_keep=must_keep,
     )
     extra_issues = [
         SeriesValidationIssueDto(
@@ -579,6 +612,9 @@ def validate_series_plan(
     source_unit_ordinals: set[int] | None = None,
     start_episode_order: int = 1,
     require_complete_source_coverage: bool = True,
+    adaptation_policy: AdaptationPolicy = "preserve_all",
+    expected_duration_seconds: int | None = None,
+    must_keep: list[str] | None = None,
 ) -> tuple[SeriesPlanDisposition, list[SeriesValidationIssueDto]]:
     issues: list[SeriesValidationIssueDto] = []
     if len(plan.episodes) != expected_episode_count:
@@ -593,9 +629,7 @@ def validate_series_plan(
                 suggestedAction="补充或移除剧集，使数量与系列设置一致。",
             )
         )
-    expected_orders = list(
-        range(start_episode_order, start_episode_order + len(plan.episodes))
-    )
+    expected_orders = list(range(start_episode_order, start_episode_order + len(plan.episodes)))
     actual_orders = [episode.order for episode in plan.episodes]
     if actual_orders != expected_orders:
         issues.append(
@@ -701,7 +735,7 @@ def validate_series_plan(
                 coverage_by_ordinal.setdefault(coverage.source_unit_ordinal, []).append(
                     episode.order
                 )
-        if require_complete_source_coverage:
+        if require_complete_source_coverage and adaptation_policy != "condense_mainline":
             for ordinal in sorted(source_unit_ordinals - coverage_by_ordinal.keys()):
                 issues.append(
                     SeriesValidationIssueDto(
@@ -723,12 +757,123 @@ def validate_series_plan(
                         suggestedAction="拆分同一节拍时只能由连续剧集承接。",
                     )
                 )
+    if adaptation_policy == "condense_mainline":
+        orders = set(actual_orders)
+        treatments = plan.source_treatments
+        ordinals = [item.source_unit_ordinal for item in treatments]
+        if set(ordinals) != (source_unit_ordinals or set()) or len(ordinals) != len(set(ordinals)):
+            issues.append(
+                SeriesValidationIssueDto(
+                    code="source_treatment_incomplete",
+                    severity="blocking",
+                    path="sourceTreatments",
+                    message="每个来源事件都必须有且只有一份保留、合并、简化或省略的处理说明。",
+                )
+            )
+        for index, item in enumerate(treatments):
+            covered = {
+                episode.order
+                for episode in plan.episodes
+                if any(
+                    coverage.source_unit_ordinal == item.source_unit_ordinal
+                    for coverage in episode.source_coverage
+                )
+            }
+            expected = set(item.episode_orders)
+            if (item.treatment == "omitted" and (expected or covered)) or (
+                item.treatment != "omitted"
+                and (not expected or not expected <= orders or covered != expected)
+            ):
+                issues.append(
+                    SeriesValidationIssueDto(
+                        code="source_treatment_conflict",
+                        severity="blocking",
+                        path=f"sourceTreatments.{index}",
+                        message="来源处理与分集引用不一致；省略事件不得计入覆盖。",
+                    )
+                )
+            if item.treatment in {"merged", "simplified"} and any(
+                coverage.coverage == "whole"
+                for episode in plan.episodes
+                for coverage in episode.source_coverage
+                if coverage.source_unit_ordinal == item.source_unit_ordinal
+            ):
+                issues.append(
+                    SeriesValidationIssueDto(
+                        code="condensed_source_marked_whole",
+                        severity="blocking",
+                        path=f"sourceTreatments.{index}",
+                        message=(
+                            "合并或简化事件须使用 partial 并说明实际保留内容，不能标为完整覆盖。"
+                        ),
+                    )
+                )
+        for index, episode in enumerate(plan.episodes):
+            if (
+                expected_duration_seconds is not None
+                and episode.target_duration_seconds != expected_duration_seconds
+            ):
+                issues.append(
+                    SeriesValidationIssueDto(
+                        code="target_duration_mismatch",
+                        severity="blocking",
+                        path=f"episodes.{index}.targetDurationSeconds",
+                        message=(
+                            f"本集必须保持已指定的 {expected_duration_seconds} 秒。"
+                            "请精简动作或调整生产目标。"
+                        ),
+                    )
+                )
+        for requirement in must_keep or []:
+            matches = [
+                item for item in plan.preserved_requirements if item.requirement == requirement
+            ]
+            if (
+                len(matches) != 1
+                or not matches[0].episode_orders
+                or not set(matches[0].episode_orders) <= orders
+            ):
+                issues.append(
+                    SeriesValidationIssueDto(
+                        code="must_keep_unaccounted",
+                        severity="blocking",
+                        path="preservedRequirements",
+                        message=f"必须说明如何保留：{requirement}",
+                    )
+                )
+        for index, risk in enumerate(plan.adaptation_risks):
+            issues.append(
+                SeriesValidationIssueDto(
+                    code="adaptation_risk",
+                    severity="blocking" if risk.blocking else "warning",
+                    path=f"adaptationRisks.{index}",
+                    message=risk.message,
+                    suggestedAction="调整镜头动作、方案或生产目标；不需要重新分析原文。",
+                )
+            )
     disposition: SeriesPlanDisposition = (
         "needs_input"
         if any(issue.severity == "blocking" for issue in issues)
         else "candidate_ready"
     )
     return disposition, issues
+
+
+CONDENSE_PLANNING_INSTRUCTIONS = (
+    "\n【按生产目标保留主线并精简】每集必须严格等于指定时长，集数严格等于本次规划数量。"
+    "允许合并重复动作、简化次要过程、减少支线与机位，不能只缩短文案却仍安排全部动作。"
+    "保留人物目标、关键因果、必须保留的事实及结局；不得加速、擅自改时长或增加集数。"
+    "每个来源事件必须在 sourceTreatments 中出现恰好一次，"
+    "treatment 为 retained/merged/simplified/omitted，"
+    "episodeOrders 列出实际使用它的集数，reason 解释保留内容和删改原因。"
+    "省略事件的 episodeOrders 为空且不得进入 sourceCoverage；"
+    "合并或简化使用 partial 并说明保留部分。"
+    "在 preservedRequirements 中逐条原样引用必须保留的要求，"
+    "说明 handling 与对应 episodeOrders。"
+    "无法容纳、冲突或关键结局无法保留时，在 adaptationRisks 中"
+    "明确 blocking=true；保留方案供修改。"
+    "动作时长只是规划估计，不能声称保证模型执行成功。"
+)
 
 
 def compile_series_plan_preview(
@@ -778,6 +923,10 @@ def compile_series_plan_preview(
         f"{source_section}\n"
         f"单次最多规划 {MAX_SERIES_PLANNING_BATCH} 集；这是调用批量边界，不是系列总集数上限。"
     )
+    if series.adaptation_policy == "condense_mainline":
+        prompt_revision = "catflow-series-planner-v3-condense"
+        prompt += CONDENSE_PLANNING_INSTRUCTIONS
+
     schema = series_plan_output_schema()
     document = {
         "seriesId": str(series.id),
@@ -830,17 +979,16 @@ def compile_series_plan_segment_preview(
     capability_revision: str,
 ) -> SeriesPlanSegmentPreviewDto:
     prompt_revision = "catflow-series-segment-planner-v1"
-    end_episode_order = (
-        command.start_episode_order + command.requested_episode_count - 1
-    )
+    end_episode_order = command.start_episode_order + command.requested_episode_count - 1
     remaining_episode_count = (
         max((series.planned_episode_count or 0) - end_episode_order, 0)
         if series.length_mode == "fixed"
         else None
     )
-    source_section = "\n".join(
-        f"{beat.binding_order}. {beat.title}：{beat.raw_text}" for beat in source_beats
-    ) or "本系列没有绑定来源剧情节拍。"
+    source_section = (
+        "\n".join(f"{beat.binding_order}. {beat.title}：{beat.raw_text}" for beat in source_beats)
+        or "本系列没有绑定来源剧情节拍。"
+    )
     prompt = (
         "你是 CatFlow 长系列分段策划。当前系列圣经和首段方案已经采用；"
         "本次只规划用户明确指定的下一段，不生成后续段、完整剧本、图片、分镜或视频。\n"
@@ -856,6 +1004,10 @@ def compile_series_plan_segment_preview(
         "剧集 order 必须与本次范围逐一对应。sourceCoverage 只能引用上述安全序号；"
         "允许组合相邻节拍或把过长节拍拆到连续剧集，并明确 whole、partial 或 continuation。"
     )
+    if series.adaptation_policy == "condense_mainline":
+        prompt_revision = "catflow-series-segment-planner-v2-condense"
+        prompt += CONDENSE_PLANNING_INSTRUCTIONS
+        prompt += f"必须保留：{json.dumps(series.must_keep, ensure_ascii=False)}"
     schema = series_plan_output_schema()
     document = {
         "seriesId": str(series.id),
@@ -867,9 +1019,7 @@ def compile_series_plan_segment_preview(
         ),
         "startEpisodeOrder": command.start_episode_order,
         "requestedEpisodeCount": command.requested_episode_count,
-        "sourceBeats": [
-            beat.model_dump(mode="json", by_alias=True) for beat in source_beats
-        ],
+        "sourceBeats": [beat.model_dump(mode="json", by_alias=True) for beat in source_beats],
         "canonProfileHash": canon_profile_hash,
         "provider": provider,
         "model": model,
@@ -879,9 +1029,7 @@ def compile_series_plan_segment_preview(
         "outputSchema": schema,
     }
     input_hash = hashlib.sha256(
-        json.dumps(
-            document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
+        json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return SeriesPlanSegmentPreviewDto(
         seriesId=series.id,
@@ -907,6 +1055,7 @@ def compile_series_episode_story_preview(
     episode: SeriesEpisodeDto,
     incoming_continuity: str | None,
     additional_notes: str | None,
+    source_segment: SeriesPlanSegmentVersionDto | None = None,
     canon_profile_hash: str,
     provider: str,
     model: str,
@@ -914,12 +1063,13 @@ def compile_series_episode_story_preview(
 ) -> SeriesEpisodeStoryPreviewDto:
     if episode.project_id is None:
         raise ValueError("series episode must be materialized before story planning")
-    prompt_revision = "catflow-series-episode-planner-v1"
+    prompt_revision = "catflow-series-episode-planner-v2-context"
     outline = episode.outline
     prompt = (
         "你是 CatFlow 单集故事策划。根据已经采用的整季路线，只扩写当前这一集，"
         "不得生成其他集、分镜、图片或视频。\n"
         f"系列：{series.title}\n整季核心：{active_plan.plan.series_bible.logline}\n"
+        f"整季设定：{active_plan.plan.series_bible.model_dump_json(by_alias=True)}\n"
         f"本集：第 {episode.order} 集《{outline.title}》，"
         f"目标 {outline.target_duration_seconds} 秒。\n"
         f"本集简纲：{outline.premise}\n开场状态：{outline.opening_state}\n"
@@ -932,6 +1082,20 @@ def compile_series_episode_story_preview(
         "天气、道具和光线，不把人物动作混入 environmentIntent；动作写清初始状态、"
         "变化过程和结束状态。保持固定儿童、猫咪身份与系列设定，不擅自改写整季路线。"
     )
+    if series.adaptation_policy == "condense_mainline":
+        prompt_revision = "catflow-series-episode-planner-v3-condense"
+        treatment_document = [
+            item.model_dump(mode="json", by_alias=True)
+            for item in (
+                source_segment.plan if source_segment is not None else active_plan.plan
+            ).source_treatments
+        ]
+        prompt += (
+            "\n【已确认缩编决定】遵守本集简纲的动作数量和目标时长，不把原文已省略的动作重新加回。"
+            f"必须保留：{json.dumps(series.must_keep, ensure_ascii=False)}。"
+            f"来源处理：{json.dumps(treatment_document, ensure_ascii=False)}"
+            f"\n来源方案：{source_segment.id if source_segment is not None else active_plan.id}"
+        )
     output_schema = LifeStoryProposalDraft.model_json_schema(by_alias=True)
     document = {
         "seriesId": str(series.id),

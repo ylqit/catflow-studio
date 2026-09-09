@@ -11,8 +11,6 @@ from catflow.application.gateways import ProviderGatewayError
 from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import (
     ProjectCreate,
-    SegmentRepairCreateCommand,
-    SegmentRepairPreviewCommand,
     StudioService,
 )
 from catflow.application.story_imports import StoryImportCreateCommand, StoryImportPreviewCommand
@@ -116,7 +114,7 @@ class IncompleteDirectorProvider(RecordingProvider):
             message="Ark response status is 'incomplete'",
             retryable=False,
             submission_unknown=False,
-            request_id="response-incomplete-worker",
+            response_id="response-incomplete-worker",
             provider_status="incomplete",
             incomplete_reason="max_output_tokens",
             max_output_tokens=8000,
@@ -135,7 +133,7 @@ class DeleteClaimedJobWorker(DurableJobWorker):
         if claimed is not None and self._delete_next_claim:
             self._delete_next_claim = False
             with self._test_sessions.begin() as session:
-                session.execute(delete(JobRecord).where(JobRecord.id == claimed[0]))
+                session.execute(delete(JobRecord).where(JobRecord.id == claimed))
         return claimed
 
 
@@ -146,13 +144,16 @@ class ExplodingSubmitWorker(DurableJobWorker):
 
     def _submit(self, job_id: uuid.UUID, *args) -> None:  # type: ignore[no-untyped-def]
         if self._after_boundary:
-            assert self._begin_submission(job_id) is True
+            with self._sessions.begin() as session:
+                self._owned(session, job_id).provider_submission_started_at = datetime.now(UTC)
         raise RuntimeError("unexpected submit iteration failure")
 
 
 class ExplodingPollWorker(DurableJobWorker):
-    def _poll(self, job_id: uuid.UUID, provider_task_id: str | None) -> None:
-        raise RuntimeError("unexpected poll iteration failure")
+    def _query(self, job_id: uuid.UUID) -> None:
+        self._query_error(
+            job_id, {"code": "RuntimeError", "message": "unexpected poll iteration failure"}
+        )
 
 
 class InvalidDirectorResultHandler:
@@ -216,9 +217,7 @@ def test_worker_events_keep_the_story_import_scope_of_the_claimed_job() -> None:
             assert events
             assert all(event.project_id is None for event in events)
             assert all(event.series_id is None for event in events)
-            assert all(
-                event.story_source_document_id == created.document.id for event in events
-            )
+            assert all(event.story_source_document_id == created.document.id for event in events)
     finally:
         with sessions.begin() as session:
             session.execute(
@@ -238,67 +237,33 @@ def test_local_input_preparation_failure_happens_before_provider_submission_boun
         ProjectCreate(title="输入准备失败", theme="雨天擦爪", targetDurationSeconds=12)
     )
     try:
-        base = service.register_asset(
-            project.id,
-            role="video",
-            media_type="video",
-            sha256="e" * 64,
-            metadata={
-                "durationFrames": 288,
-                "frameRateNumerator": 24,
-                "frameRateDenominator": 1,
-            },
-        )
-        environment = service.register_asset(
-            project.id,
-            role="environment",
-            media_type="image",
-            sha256="f" * 64,
-        )
-        service.select_asset(project.id, slot="video", asset_id=base.id)
-        service.select_asset(project.id, slot="environment", asset_id=environment.id)
-        for index, role in enumerate(
-            ("episode_child", "episode_cat", "pair_scale", "style_board"),
-            start=1,
-        ):
-            reference = service.register_asset(
-                project.id,
-                role=role,
-                media_type="image",
-                sha256=f"{index}" * 64,
+        job_id = uuid.uuid4()
+        with sessions.begin() as session:
+            session.add(
+                JobRecord(
+                    id=job_id,
+                    project_id=project.id,
+                    kind="generate_video",
+                    status="queued",
+                    input_hash="e" * 64,
+                    idempotency_key=f"prepare-failure-{job_id}",
+                    provider="ark",
+                    model="isolated-input-preparation",
+                    frozen_input_json={"prompt": "内部准备失败验证"},
+                )
             )
-            service.select_asset(project.id, slot=role, asset_id=reference.id)
-        preview = service.preview_video_repair(
-            project.id,
-            SegmentRepairPreviewCommand(
-                baseVideoAssetId=base.id,
-                issueRange={"startFrame": 0, "endFrame": 96},
-                instruction="修正擦爪动作。",
-            ),
-        )
-        created = service.create_video_repair_job(
-            project.id,
-            SegmentRepairCreateCommand(
-                baseVideoAssetId=base.id,
-                issueRange={"startFrame": 0, "endFrame": 96},
-                instruction="修正擦爪动作。",
-                expectedInputHash=preview.input_hash,
-                idempotencyKey=f"prepare-failure-{project.id}",
-            ),
-        )
-        assert created.video_repair_id is not None
 
         provider = FailedPreparationProvider()
         worker = DurableJobWorker(sessions, provider, worker_id="prepare-failure")
 
         assert worker.run_once() is True
         with sessions() as session:
-            job = session.get(JobRecord, created.id)
+            job = session.get(JobRecord, job_id)
             assert job is not None
             assert job.status == "failed"
             assert job.provider_submission_started_at is None
-            assert job.error_json["code"] == "provider_input_preparation_failed"
-        assert service.get_video_repair(created.video_repair_id).status == "failed"
+            assert job.error_json["code"] == "ValueError"
+            assert job.execution_json["stage"] == "prepare"
         assert provider.submissions == []
     finally:
         with sessions.begin() as session:
@@ -357,8 +322,8 @@ def test_worker_persists_provider_task_before_polling_and_never_resubmits() -> N
             polling = session.get(JobRecord, job_id)
             assert polling is not None
             assert polling.status == "polling"
-            assert polling.leased_until is not None
-            assert polling.leased_until > datetime.now(UTC)
+            assert polling.leased_until is None
+            assert polling.next_action_at > datetime.now(UTC)
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
@@ -510,7 +475,8 @@ def test_worker_persists_immediate_provider_result_before_finishing_job() -> Non
         with sessions() as session:
             persisted = session.get(JobRecord, job_id)
             assert persisted is not None
-            assert persisted.status == "succeeded"
+            assert persisted.status == "storing"
+            assert persisted.execution_json["resultComplete"] is True
             assert persisted.provider_task_id is None
             assert persisted.provider_result_json == {
                 "proposal": {"title": "雨天擦爪"},
@@ -520,7 +486,8 @@ def test_worker_persists_immediate_provider_result_before_finishing_job() -> Non
                 "inputTokens": 120,
                 "outputTokens": 80,
             }
-            assert persisted.provider_request_id == "planning-request-1"
+            assert persisted.provider_request_id is None
+            assert persisted.provider_response_id == "planning-request-1"
             assert persisted.actual_cost_micros == 640
             assert persisted.billing_status == "calculated"
             assert persisted.rate_card_revision == "ark-planning-2026-09-02"
@@ -567,7 +534,8 @@ def test_worker_preserves_incomplete_director_reason_response_and_usage() -> Non
             persisted = session.get(JobRecord, job_id)
             assert persisted is not None
             assert persisted.status == "failed"
-            assert persisted.provider_request_id == "response-incomplete-worker"
+            assert persisted.provider_request_id is None
+            assert persisted.provider_response_id == "response-incomplete-worker"
             assert persisted.actual_usage_json == {
                 "inputTokens": 321,
                 "outputTokens": 8000,
@@ -671,7 +639,7 @@ def test_unexpected_error_before_submission_is_isolated_and_failed() -> None:
             assert persisted is not None
             assert persisted.status == "failed"
             assert persisted.provider_submission_started_at is None
-            assert persisted.error_json["code"] == "worker_internal_error_before_submission"
+            assert persisted.error_json["code"] == "RuntimeError"
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
@@ -718,7 +686,7 @@ def test_unexpected_error_after_submission_boundary_becomes_unknown() -> None:
             assert persisted.status == "submission_unknown"
             assert persisted.provider_submission_started_at is not None
             assert persisted.provider_task_id is None
-            assert persisted.error_json["code"] == "worker_internal_error_after_submission"
+            assert persisted.error_json["code"] == "RuntimeError"
     finally:
         with sessions.begin() as session:
             session.execute(delete(ProjectRecord).where(ProjectRecord.id == project.id))
@@ -770,6 +738,9 @@ def test_unexpected_poll_error_releases_lease_without_resubmitting() -> None:
             assert persisted.locked_by is None
             assert persisted.leased_until is None
         assert provider.submissions == []
+
+        with sessions.begin() as session:
+            session.get(JobRecord, job_id).next_action_at = datetime.now(UTC)
 
         recovering_worker = DurableJobWorker(
             sessions,
@@ -829,6 +800,7 @@ def test_director_validation_failure_is_not_misreported_as_storage_failure() -> 
                 "message": "模型返回的分镜结构未通过校验，本次没有生成新版本。",
                 "retryable": False,
                 "detail": "shots: List should have at most 4 items after validation",
+                "localProcessing": True,
             }
     finally:
         with sessions.begin() as session:

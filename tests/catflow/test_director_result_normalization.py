@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
+
+import pytest
 
 from catflow.domain.models import BlockingDesign, ShotSoundDesign
 
@@ -226,3 +230,86 @@ def test_normalizer_rejects_payload_without_a_shot_array() -> None:
     assert result.disposition == "invalid"
     assert result.plan is None
     assert any(issue.severity == "fatal" for issue in result.issues)
+
+
+def test_professional_output_schema_requires_the_same_fields_as_validation() -> None:
+    from catflow.domain.director_results import director_provider_output_schema
+    from catflow.domain.models import ProfessionalDirectorOutput, ShotSpec
+
+    schema = director_provider_output_schema()["$defs"]["ProfessionalShotOutput"]
+    for key in ("childBlocking", "catBlocking", "durationFrames", "lens", "composition",
+                "physicalChange", "continuity", "lighting", "sound", "directorIntent"):
+        assert key in schema["required"]
+        assert "default" not in schema["properties"][key]
+        assert "anyOf" not in schema["properties"][key]
+        payload = _director_payload()
+        payload["shots"][0].pop("blocking_note")
+        payload["shots"][0][key] = None
+        with pytest.raises(ValueError):
+            ProfessionalDirectorOutput.model_validate(payload)
+    assert ShotSpec.model_fields["cat_blocking"].default is None
+
+
+@pytest.mark.parametrize("canonical", ["missing", "null", "equal", "different", "wrong_type"])
+def test_only_unambiguous_blocking_alias_is_recovered(canonical: str) -> None:
+    from catflow.domain.director_results import normalize_director_result
+
+    payload = _director_payload()
+    shot = payload["shots"][0]
+    original = deepcopy(shot["catBlocking"])
+    shot["blocking"] = {"catBlocking": deepcopy(original)}
+    if canonical == "missing":
+        del shot["catBlocking"]
+    elif canonical == "null":
+        shot["catBlocking"] = None
+    elif canonical == "different":
+        shot["catBlocking"]["endState"] = "不同的结束状态"
+    elif canonical == "wrong_type":
+        shot["catBlocking"] = "不是对象"
+    before = deepcopy(payload)
+    result = normalize_director_result(payload)
+    assert payload == before == result.raw_payload
+    if canonical in {"different", "wrong_type"}:
+        assert result.disposition == "needs_input"
+        assert result.plan is None
+        conflict = next(issue for issue in result.issues if issue.code == "blocking_path_conflict")
+        assert conflict.provider_value["nested"] == original
+    else:
+        assert result.disposition == "candidate_ready"
+        assert result.normalized_payload["shots"][0]["catBlocking"] == original
+        assert result.validation_document()["adjustments"]
+        second = normalize_director_result(result.normalized_payload)
+        assert second.normalized_payload == result.normalized_payload
+
+
+def test_real_episode_two_receipt_recovers_without_changing_any_action() -> None:
+    from catflow.domain.director_results import normalize_director_result
+
+    fixture = Path(__file__).parent / "fixtures" / "director-episode-two.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    before = deepcopy(payload)
+    legacy = normalize_director_result(payload, legacy=True)
+    assert legacy.disposition == "needs_input"
+    result = normalize_director_result(payload)
+    assert payload == before
+    assert result.disposition == "candidate_ready"
+    assert [shot.duration_seconds for shot in result.plan.shots] == [3, 4, 5, 3]
+    for source, target in zip(payload["shots"], result.normalized_payload["shots"], strict=True):
+        expected = deepcopy(source)
+        expected.update(expected.pop("blocking"))
+        assert target == expected
+    assert len(result.validation_document()["adjustments"]) == 8
+    assert all(issue.severity == "warning" for issue in result.issues)
+
+
+def test_missing_nested_detail_and_wrong_duration_remain_blocking() -> None:
+    from catflow.domain.director_results import normalize_director_result
+
+    payload = _director_payload()
+    del payload["shots"][0]["catBlocking"]["endState"]
+    result = normalize_director_result(payload)
+    assert result.disposition == "needs_input"
+    assert any(issue.path == "shots.0.catBlocking.endState" for issue in result.issues)
+    payload = _director_payload()
+    payload["targetDurationSeconds"] = 15
+    assert normalize_director_result(payload).disposition == "needs_input"

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import { subscribeJobs, jobsConnected } from "../jobUpdates";
 import { api } from "../api/client";
 import type { ProjectSeriesContextDto, RuntimeBootstrapDto, WorkspaceDto } from "../api/types";
 import AssetsStep from "../components/workspace/AssetsStep.vue";
@@ -9,7 +10,6 @@ import DeliveryStep from "../components/workspace/DeliveryStep.vue";
 import GenerationStep from "../components/workspace/GenerationStep.vue";
 import PlannerStep from "../components/workspace/PlannerStep.vue";
 import StoryboardStep from "../components/workspace/StoryboardStep.vue";
-import { projectJobEvent } from "../projectJobEvents";
 import { useUiStore } from "../stores/ui";
 
 const props = defineProps<{ step: "planner" | "assets" | "storyboard" | "generation" | "delivery" }>();
@@ -22,7 +22,7 @@ const seriesContext = ref<ProjectSeriesContextDto | null>(null);
 const loading = ref(true);
 const error = ref("");
 const projectId = computed(() => String(route.params.projectId));
-let eventSource: EventSource | null = null;
+let unsubscribeJobs: (() => void) | undefined;
 let runtimeTimer: number | undefined;
 
 const steps = [
@@ -33,13 +33,16 @@ const steps = [
   { id: "delivery", number: "05", label: "剪辑与导出", hint: "完成剪辑" },
 ] as const;
 
+let workspaceRequest = 0;
 async function loadWorkspace() {
+  const sequence = ++workspaceRequest; const requestedProject = projectId.value;
   try {
     const [nextWorkspace, nextRuntime, nextSeriesContext] = await Promise.all([
       api.workspace(projectId.value),
       api.runtime().catch(() => null),
-      api.projectSeriesContext(projectId.value).catch(() => null),
+      api.projectSeriesContext(projectId.value),
     ]);
+    if (sequence !== workspaceRequest || requestedProject !== projectId.value) return;
     workspace.value = nextWorkspace;
     runtime.value = nextRuntime;
     seriesContext.value = nextSeriesContext;
@@ -49,7 +52,7 @@ async function loadWorkspace() {
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : "工作区读取失败";
   } finally {
-    loading.value = false;
+    if (sequence === workspaceRequest) loading.value = false;
   }
 }
 
@@ -83,22 +86,13 @@ function refreshRuntimeWhenVisible() {
 }
 
 function connectEvents() {
-  eventSource?.close();
-  eventSource = new EventSource(api.eventsUrl(store.lastEventId));
-  eventSource.onopen = () => { store.sseConnected = true; };
-  eventSource.onerror = () => { store.sseConnected = false; };
-  const refresh = (event: MessageEvent) => {
-    if (event.lastEventId) store.lastEventId = Number(event.lastEventId);
-    if (!projectJobEvent(event, projectId.value)) return;
-    void loadWorkspace();
-  };
-  for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.storing", "job.succeeded", "job.failed", "job.submission_unknown", "job.cancel_requested", "job.cancelled", "planner.proposal.created"]) {
-    eventSource.addEventListener(type, refresh as EventListener);
-  }
+  unsubscribeJobs?.();
+  unsubscribeJobs = subscribeJobs(() => ({ projectId: projectId.value }), loadWorkspace,
+    () => Object.values(workspace.value ?? {}).some(value => value && typeof value === 'object' && 'execution' in value && (value.execution as { waitingForProvider?: boolean })?.waitingForProvider === true));
 }
+watch(jobsConnected, value => { store.sseConnected = value; });
 
 onMounted(async () => {
-  await loadWorkspace();
   connectEvents();
   syncRuntimePolling();
   window.addEventListener("focus", refreshRuntimeWhenVisible);
@@ -107,7 +101,7 @@ onMounted(async () => {
 watch(projectId, async () => { loading.value = true; await loadWorkspace(); connectEvents(); });
 watch(() => [runtime.value?.worker.ready, runtime.value?.worker.state], syncRuntimePolling);
 onBeforeUnmount(() => {
-  eventSource?.close();
+  unsubscribeJobs?.();
   if (runtimeTimer !== undefined) window.clearInterval(runtimeTimer);
   window.removeEventListener("focus", refreshRuntimeWhenVisible);
   document.removeEventListener("visibilitychange", refreshRuntimeWhenVisible);
@@ -116,7 +110,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="workspace-page">
+  <main class="workspace-page" :class="{ 'editing-focus': step === 'delivery', 'storyboard-workspace': step === 'storyboard' }">
     <section v-if="loading" class="page"><div class="card empty">正在加载工作区…</div></section>
     <section v-else-if="error || !workspace" class="page"><div class="card empty"><h2>工作区暂时不可用</h2><p class="notice error">{{ error }}</p><button class="secondary" @click="loadWorkspace">重新检查</button></div></section>
     <template v-else>
@@ -127,14 +121,14 @@ onBeforeUnmount(() => {
       <div v-if="seriesContext" class="episode-switcher"><label>切换剧集<select :value="projectId" @change="switchEpisode"><option v-for="episode in seriesContext.episodes" :key="episode.id" :value="episode.projectId ?? ''" :disabled="!episode.projectId">第 {{ episode.order }} 集 · {{ episode.title }}{{ episode.projectId ? '' : '（未开始）' }}</option></select></label></div>
       <nav class="step-nav" aria-label="五步创作流程">
         <RouterLink v-for="item in steps" :key="item.id" :to="`/projects/${projectId}/${item.id}`" :class="{ current: step === item.id, ready: workspace.steps.find((state) => state.id === item.id)?.ready }">
-          <span>{{ item.number }}</span><div><b>{{ item.label }}</b><small>{{ item.hint }}</small></div><i>✓</i>
+          <span>{{ item.number }}</span><div><b>{{ item.id === 'planner' && seriesContext ? '本集剧情' : item.label }}</b><small>{{ item.id === 'planner' && seriesContext ? '本集任务与前后承接' : item.hint }}</small></div><i>✓</i>
         </RouterLink>
       </nav>
       <p v-if="runtime?.worker.ready === false" class="worker-warning" role="status">
         后台任务暂时不可用。已经保存的任务不会丢失，{{ runtime.worker.retryingAutomatically ? "系统正在尝试恢复；" : "请到运行设置检查；" }}恢复前不能开始新的生成。
       </p>
       <section class="workspace-content">
-        <PlannerStep v-if="step === 'planner'" :project-id="projectId" :runtime="runtime" @changed="loadWorkspace" />
+        <PlannerStep v-if="step === 'planner'" :key="projectId" :project-id="projectId" :series-context="seriesContext" :runtime="runtime" @changed="loadWorkspace" />
         <AssetsStep v-else-if="step === 'assets'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
         <StoryboardStep v-else-if="step === 'storyboard'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
         <GenerationStep v-else-if="step === 'generation'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />
@@ -146,6 +140,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .workspace-page { min-height: calc(100vh - 70px); }
+.editing-focus .workspace-heading { height:54px; }.editing-focus .workspace-title h1 { font-size:20px; }.editing-focus .step-nav { height:42px; }.editing-focus .step-nav small { display:none; }.editing-focus .episode-switcher { margin-bottom:4px; }.editing-focus .workspace-content { padding-top:10px; }
 .workspace-heading { width: min(1480px, calc(100% - 56px)); height: 84px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
 .workspace-title { display: flex; align-items: center; gap: 15px; }
 .workspace-title > a { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); color: var(--muted); }

@@ -84,7 +84,7 @@ class LocalMediaJobExecutor:
                     AssetRecord.role == expected_role,
                 )
             )
-            if primary is not None:
+            if primary is not None and primary.role in {"video", "final"}:
                 self._poster_generator.ensure_for_asset(primary.id)
 
     def _extract_shot_frame(self, job_id: uuid.UUID) -> None:
@@ -515,7 +515,7 @@ class LocalMediaJobExecutor:
                 metadata={
                     **facts,
                     **shared,
-                    "timelineHash": frozen["parentTimelineHash"],
+                    "timelineHash": frozen.get("inputTimelineHash", frozen["parentTimelineHash"]),
                     "view": "before",
                 },
             )
@@ -548,11 +548,104 @@ class LocalMediaJobExecutor:
                 {**candidate.metadata_json, **shared},
                 index_offset=2000,
             )
+        clip_ids = {}
+        sources = [("before", base, base_path), ("after", trial, trial_path)]
+        if frozen.get("sourceResultJobId"):
+            original_key = f"generated/{project_id}/edit-previews/{job_id}-original.mp4"
+            original_path = self._media_store.resolve(original_key)
+            facts = self.render_timeline(
+                job_id, frozen["originalBaseEdl"], original_path, allow_draft=True
+            )
+            original_id = self._persist_asset(
+                job_id,
+                role="edit_trial_original",
+                storage_key=original_key,
+                path=original_path,
+                media_type="video",
+                metadata={**facts, **shared, "timelineHash": frozen["parentTimelineHash"]},
+            )
+            with self._sessions() as session:
+                original = session.get(AssetRecord, original_id)
+            sources.append(("original", original, original_path))
+            clip_ids["originalAssetId"] = str(original_id)
+        if frozen.get("resultRevision", 0) >= 2:
+            window = frozen.get("resultRange") or frozen["issueRange"]
+            start, end = window["startFrame"], window["endFrame"]
+            for side, source, path in sources:
+                role = f"edit_result_{side}"
+                with self._sessions() as session:
+                    prior = session.scalar(
+                        select(AssetRecord).where(
+                            AssetRecord.producing_job_id == job_id, AssetRecord.role == role
+                        )
+                    )
+                if prior is not None:
+                    clip_ids[f"{side}SegmentAssetId"] = str(prior.id)
+                    continue
+                key = f"generated/{project_id}/edit-previews/{job_id}-{side}-segment.mp4"
+                output = self._media_store.resolve(key)
+                arguments = [
+                    str(self._ffmpeg_path),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(path),
+                    "-vf",
+                    f"trim=start_frame={start}:end_frame={end},setpts=PTS-STARTPTS",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                ]
+                if source.metadata_json.get("hasAudio"):
+                    arguments += [
+                        "-af",
+                        f"atrim=start={start / 24}:end={end / 24},asetpts=PTS-STARTPTS",
+                        "-c:a",
+                        "aac",
+                    ]
+                else:
+                    arguments += ["-an"]
+                self._run([*arguments, "-movflags", "+faststart", str(output)])
+                facts = inspect_video(output, self._ffprobe_path)
+                if facts["durationFrames"] != end - start:
+                    raise ValueError(
+                        "result segment frame count differs from the frozen replacement"
+                    )
+                asset_id = self._persist_asset(
+                    job_id,
+                    role=role,
+                    storage_key=key,
+                    path=output,
+                    media_type="video",
+                    metadata={
+                        **facts,
+                        **shared,
+                        "issueRange": window,
+                        "sourceAssetId": str(source.id),
+                        "sourceSha256": source.sha256,
+                        "view": side,
+                    },
+                )
+                clip_ids[f"{side}SegmentAssetId"] = str(asset_id)
         with self._sessions.begin() as session:
             job = session.get(JobRecord, job_id)
             job.provider_result_json = {
                 **(job.provider_result_json or {}),
                 "comparison": {
+                    **clip_ids,
+                    "issueRange": frozen.get("issueRange"),
+                    "resultRange": frozen.get("resultRange", frozen.get("issueRange")),
+                    "sourceResultJobId": frozen.get("sourceResultJobId"),
+                    "inputTimelineHash": frozen.get(
+                        "inputTimelineHash", frozen["parentTimelineHash"]
+                    ),
                     "beforeAssetId": str(base.id),
                     "afterAssetId": str(trial.id),
                     "parentEditVersionId": frozen["editVersionId"],

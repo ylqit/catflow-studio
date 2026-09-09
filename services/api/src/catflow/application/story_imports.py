@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from catflow.application.job_execution import JobExecutionDto, PaidJobCommand
 from catflow.domain.contract import ContractModel
 
 from .series import SeriesLengthMode, SeriesNarrativeMode, StorySeriesDto
@@ -36,12 +37,42 @@ class StoryImportPreviewCommand(ContractModel):
         return self
 
 
-class StoryImportCreateCommand(StoryImportPreviewCommand):
+class StoryProductionTarget(ContractModel):
+    length_mode: SeriesLengthMode = Field(alias="lengthMode", default="fixed")
+    planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=3, ge=2)
+    default_episode_duration_seconds: int = Field(
+        alias="defaultEpisodeDurationSeconds", default=15, ge=8, le=15
+    )
+    narrative_mode: SeriesNarrativeMode = Field(alias="narrativeMode", default="continuous")
+    adaptation_policy: Literal["condense_mainline"] = Field(
+        alias="adaptationPolicy", default="condense_mainline"
+    )
+    must_keep: list[str] = Field(alias="mustKeep", default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_length(self) -> StoryProductionTarget:
+        if self.length_mode == "fixed" and self.planned_episode_count is None:
+            raise ValueError("固定系列需要至少两集；一集请使用独立短片。")
+        if self.length_mode == "ongoing" and self.planned_episode_count is not None:
+            raise ValueError("持续连载不设置总集数。")
+        return self
+
+
+class StoryProductionTargetsCommand(ContractModel):
+    expected_updated_at: datetime = Field(alias="expectedUpdatedAt")
+    production_targets: dict[str, StoryProductionTarget] = Field(alias="productionTargets")
+
+
+class StoryImportCreateCommand(StoryImportPreviewCommand, PaidJobCommand):
+    production_targets: dict[str, StoryProductionTarget] | None = Field(
+        alias="productionTargets", default=None
+    )
+
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
-class StoryImportReanalyzeCommand(ContractModel):
+class StoryImportReanalyzeCommand(PaidJobCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -137,6 +168,9 @@ class StorySourceDocumentDto(ContractModel):
     file_name: str | None = Field(alias="fileName", default=None)
     raw_text: str = Field(alias="rawText")
     status: StorySourceStatus
+    production_targets: dict[str, StoryProductionTarget] | None = Field(
+        alias="productionTargets", default=None
+    )
     analysis_job_id: uuid.UUID | None = Field(alias="analysisJobId", default=None)
     units: list[StorySourceUnitDto] = Field(default_factory=list)
     relation_suggestions: list[StorySourceRelationSuggestionDto] = Field(
@@ -147,6 +181,8 @@ class StorySourceDocumentDto(ContractModel):
 
 
 class StoryImportAnalysisJobDto(ContractModel):
+    execution: JobExecutionDto | None = None
+    revision: int = 0
     id: uuid.UUID
     status: Literal[
         "queued",
@@ -190,6 +226,14 @@ class StoryImportConfirmCommand(ContractModel):
     target_project_id: uuid.UUID | None = Field(alias="targetProjectId", default=None)
     series_length_mode: SeriesLengthMode | None = Field(alias="seriesLengthMode", default=None)
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None)
+    default_episode_duration_seconds: int = Field(
+        alias="defaultEpisodeDurationSeconds", default=12, ge=8, le=15
+    )
+    narrative_mode: SeriesNarrativeMode | None = Field(alias="narrativeMode", default=None)
+    adaptation_policy: Literal["preserve_all", "condense_mainline"] = Field(
+        alias="adaptationPolicy", default="preserve_all"
+    )
+    must_keep: list[str] = Field(alias="mustKeep", default_factory=list, max_length=30)
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
     @model_validator(mode="after")
@@ -240,9 +284,7 @@ def recommended_episode_count(beat_count: int) -> EpisodeCountRecommendationDto:
         minimumRecommended=math.ceil(beat_count / 2),
         preferred=math.ceil(beat_count * 2 / 3),
         maximumRecommended=beat_count,
-        rationale=(
-            f"根据 {beat_count} 个剧情节拍提供确定性编排建议；最终集数由用户确认。"
-        ),
+        rationale=(f"根据 {beat_count} 个剧情节拍提供确定性编排建议；最终集数由用户确认。"),
     )
 
 
@@ -254,9 +296,7 @@ def normalize_import_relationship_suggestions(
     for suggestion in analysis.relation_suggestions:
         relation_type: StorySourceRelationType = suggestion.relation_type
         if relation_type not in {"new_series", "independent"}:
-            relation_type = (
-                "new_series" if len(suggestion.unit_ordinals) > 1 else "independent"
-            )
+            relation_type = "new_series" if len(suggestion.unit_ordinals) > 1 else "independent"
         beat_count = len(suggestion.unit_ordinals)
         recommendation = suggestion.episode_count_recommendation
         if recommendation is None:

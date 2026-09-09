@@ -109,9 +109,7 @@ class SegmentReferencePublisher:
                 session.scalars(
                     select(MediaPublicationRecord)
                     .where(
-                        MediaPublicationRecord.state.in_(
-                            ("ready", "failed", "delete_pending")
-                        ),
+                        MediaPublicationRecord.state.in_(("ready", "failed", "delete_pending")),
                         MediaPublicationRecord.delete_after <= now,
                     )
                     .order_by(MediaPublicationRecord.delete_after)
@@ -168,6 +166,22 @@ class SegmentReferencePublisher:
                     "published video asset does not match the provider job",
                 )
             frozen_asset_id = job.frozen_input_json.get("previousEpisodeVideoAssetId")
+            prepared_id = job.frozen_input_json.get("referencePreparationJobId")
+            prepared = session.get(JobRecord, uuid.UUID(prepared_id)) if prepared_id else None
+            frozen_reference = job.frozen_input_json.get("videoReference") or {}
+            is_prepared_context = (
+                job.kind == "regenerate_video_segment"
+                and prepared is not None
+                and prepared.project_id == job.project_id
+                and prepared.provider == "local_ffmpeg"
+                and prepared.status == "succeeded"
+                and prepared.frozen_input_json.get("purpose") == "segment_reference"
+                and source.producing_job_id == prepared.id
+                and source.project_id == job.project_id
+                and source.role == "repair_context"
+                and frozen_reference.get("assetId") == str(source.id)
+                and frozen_reference.get("sha256") == source.sha256
+            )
             is_repair_context = (
                 source.producing_job_id == job_id
                 and source.project_id == job.project_id
@@ -178,7 +192,7 @@ class SegmentReferencePublisher:
                 and frozen_asset_id is not None
                 and str(source.id) == str(frozen_asset_id)
             )
-            if not is_repair_context and not is_frozen_previous_episode:
+            if not (is_prepared_context or is_repair_context or is_frozen_previous_episode):
                 raise ObjectPublisherError(
                     "publication_source_mismatch",
                     "video asset is not frozen as an input of the provider job",
@@ -250,9 +264,7 @@ class SegmentReferencePublisher:
                 "repair context file changed after publication was recorded",
             )
 
-    def _mark_failed(
-        self, publication_id: uuid.UUID, error: ObjectPublisherError
-    ) -> None:
+    def _mark_failed(self, publication_id: uuid.UUID, error: ObjectPublisherError) -> None:
         with self._sessions.begin() as session:
             record = session.get(MediaPublicationRecord, publication_id)
             if record is None:
@@ -260,6 +272,7 @@ class SegmentReferencePublisher:
             record.state = "failed"
             record.error_json = {"code": error.code, "message": error.message}
             record.updated_at = datetime.now(UTC)
+
     def _record_cleanup_failure(
         self, publication_id: uuid.UUID, error: ObjectPublisherError
     ) -> None:

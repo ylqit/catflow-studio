@@ -10,6 +10,7 @@ from .contract import ContractModel
 
 EDIT_FRAME_RATE = 24
 MIN_ISSUE_FRAMES = 1
+MIN_GENERATION_FRAMES = 4 * EDIT_FRAME_RATE
 MAX_ISSUE_FRAMES = 15 * EDIT_FRAME_RATE
 
 
@@ -288,8 +289,13 @@ def expand_generation_window(
 
     one_second = math.ceil(frame_rate.frames_per_second)
     minimum_frames = math.ceil(4 * frame_rate.frames_per_second)
-    start = max(0, issue_range.start_frame - one_second)
-    end = min(total_frames, issue_range.end_frame + one_second)
+    # Context fits around the frozen replacement; it must never shrink that replacement.
+    context_budget = max(0, MAX_ISSUE_FRAMES - issue_range.duration_frames)
+    left = min(issue_range.start_frame, one_second, context_budget // 2)
+    right = min(total_frames - issue_range.end_frame, one_second, context_budget - left)
+    left = min(issue_range.start_frame, one_second, context_budget - right)
+    start = issue_range.start_frame - left
+    end = issue_range.end_frame + right
 
     missing = max(0, minimum_frames - (end - start))
     add_left = min(start, missing // 2)

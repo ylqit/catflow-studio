@@ -2562,6 +2562,56 @@
         }
       }
     },
+    "/api/v1/story-imports/{document_id}/production-targets": {
+      "patch": {
+        "summary": "Update Story Production Targets",
+        "operationId": "update_story_production_targets_api_v1_story_imports__document_id__production_targets_patch",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoryProductionTargetsCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorySourceDocumentDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/story-imports/{document_id}": {
       "get": {
         "summary": "Get Story Import",
@@ -4433,6 +4483,56 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/video-edits/references": {
+      "post": {
+        "summary": "Prepare Edit References",
+        "operationId": "prepare_edit_references_api_v1_projects__project_id__video_edits_references_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SegmentReferencePreparationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/video-edits": {
       "post": {
         "summary": "Create Video Edit",
@@ -5013,6 +5113,66 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/results": {
+      "post": {
+        "summary": "Prepare Repair Result",
+        "operationId": "prepare_repair_result_api_v1_projects__project_id__video_edit_drafts__draft_id__results_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoRepairResultCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/edit-previews": {
       "post": {
         "summary": "Render Edit Preview",
@@ -5183,6 +5343,243 @@
         ],
         "responses": {
           "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/events": {
+      "get": {
+        "summary": "Job Events",
+        "operationId": "job_events_api_v1_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/replacement-preview": {
+      "post": {
+        "summary": "Replacement Preview",
+        "operationId": "replacement_preview_api_v1_jobs__job_id__replacement_preview_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/replacement": {
+      "post": {
+        "summary": "Replacement Create",
+        "operationId": "replacement_create_api_v1_jobs__job_id__replacement_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplacementGenerationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/result": {
+      "get": {
+        "summary": "Job Result",
+        "operationId": "job_result_api_v1_jobs__job_id__result_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/recovery": {
+      "post": {
+        "summary": "Recover Job",
+        "operationId": "recover_job_api_v1_jobs__job_id__recovery_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRecoveryCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -5660,6 +6057,27 @@
   },
   "components": {
     "schemas": {
+      "AdaptationRiskDraft": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "blocking": {
+            "type": "boolean",
+            "title": "Blocking",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "AdaptationRiskDraft"
+      },
       "AssetDto": {
         "properties": {
           "id": {
@@ -5760,6 +6178,33 @@
       },
       "AssetGenerationCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "includePreviousEpisodeVideo": {
             "type": "boolean",
             "title": "Includepreviousepisodevideo",
@@ -7785,6 +8230,33 @@
       },
       "GenerationCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "includePreviousEpisodeVideo": {
             "type": "boolean",
             "title": "Includepreviousepisodevideo",
@@ -8102,7 +8574,10 @@
           },
           "role": {
             "type": "string",
-            "const": "previous_episode_video",
+            "enum": [
+              "previous_episode_video",
+              "reference_video"
+            ],
             "title": "Role"
           },
           "sha256": {
@@ -8422,6 +8897,33 @@
       },
       "ImageDiagnosisCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "assetId": {
             "type": "string",
             "format": "uuid",
@@ -8541,6 +9043,55 @@
       },
       "JobDto": {
         "properties": {
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobExecutionDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providerResponseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerresponseid"
+          },
+          "providerClientRequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerclientrequestid"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 0
+          },
+          "nextActionAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextactionat"
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -8860,6 +9411,14 @@
             ],
             "title": "Supersedesjobid"
           },
+          "successorJobIds": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Successorjobids"
+          },
           "error": {
             "anyOf": [
               {
@@ -8896,6 +9455,216 @@
           "updatedAt"
         ],
         "title": "JobDto"
+      },
+      "JobExecutionDto": {
+        "properties": {
+          "contractVersion": {
+            "type": "integer",
+            "title": "Contractversion",
+            "default": 1
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "default": "prepare"
+          },
+          "stageStartedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stagestartedat"
+          },
+          "providerStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerstatus"
+          },
+          "providerObservedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerobservedat"
+          },
+          "providerResponseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerresponseid"
+          },
+          "providerClientRequestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providerclientrequestid"
+          },
+          "providerError": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providererror"
+          },
+          "responseExpiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responseexpiresat"
+          },
+          "resultReceivedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resultreceivedat"
+          },
+          "recoveryState": {
+            "type": "string",
+            "enum": [
+              "none",
+              "automatic",
+              "needs_attention",
+              "unavailable"
+            ],
+            "title": "Recoverystate",
+            "default": "none"
+          },
+          "lastQueryAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastqueryat"
+          },
+          "nextActionAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextactionat"
+          },
+          "queryFailureCount": {
+            "type": "integer",
+            "title": "Queryfailurecount",
+            "default": 0
+          },
+          "queryError": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queryerror"
+          },
+          "availableActions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Availableactions"
+          },
+          "waitingForProvider": {
+            "type": "boolean",
+            "title": "Waitingforprovider",
+            "default": false
+          },
+          "needsAttention": {
+            "type": "boolean",
+            "title": "Needsattention",
+            "default": false
+          },
+          "usageUnconfirmed": {
+            "type": "boolean",
+            "title": "Usageunconfirmed",
+            "default": false
+          },
+          "resultState": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "partial",
+              "complete"
+            ],
+            "title": "Resultstate",
+            "default": "missing"
+          },
+          "historicalResult": {
+            "type": "boolean",
+            "title": "Historicalresult",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "JobExecutionDto"
       },
       "JobPublicationDto": {
         "properties": {
@@ -8946,6 +9715,37 @@
           "deleteAfter"
         ],
         "title": "JobPublicationDto"
+      },
+      "JobRecoveryCommand": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "query_provider",
+              "process_result"
+            ],
+            "title": "Action"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expectedrevision"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action",
+          "expectedRevision",
+          "idempotencyKey"
+        ],
+        "title": "JobRecoveryCommand"
       },
       "JobUsageDto": {
         "properties": {
@@ -9420,6 +10220,21 @@
       },
       "PlannerJobDto": {
         "properties": {
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobExecutionDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 0
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -9561,6 +10376,33 @@
       },
       "PlannerMessageCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "text": {
             "type": "string",
             "maxLength": 4000,
@@ -9679,6 +10521,34 @@
           "proposals"
         ],
         "title": "PlannerSnapshotDto"
+      },
+      "PreservedRequirementDraft": {
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Requirement"
+          },
+          "handling": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Handling"
+          },
+          "episodeOrders": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Episodeorders"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "requirement",
+          "handling"
+        ],
+        "title": "PreservedRequirementDraft"
       },
       "ProjectCollectionCreate": {
         "properties": {
@@ -10708,8 +11578,95 @@
         "type": "object",
         "title": "RecurringPropDraft"
       },
+      "ReplacementGenerationCommand": {
+        "properties": {
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "acknowledgeDuplicateCharge": {
+            "type": "boolean",
+            "const": true,
+            "title": "Acknowledgeduplicatecharge"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inputHash",
+          "acknowledgeDuplicateCharge",
+          "idempotencyKey"
+        ],
+        "title": "ReplacementGenerationCommand"
+      },
       "SegmentEditInputDto": {
         "properties": {
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "referencePreparationJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencepreparationjobid"
+          },
+          "inputEdl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditDecisionListV2"
+              },
+              {
+                "$ref": "#/components/schemas/EditDecisionListV3"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputedl"
+          },
+          "inputTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputtimelinehash"
+          },
+          "resultRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "generationMode": {
             "type": "string",
             "enum": [
@@ -10813,6 +11770,173 @@
         ],
         "title": "SegmentEditInputDto"
       },
+      "SegmentReferencePreparationCommand": {
+        "properties": {
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
+          "referencePreparationJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencepreparationjobid"
+          },
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "edit_existing"
+          },
+          "audioMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_current",
+                  "generate_candidate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiomode"
+          },
+          "soundDescription": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Sounddescription",
+            "default": ""
+          },
+          "anchorStartFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorstartframe"
+          },
+          "anchorEndFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorendframe"
+          },
+          "baseVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Basevideoassetid"
+          },
+          "baseEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseeditversionid"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Instruction"
+          },
+          "editDraftId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editdraftid"
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Desiredendstate",
+            "default": ""
+          },
+          "retryAfterJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retryafterjobid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "baseVideoAssetId",
+          "issueRange",
+          "instruction"
+        ],
+        "title": "SegmentReferencePreparationCommand"
+      },
       "SegmentRepairApproveCommand": {
         "properties": {
           "candidateAssetId": {
@@ -10877,6 +12001,69 @@
       },
       "SegmentRepairCreateCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
+          "referencePreparationJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencepreparationjobid"
+          },
           "generationMode": {
             "type": "string",
             "enum": [
@@ -11069,6 +12256,42 @@
       },
       "SegmentRepairPreviewCommand": {
         "properties": {
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
+          "referencePreparationJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencepreparationjobid"
+          },
           "generationMode": {
             "type": "string",
             "enum": [
@@ -11188,6 +12411,77 @@
       },
       "SegmentRepairPreviewDto": {
         "properties": {
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
+          "referencePreparationJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencepreparationjobid"
+          },
+          "inputEdl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditDecisionListV2"
+              },
+              {
+                "$ref": "#/components/schemas/EditDecisionListV3"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputedl"
+          },
+          "inputTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputtimelinehash"
+          },
+          "resultRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "generationMode": {
             "type": "string",
             "enum": [
@@ -11717,6 +13011,15 @@
       },
       "SeriesCreateCommand": {
         "properties": {
+          "adaptationPolicy": {
+            "type": "string",
+            "enum": [
+              "preserve_all",
+              "condense_mainline"
+            ],
+            "title": "Adaptationpolicy",
+            "default": "preserve_all"
+          },
           "title": {
             "type": "string",
             "maxLength": 160,
@@ -11986,7 +13289,6 @@
           },
           "targetDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
             "minimum": 0.0,
             "title": "Targetdurationseconds",
             "default": 0
@@ -12081,6 +13383,33 @@
       },
       "SeriesEpisodeStoryGenerationCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "expectedInputHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
@@ -12221,6 +13550,46 @@
       },
       "SeriesPatchCommand": {
         "properties": {
+          "plannedEpisodeCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plannedepisodecount"
+          },
+          "defaultEpisodeDurationSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 15.0,
+                "minimum": 8.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defaultepisodedurationseconds"
+          },
+          "mustKeep": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mustkeep"
+          },
           "title": {
             "anyOf": [
               {
@@ -12330,6 +13699,27 @@
       },
       "SeriesPlanDraft": {
         "properties": {
+          "sourceTreatments": {
+            "items": {
+              "$ref": "#/components/schemas/SourceTreatmentDraft"
+            },
+            "type": "array",
+            "title": "Sourcetreatments"
+          },
+          "adaptationRisks": {
+            "items": {
+              "$ref": "#/components/schemas/AdaptationRiskDraft"
+            },
+            "type": "array",
+            "title": "Adaptationrisks"
+          },
+          "preservedRequirements": {
+            "items": {
+              "$ref": "#/components/schemas/PreservedRequirementDraft"
+            },
+            "type": "array",
+            "title": "Preservedrequirements"
+          },
           "seriesBible": {
             "$ref": "#/components/schemas/SeriesBibleDraft"
           },
@@ -12352,6 +13742,33 @@
       },
       "SeriesPlanGenerationCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "expectedInputHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
@@ -12567,6 +13984,33 @@
       },
       "SeriesPlanSegmentGenerationCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "startEpisodeOrder": {
             "type": "integer",
             "minimum": 1.0,
@@ -13198,6 +14642,33 @@
       },
       "ShotMediaCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "shotPlanVersionId": {
             "type": "string",
             "format": "uuid",
@@ -13406,6 +14877,21 @@
       },
       "ShotPlanGenerationAttemptDto": {
         "properties": {
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobExecutionDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 0
+          },
           "jobId": {
             "type": "string",
             "format": "uuid",
@@ -13608,6 +15094,33 @@
       },
       "ShotPlanGenerationCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "idempotencyKey": {
             "type": "string",
             "maxLength": 96,
@@ -13701,6 +15214,52 @@
             },
             "type": "array",
             "title": "Issues"
+          },
+          "normalizationRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalizationrevision"
+          },
+          "adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/DirectorValidationIssueDto"
+            },
+            "type": "array",
+            "title": "Adjustments"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "unresolved",
+              "candidate",
+              "accepted",
+              "rejected",
+              "superseded"
+            ],
+            "title": "Resolution",
+            "default": "unresolved"
+          },
+          "resultRevision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resultrevision"
+          },
+          "resultActive": {
+            "type": "boolean",
+            "title": "Resultactive",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -14189,6 +15748,46 @@
         ],
         "title": "ShotTarget"
       },
+      "SourceTreatmentDraft": {
+        "properties": {
+          "sourceUnitOrdinal": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Sourceunitordinal"
+          },
+          "treatment": {
+            "type": "string",
+            "enum": [
+              "retained",
+              "merged",
+              "simplified",
+              "omitted"
+            ],
+            "title": "Treatment"
+          },
+          "episodeOrders": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Episodeorders"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sourceUnitOrdinal",
+          "treatment",
+          "reason"
+        ],
+        "title": "SourceTreatmentDraft"
+      },
       "StoryCreateCommand": {
         "properties": {
           "title": {
@@ -14241,6 +15840,21 @@
       },
       "StoryImportAnalysisJobDto": {
         "properties": {
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobExecutionDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 0
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -14413,6 +16027,46 @@
             ],
             "title": "Plannedepisodecount"
           },
+          "defaultEpisodeDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 8.0,
+            "title": "Defaultepisodedurationseconds",
+            "default": 12
+          },
+          "narrativeMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "continuous",
+                  "lightly_serialized",
+                  "anthology"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrativemode"
+          },
+          "adaptationPolicy": {
+            "type": "string",
+            "enum": [
+              "preserve_all",
+              "condense_mainline"
+            ],
+            "title": "Adaptationpolicy",
+            "default": "preserve_all"
+          },
+          "mustKeep": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Mustkeep"
+          },
           "idempotencyKey": {
             "type": "string",
             "maxLength": 96,
@@ -14431,6 +16085,33 @@
       },
       "StoryImportCreateCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "rawText": {
             "type": "string",
             "maxLength": 500000,
@@ -14457,6 +16138,20 @@
               }
             ],
             "title": "Filename"
+          },
+          "productionTargets": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/StoryProductionTarget"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Productiontargets"
           },
           "expectedInputHash": {
             "type": "string",
@@ -14700,6 +16395,33 @@
       },
       "StoryImportReanalyzeCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "expectedInputHash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
@@ -14720,8 +16442,100 @@
         ],
         "title": "StoryImportReanalyzeCommand"
       },
+      "StoryProductionTarget": {
+        "properties": {
+          "lengthMode": {
+            "type": "string",
+            "enum": [
+              "fixed",
+              "ongoing"
+            ],
+            "title": "Lengthmode",
+            "default": "fixed"
+          },
+          "plannedEpisodeCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plannedepisodecount",
+            "default": 3
+          },
+          "defaultEpisodeDurationSeconds": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 8.0,
+            "title": "Defaultepisodedurationseconds",
+            "default": 15
+          },
+          "narrativeMode": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "lightly_serialized",
+              "anthology"
+            ],
+            "title": "Narrativemode",
+            "default": "continuous"
+          },
+          "adaptationPolicy": {
+            "type": "string",
+            "const": "condense_mainline",
+            "title": "Adaptationpolicy",
+            "default": "condense_mainline"
+          },
+          "mustKeep": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Mustkeep"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StoryProductionTarget"
+      },
+      "StoryProductionTargetsCommand": {
+        "properties": {
+          "expectedUpdatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expectedupdatedat"
+          },
+          "productionTargets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StoryProductionTarget"
+            },
+            "type": "object",
+            "title": "Productiontargets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedUpdatedAt",
+          "productionTargets"
+        ],
+        "title": "StoryProductionTargetsCommand"
+      },
       "StorySeriesDto": {
         "properties": {
+          "adaptationPolicy": {
+            "type": "string",
+            "enum": [
+              "preserve_all",
+              "condense_mainline"
+            ],
+            "title": "Adaptationpolicy",
+            "default": "preserve_all"
+          },
           "title": {
             "type": "string",
             "maxLength": 160,
@@ -14938,6 +16752,20 @@
               "failed"
             ],
             "title": "Status"
+          },
+          "productionTargets": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/StoryProductionTarget"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Productiontargets"
           },
           "analysisJobId": {
             "anyOf": [
@@ -15245,6 +17073,33 @@
         ],
         "title": "StoryVersionDto"
       },
+      "UnknownJobReplacement": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Jobid"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Inputhash"
+          },
+          "acknowledgeDuplicateCharge": {
+            "type": "boolean",
+            "const": true,
+            "title": "Acknowledgeduplicatecharge"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "jobId",
+          "inputHash",
+          "acknowledgeDuplicateCharge"
+        ],
+        "title": "UnknownJobReplacement"
+      },
       "ValidationCanonReferenceDto": {
         "properties": {
           "role": {
@@ -15547,6 +17402,33 @@
       },
       "VideoDiagnosisCommand": {
         "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
           "assetId": {
             "type": "string",
             "format": "uuid",
@@ -15693,6 +17575,30 @@
       },
       "VideoEditDraftCreateCommand": {
         "properties": {
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
           "sourceVideoAssetId": {
             "type": "string",
             "format": "uuid",
@@ -15732,6 +17638,30 @@
       },
       "VideoEditDraftDto": {
         "properties": {
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -16005,6 +17935,50 @@
           "createdAt"
         ],
         "title": "VideoRepairDto"
+      },
+      "VideoRepairResultCommand": {
+        "properties": {
+          "repairId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Repairid"
+          },
+          "previousPreviewJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previouspreviewjobid"
+          },
+          "preserveOriginalAudio": {
+            "type": "boolean",
+            "title": "Preserveoriginalaudio",
+            "default": false
+          },
+          "retryAfterJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retryafterjobid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repairId"
+        ],
+        "title": "VideoRepairResultCommand"
       },
       "VideoReviewCreateCommand": {
         "properties": {

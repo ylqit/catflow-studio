@@ -8,6 +8,7 @@ const client = vi.hoisted(() => ({
   runtime: vi.fn(),
   plannerMessage: vi.fn(),
   adoptProposal: vi.fn(),
+  job: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => ({ api: client }));
@@ -30,6 +31,7 @@ describe("PlannerStep", () => {
       },
     });
     client.plannerMessage.mockResolvedValue({ id: "job-1", status: "queued" });
+    client.job.mockImplementation(async () => (await client.planner()).latestJob);
   });
 
   it("submits the paid Ark planning job directly without a validation quota prompt", async () => {
@@ -75,11 +77,10 @@ describe("PlannerStep", () => {
     const wrapper = mount(PlannerStep, { props: { projectId: "project-1", runtime } });
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="planner-job-summary"]').text()).toContain("已完成");
-    expect(wrapper.get('[data-testid="planner-job-summary"]').text()).not.toContain("job-1");
-    expect(wrapper.get('[data-testid="planner-job-details"]').text()).toContain("inputTokens");
-    expect(wrapper.get('[data-testid="planner-job-details"]').text()).toContain("321");
-    expect(wrapper.get('[data-testid="planner-job-details"]').text()).toContain("费用待核价");
+    expect(wrapper.get('[data-testid="job-status-card"]').text()).toContain("结果已保存");
+    expect(wrapper.get('[data-testid="job-status-card"]').text()).toContain("inputTokens");
+    expect(wrapper.get('[data-testid="job-status-card"]').text()).toContain("321");
+    expect(wrapper.get('[data-testid="job-status-card"]').text()).toContain("待核价");
     expect(wrapper.text()).not.toContain("¥0");
   });
 
@@ -147,7 +148,7 @@ describe("PlannerStep", () => {
 
     const button = wrapper.get(".composer button.primary");
     expect(button.attributes("disabled")).toBeDefined();
-    expect(wrapper.text()).toContain("当前故事任务正在处理");
+    expect(wrapper.text()).toContain("正在提交或接收");
     await wrapper.get("form").trigger("submit");
     expect(client.plannerMessage).not.toHaveBeenCalled();
   });

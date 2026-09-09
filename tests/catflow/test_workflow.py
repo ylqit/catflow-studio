@@ -368,7 +368,7 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert first_video_job.input_snapshot.prompt == preview.prompt
     assert first_video_job.input_snapshot.schema_version == 2
     assert (
-        first_video_job.input_snapshot.prompt_compiler_revision == "seedance-professional-v5-audio"
+        first_video_job.input_snapshot.prompt_compiler_revision == "seedance-professional-v6-scene"
     )
     assert first_video_job.input_snapshot.prompt_summary == preview.prompt_summary
     assert first_video_job.input_snapshot.prompt_sections == preview.prompt_sections
@@ -439,7 +439,10 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert job.kind == "plan_shots"
     assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
     assert job.frozen_input["storyVersionId"] == str(story.id)
-    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v3"
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v5-contract"
+    assert job.frozen_input["outputContractRevision"] == "professional-director-v2"
+    assert job.frozen_input["normalizationRevision"] == "director-normalizer-v2"
+    assert "规划分镜" in job.frozen_input["inputInstruction"]
     assert "不得输出空占位镜头、备用镜头或修订镜头" in job.frozen_input["prompt"]
     assert job.frozen_input["referenceRoles"] == [
         "episode_child",
@@ -702,6 +705,21 @@ def test_incomplete_director_draft_can_be_corrected_without_another_provider_job
     assert candidate.active is False
     assert candidate.producing_job_id == job.id
     assert len(repository.list_project_jobs(project.id)) == original_job_count
+
+    resolved = service.list_shot_plan_generation_attempts(project.id)[0]
+    assert resolved.result.disposition == "needs_input"  # original validation remains evidence
+    assert resolved.result.resolution == "candidate"
+    assert resolved.result.result_revision == candidate.revision
+    saved = service.get_job(job.id).provider_result
+    assert saved["payload"] == incomplete_payload
+    assert saved["validation"]["manualResolution"]["resultShotPlanVersionId"] == str(candidate.id)
+    before_events = len(repository._job_events)
+    repeated = service.recover_shot_plan_generation_result(
+        project.id, job.id, ShotPlanGenerationRecoveryCommand(idempotencyKey="already-resolved")
+    )
+    assert repeated.id == candidate.id
+    assert len(repository._job_events) == before_events
+    assert service.get_job(job.id).provider_result == saved
 
 
 def test_running_director_job_blocks_a_second_paid_submission() -> None:
@@ -1002,7 +1020,7 @@ def test_asset_generation_preview_and_job_freeze_role_without_style_source() -> 
     assert all(reference["role"] != "style_source" for reference in job.frozen_input["references"])
 
 
-def test_environment_generation_uses_story_intent_and_only_the_three_rendering_references() -> None:
+def test_environment_generation_uses_story_intent_and_only_the_style_reference() -> None:
     service = _service()
     project = _project(service)
     story = service.create_story(
@@ -1032,7 +1050,7 @@ def test_environment_generation_uses_story_intent_and_only_the_three_rendering_r
     assert preview.image_input_snapshot.source_story_version_id == story.id
     assert preview.image_input_snapshot.environment_intent == "雨天玄关，柔和暖光。"
     assert preview.image_input_snapshot.subject_policy == "empty_scene"
-    assert roles == ["style_board", "episode_child", "episode_cat"]
+    assert roles == ["style_board"]
     assert "空场景" in preview.prompt
     assert "雨天玄关，柔和暖光" in preview.prompt
     assert "柔和暖光。。" not in preview.prompt
@@ -1050,11 +1068,7 @@ def test_environment_generation_uses_story_intent_and_only_the_three_rendering_r
     )
     assert job.image_input_snapshot is not None
     assert job.image_input_snapshot.state == "submitted"
-    assert job.frozen_input["referenceRoles"] == [
-        "style_board",
-        "episode_child",
-        "episode_cat",
-    ]
+    assert job.frozen_input["referenceRoles"] == ["style_board"]
     assert job.frozen_input["compiledProviderPrompt"] == (
         f"【生成目标】\n{preview.prompt}\n\n【必须避免】\n{preview.negative_prompt}"
     )
@@ -1128,8 +1142,6 @@ def test_environment_diagnosis_checks_an_empty_scene_against_story_and_rendering
     assert job.frozen_input["environmentIntent"] == "雨天玄关，柔和暖光和吸水脚垫"
     assert [reference["role"] for reference in job.frozen_input["references"]] == [
         "style_board",
-        "episode_child",
-        "episode_cat",
     ]
     assert set(job.frozen_input["outputSchema"]["properties"]) == {
         "intentMatch",

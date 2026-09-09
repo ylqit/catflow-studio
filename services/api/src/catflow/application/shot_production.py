@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from catflow.application.job_execution import PaidJobCommand
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import ShotSpec
 
@@ -20,7 +21,7 @@ class ShotMediaPreviewCommand(ShotTarget):
     purpose: Literal["shot_frame", "shot_video"]
 
 
-class ShotMediaCommand(ShotMediaPreviewCommand):
+class ShotMediaCommand(ShotMediaPreviewCommand, PaidJobCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 

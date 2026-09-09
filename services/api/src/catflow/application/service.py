@@ -2,16 +2,31 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_serializer, model_validator
 
+from catflow.application.job_execution import (
+    GenerationPrepared,
+    JobExecutionDto,
+    JobRecoveryCommand,
+    PaidJobCommand,
+    execution_contract,
+    generation_command,
+    generation_request,
+    public_result,
+    replacing_unknown,
+    summarize_execution,
+)
 from catflow.domain.billing import RateCardItem
 from catflow.domain.contract import ContractModel
 from catflow.domain.director_results import (
+    DIRECTOR_NORMALIZATION_REVISION,
+    DIRECTOR_OUTPUT_CONTRACT,
     DirectorNormalizationResult,
     director_provider_output_schema,
     normalize_director_result,
@@ -29,7 +44,7 @@ from catflow.domain.models import (
 from catflow.domain.references import CompiledReference, ProviderReference, compile_references
 from catflow.domain.video_repairs import (
     MAX_ISSUE_FRAMES,
-    MIN_ISSUE_FRAMES,
+    MIN_GENERATION_FRAMES,
     CandidatePlacement,
     EditDecisionListV2,
     EditDecisionListV3,
@@ -113,6 +128,7 @@ from .story_imports import (
     StoryImportPreviewCommand,
     StoryImportPreviewDto,
     StoryImportReanalyzeCommand,
+    StoryProductionTargetsCommand,
     StorySourceDocumentDto,
     compile_story_import_preview,
     normalize_import_relationship_suggestions,
@@ -232,7 +248,7 @@ class ProjectDto(ContractModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
-class PlannerMessageCommand(ContractModel):
+class PlannerMessageCommand(PaidJobCommand):
     text: str = Field(min_length=1, max_length=4_000)
     expected_context_revision: int = Field(alias="expectedContextRevision", ge=1)
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
@@ -242,7 +258,7 @@ class GenerationPreviewCommand(ContractModel):
     include_previous_episode_video: bool = Field(alias="includePreviousEpisodeVideo", default=False)
 
 
-class GenerationCommand(GenerationPreviewCommand):
+class GenerationCommand(GenerationPreviewCommand, PaidJobCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -260,12 +276,12 @@ class AssetGenerationCommand(GenerationCommand):
     kind: AssetGenerationKind
 
 
-class ImageDiagnosisCommand(ContractModel):
+class ImageDiagnosisCommand(PaidJobCommand):
     asset_id: uuid.UUID = Field(alias="assetId")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
-class VideoDiagnosisCommand(ContractModel):
+class VideoDiagnosisCommand(PaidJobCommand):
     asset_id: uuid.UUID = Field(alias="assetId")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -313,6 +329,8 @@ BillingStatus = Literal["pending", "usage_reported", "calculated", "unpriced", "
 
 
 class PlannerJobDto(ContractModel):
+    execution: JobExecutionDto | None = None
+    revision: int = 0
     id: uuid.UUID
     status: JobStatus
     provider: str | None = None
@@ -471,7 +489,7 @@ class ShotPlanVersionDto(ContractModel):
     created_at: datetime = Field(alias="createdAt")
 
 
-class ShotPlanGenerationCommand(ContractModel):
+class ShotPlanGenerationCommand(PaidJobCommand):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
@@ -523,9 +541,18 @@ class ShotPlanGenerationResultDto(ContractModel):
     recoverable: bool
     draft: DirectorPlanDraftDto | None = None
     issues: list[DirectorValidationIssueDto] = Field(default_factory=list)
+    normalization_revision: str | None = Field(alias="normalizationRevision", default=None)
+    adjustments: list[DirectorValidationIssueDto] = Field(default_factory=list)
+    resolution: Literal[
+        "unresolved", "candidate", "accepted", "rejected", "superseded"
+    ] = "unresolved"
+    result_revision: int | None = Field(alias="resultRevision", default=None)
+    result_active: bool = Field(alias="resultActive", default=False)
 
 
 class ShotPlanGenerationAttemptDto(ContractModel):
+    execution: JobExecutionDto | None = None
+    revision: int = 0
     job_id: uuid.UUID = Field(alias="jobId")
     status: JobStatus
     story_version_id: uuid.UUID = Field(alias="storyVersionId")
@@ -564,7 +591,7 @@ class GenerationInputReferenceDto(ContractModel):
 
 class GenerationInputVideoReferenceDto(ContractModel):
     asset_id: uuid.UUID = Field(alias="assetId")
-    role: Literal["previous_episode_video"]
+    role: Literal["previous_episode_video", "reference_video"]
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     duration_seconds: float | None = Field(alias="durationSeconds", default=None, gt=0)
     included: bool
@@ -589,6 +616,13 @@ class GenerationInputSourceDto(ContractModel):
 
 
 class SegmentEditInputDto(ContractModel):
+    source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
+    reference_preparation_job_id: uuid.UUID | None = Field(
+        alias="referencePreparationJobId", default=None
+    )
+    input_edl: FrameEditTimeline | None = Field(alias="inputEdl", default=None)
+    input_timeline_hash: str | None = Field(alias="inputTimelineHash", default=None)
+    result_range: FrameRange | None = Field(alias="resultRange", default=None)
     generation_mode: Literal["edit_existing", "from_frame"] = Field(
         alias="generationMode", default="edit_existing"
     )
@@ -653,6 +687,14 @@ class ImageGenerationInputSnapshotDto(ContractModel):
 
 
 class JobDto(ContractModel):
+    execution: JobExecutionDto | None = None
+    execution_facts: dict[str, Any] | None = Field(
+        alias="executionFacts", default=None, exclude=True
+    )
+    provider_response_id: str | None = Field(alias="providerResponseId", default=None)
+    provider_client_request_id: str | None = Field(alias="providerClientRequestId", default=None)
+    revision: int = 0
+    next_action_at: datetime | None = Field(alias="nextActionAt", default=None)
     id: uuid.UUID
     project_id: uuid.UUID | None = Field(alias="projectId", default=None)
     series_id: uuid.UUID | None = Field(alias="seriesId", default=None)
@@ -702,9 +744,34 @@ class JobDto(ContractModel):
     frozen_input: dict[str, Any] = Field(alias="frozenInput")
     result_asset_ids: list[uuid.UUID] = Field(alias="resultAssetIds", default_factory=list)
     supersedes_job_id: uuid.UUID | None = Field(alias="supersedesJobId", default=None)
+    successor_job_ids: list[uuid.UUID] = Field(alias="successorJobIds", default_factory=list)
     error: dict[str, Any] | None = None
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+
+    @field_serializer("provider_result")
+    def public_provider_result(self, value: dict[str, Any] | None):
+        return public_result(value)
+
+    @model_validator(mode="after")
+    def execution_summary(self) -> JobDto:
+        self.execution = summarize_execution(
+            kind=self.kind,
+            provider=self.provider,
+            status=self.status,
+            facts=self.execution_facts,
+            task_id=self.provider_task_id,
+            response_id=self.provider_response_id,
+            client_request_id=self.provider_client_request_id,
+            result=self.provider_result,
+            error=self.error,
+            usage=self.actual_usage,
+            submitted_at=self.provider_submission_started_at,
+            next_action_at=self.next_action_at,
+        )
+        if self.successor_job_ids and "prepare_replacement" in self.execution.available_actions:
+            self.execution.available_actions.remove("prepare_replacement")
+        return self
 
 
 class JobUsageDto(ContractModel):
@@ -882,6 +949,10 @@ class EditVersionDto(ContractModel):
 
 
 class VideoEditDraftCreateCommand(ContractModel):
+    source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
+    expected_source_timeline_hash: str | None = Field(
+        alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
+    )
     source_video_asset_id: uuid.UUID = Field(alias="sourceVideoAssetId")
     source_edit_version_id: uuid.UUID | None = Field(alias="sourceEditVersionId", default=None)
     confirm_current_references: bool = Field(alias="confirmCurrentReferences", default=False)
@@ -889,6 +960,10 @@ class VideoEditDraftCreateCommand(ContractModel):
 
 
 class VideoEditDraftDto(ContractModel):
+    source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
+    expected_source_timeline_hash: str | None = Field(
+        alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
+    )
     id: uuid.UUID
     project_id: uuid.UUID = Field(alias="projectId")
     source_video_asset_id: uuid.UUID = Field(alias="sourceVideoAssetId")
@@ -911,6 +986,13 @@ class VideoDraftPreviewCommand(ContractModel):
     repair_id: uuid.UUID | None = Field(alias="repairId", default=None)
     placement: CandidatePlacement | None = None
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
+class VideoRepairResultCommand(ContractModel):
+    repair_id: uuid.UUID = Field(alias="repairId")
+    previous_preview_job_id: uuid.UUID | None = Field(alias="previousPreviewJobId", default=None)
+    preserve_original_audio: bool = Field(alias="preserveOriginalAudio", default=False)
+    retry_after_job_id: uuid.UUID | None = Field(alias="retryAfterJobId", default=None)
 
 
 class VideoDraftSaveCommand(VideoDraftPreviewCommand):
@@ -994,6 +1076,13 @@ VideoRepairStatus = Literal[
 
 
 class SegmentRepairPreviewCommand(ContractModel):
+    source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
+    expected_source_timeline_hash: str | None = Field(
+        alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    reference_preparation_job_id: uuid.UUID | None = Field(
+        alias="referencePreparationJobId", default=None
+    )
     generation_mode: Literal["edit_existing", "from_frame"] = Field(
         alias="generationMode", default="edit_existing"
     )
@@ -1017,14 +1106,28 @@ class SegmentRepairPreviewCommand(ContractModel):
     def require_supported_issue_duration(self) -> SegmentRepairPreviewCommand:
         if self.end_state_policy == "replace" and not self.desired_end_state.strip():
             raise ValueError("replacing the ending requires desiredEndState")
-        if self.issue_range.duration_frames < MIN_ISSUE_FRAMES:
-            raise ValueError("issueRange must contain at least one frame")
+        if self.issue_range.duration_frames < MIN_GENERATION_FRAMES:
+            raise ValueError("新生成选区至少 4 秒（96 帧）；历史片段仍可查看。")
         if self.issue_range.duration_frames > MAX_ISSUE_FRAMES:
             raise ValueError("issueRange must not exceed 15 seconds (360 frames)")
         return self
 
 
+class SegmentReferencePreparationCommand(SegmentRepairPreviewCommand):
+    retry_after_job_id: uuid.UUID | None = Field(alias="retryAfterJobId", default=None)
+
+
 class SegmentRepairPreviewDto(ContractModel):
+    source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
+    expected_source_timeline_hash: str | None = Field(
+        alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
+    )
+    reference_preparation_job_id: uuid.UUID | None = Field(
+        alias="referencePreparationJobId", default=None
+    )
+    input_edl: FrameEditTimeline | None = Field(alias="inputEdl", default=None)
+    input_timeline_hash: str | None = Field(alias="inputTimelineHash", default=None)
+    result_range: FrameRange | None = Field(alias="resultRange", default=None)
     generation_mode: Literal["edit_existing", "from_frame"] = Field(
         alias="generationMode", default="edit_existing"
     )
@@ -1096,7 +1199,7 @@ class VideoRepairDto(ContractModel):
     approved_at: datetime | None = Field(alias="approvedAt", default=None)
 
 
-class SegmentRepairCreateCommand(SegmentRepairPreviewCommand):
+class SegmentRepairCreateCommand(SegmentRepairPreviewCommand, PaidJobCommand):
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -1301,6 +1404,10 @@ class StudioRepository(Protocol):
         self, job_id: uuid.UUID, analysis: StoryImportAnalysisDraft
     ) -> StorySourceDocumentDto: ...
 
+    def update_story_production_targets(
+        self, document_id: uuid.UUID, command: StoryProductionTargetsCommand
+    ) -> StorySourceDocumentDto: ...
+
     def restart_story_source_analysis(self, document_id: uuid.UUID, job: JobDto) -> JobDto: ...
 
     def confirm_story_source(
@@ -1403,6 +1510,8 @@ class StudioRepository(Protocol):
     def latest_job(self, project_id: uuid.UUID, *, kind: str) -> JobDto | None: ...
 
     def resume_job_storage(self, job_id: uuid.UUID) -> JobDto: ...
+
+    def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto: ...
 
     def cancel_job(self, job_id: uuid.UUID) -> JobDto: ...
 
@@ -1589,6 +1698,7 @@ class StudioService:
             capability_revision=self._provider_runtime.capability_revision,
         )
 
+    @generation_request
     def create_series_plan_job(
         self, series_id: uuid.UUID, command: SeriesPlanGenerationCommand
     ) -> JobDto:
@@ -1611,6 +1721,13 @@ class StudioService:
                 frozenInput={
                     "seriesId": str(series_id),
                     "canonProfileId": str(self.get_story_series(series_id).canon_profile_id),
+                    "adaptationPolicy": self.get_story_series(series_id).adaptation_policy,
+                    "narrativeMode": self.get_story_series(series_id).narrative_mode,
+                    "mustKeep": self.get_story_series(series_id).must_keep,
+                    "sourceBeats": [
+                        beat.model_dump(mode="json", by_alias=True)
+                        for beat in self.list_series_source_beats(series_id)
+                    ],
                     "plannedEpisodeCount": preview.planned_episode_count,
                     "defaultEpisodeDurationSeconds": preview.default_episode_duration_seconds,
                     "prompt": preview.prompt,
@@ -1662,6 +1779,7 @@ class StudioService:
             capability_revision=self._provider_runtime.capability_revision,
         )
 
+    @generation_request
     def create_series_plan_segment_job(
         self, series_id: uuid.UUID, command: SeriesPlanSegmentGenerationCommand
     ) -> JobDto:
@@ -1698,6 +1816,16 @@ class StudioService:
                         else None
                     ),
                     "startEpisodeOrder": preview.start_episode_order,
+                    "adaptationPolicy": self.get_story_series(series_id).adaptation_policy,
+                    "narrativeMode": self.get_story_series(series_id).narrative_mode,
+                    "mustKeep": self.get_story_series(series_id).must_keep,
+                    "defaultEpisodeDurationSeconds": self.get_story_series(
+                        series_id
+                    ).default_episode_duration_seconds,
+                    "sourceBeats": [
+                        beat.model_dump(mode="json", by_alias=True)
+                        for beat in self.list_series_source_beats(series_id)
+                    ],
                     "plannedEpisodeCount": preview.requested_episode_count,
                     "prompt": preview.prompt,
                     "outputSchema": preview.output_schema,
@@ -1922,7 +2050,19 @@ class StudioService:
         canon = self._repository.current_canon_profile()
         if canon.id != series.canon_profile_id:
             raise StudioConflictError("series Canon changed")
+        source_segment = None
+        if series.adaptation_policy == "condense_mainline":
+            source_segment = next(
+                (
+                    segment
+                    for segment in self._repository.list_series_plan_segment_versions(series_id)
+                    if segment.active
+                    and any(outline.order == episode.order for outline in segment.plan.episodes)
+                ),
+                None,
+            )
         return compile_series_episode_story_preview(
+            source_segment=source_segment,
             series=series,
             active_plan=active_plan,
             episode=episode,
@@ -1934,6 +2074,7 @@ class StudioService:
             capability_revision=self._provider_runtime.capability_revision,
         )
 
+    @generation_request
     def create_series_episode_story_job(
         self,
         series_id: uuid.UUID,
@@ -2104,6 +2245,7 @@ class StudioService:
             capability_revision=self._provider_runtime.capability_revision,
         )
 
+    @generation_request
     def create_story_import(self, command: StoryImportCreateCommand) -> StoryImportCreateResultDto:
         preview = self.preview_story_import(
             StoryImportPreviewCommand(
@@ -2141,12 +2283,19 @@ class StudioService:
     def list_story_imports(self) -> list[StorySourceDocumentDto]:
         return self._repository.list_story_source_documents()
 
+    def update_story_production_targets(
+        self, document_id: uuid.UUID, command: StoryProductionTargetsCommand
+    ) -> StorySourceDocumentDto:
+        self.get_story_import(document_id)
+        return self._repository.update_story_production_targets(document_id, command)
+
     def get_story_import(self, document_id: uuid.UUID) -> StorySourceDocumentDto:
         document = self._repository.get_story_source_document(document_id)
         if document is None:
             raise StudioNotFoundError("story source document not found")
         return document
 
+    @generation_request
     def reanalyze_story_import(
         self, document_id: uuid.UUID, command: StoryImportReanalyzeCommand
     ) -> JobDto:
@@ -2299,6 +2448,7 @@ class StudioService:
         self._require_project(project_id)
         return self._repository.planner_snapshot(project_id)
 
+    @generation_request
     def enqueue_planner_message(
         self, project_id: uuid.UUID, command: PlannerMessageCommand
     ) -> JobDto:
@@ -2306,6 +2456,21 @@ class StudioService:
         snapshot = self._repository.planner_snapshot(project_id)
         if command.expected_context_revision != snapshot.context_revision:
             raise StudioConflictError("planner context revision changed")
+        series_context = self.project_series_context(project_id)
+        if series_context is not None:
+            # Older clients keep their entry point, but cannot bypass the series input contract.
+            preview = self.preview_series_episode_story(
+                series_context.series.id, series_context.episode.id, additional_notes=command.text
+            )
+            return self.create_series_episode_story_job(
+                series_context.series.id,
+                series_context.episode.id,
+                SeriesEpisodeStoryGenerationCommand(
+                    expectedInputHash=preview.input_hash,
+                    additionalNotes=command.text,
+                    idempotencyKey=command.idempotency_key,
+                ),
+            )
         self._require_paid_calls_enabled()
         prompt = _planner_prompt(project, command.text)
         output_schema = _planner_output_schema()
@@ -2463,6 +2628,7 @@ class StudioService:
             base_shot_plan_version_id=draft.base_shot_plan_version_id,
         )
 
+    @generation_request
     def create_shot_plan_generation_job(
         self, project_id: uuid.UUID, command: ShotPlanGenerationCommand
     ) -> JobDto:
@@ -2511,7 +2677,10 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v4-vision",
+            "directorPromptRevision": "catflow-director-v5-contract",
+            "outputContractRevision": DIRECTOR_OUTPUT_CONTRACT,
+            "normalizationRevision": DIRECTOR_NORMALIZATION_REVISION,
+            "inputInstruction": "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
             "referenceInputMode": "vision",
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.planning_model,
@@ -2525,6 +2694,7 @@ class StudioService:
                 item
                 for item in self._repository.list_project_jobs(project_id)
                 if item.kind == "plan_shots"
+                and not replacing_unknown(item.id)
                 and item.status
                 in {
                     "queued",
@@ -2697,6 +2867,7 @@ class StudioService:
             "costEstimateStatus": "unmetered_paid",
         }
 
+    @generation_request
     def create_shot_media_job(self, project_id: uuid.UUID, command: ShotMediaCommand) -> JobDto:
         preview = self.preview_shot_media(project_id, command)
         if preview["inputHash"] != command.expected_input_hash:
@@ -2705,6 +2876,7 @@ class StudioService:
             if (
                 job.frozen_input.get("targetShotId") == command.shot_id
                 and job.frozen_input.get("purpose") == command.purpose
+                and not replacing_unknown(job.id)
                 and job.status not in {"succeeded", "failed", "cancelled"}
             ):
                 if (
@@ -2931,7 +3103,7 @@ class StudioService:
     ) -> list[ShotPlanGenerationAttemptDto]:
         self._require_project(project_id)
         plans_by_job = {
-            plan.producing_job_id: plan.id
+            plan.producing_job_id: plan
             for plan in self._repository.list_shot_plans(project_id)
             if plan.producing_job_id is not None
         }
@@ -2949,21 +3121,30 @@ class StudioService:
                 if isinstance(job.provider_result, dict)
                 else None
             )
-            normalization = (
-                normalize_director_result(provider_payload)
-                if provider_payload is not None
-                else None
+            saved_validation = (job.provider_result or {}).get("validation")
+            # GET preserves the original interpretation. New normalization is an
+            # explicit recovery operation, never an incidental effect of reading history.
+            validation = (
+                saved_validation if isinstance(saved_validation, dict)
+                else normalize_director_result(provider_payload, legacy=True).validation_document()
+                if provider_payload is not None else None
             )
-            result_plan_id = plans_by_job.get(job.id)
+            result_plan = plans_by_job.get(job.id)
+            result_plan_id = result_plan.id if result_plan else None
             generation_result = None
-            if normalization is not None:
-                normalized_payload = normalization.normalized_payload or {}
+            if validation is not None:
+                normalized_payload = validation.get("normalizedPayload") or {}
                 treatment_value = normalized_payload.get("directorTreatment")
                 shots_value = normalized_payload.get("shots")
                 generation_result = ShotPlanGenerationResultDto(
-                    disposition=normalization.disposition,
+                    disposition=validation["disposition"],
                     resultShotPlanVersionId=result_plan_id,
-                    recoverable=normalization.recoverable,
+                    recoverable=bool(validation.get("recoverable")),
+                    normalizationRevision=validation.get("normalizationRevision"),
+                    adjustments=validation.get("adjustments", []),
+                    resolution=result_plan.review_status if result_plan else "unresolved",
+                    resultRevision=result_plan.revision if result_plan else None,
+                    resultActive=result_plan.active if result_plan else False,
                     draft=(
                         DirectorPlanDraftDto(
                             targetDurationSeconds=(
@@ -2980,24 +3161,16 @@ class StudioService:
                                 else []
                             ),
                         )
-                        if normalization.normalized_payload is not None
+                        if validation.get("normalizedPayload") is not None
                         else None
                     ),
-                    issues=[
-                        DirectorValidationIssueDto(
-                            code=issue.code,
-                            severity=issue.severity,
-                            path=issue.path,
-                            message=issue.message,
-                            suggestedAction=issue.suggested_action,
-                            providerValue=issue.provider_value,
-                        )
-                        for issue in normalization.issues
-                    ],
+                    issues=validation.get("issues", []),
                 )
             attempts.append(
                 ShotPlanGenerationAttemptDto(
                     jobId=job.id,
+                    execution=job.execution,
+                    revision=job.revision,
                     status=job.status,
                     storyVersionId=uuid.UUID(str(story_value)),
                     baseShotPlanVersionId=(uuid.UUID(str(base_value)) if base_value else None),
@@ -3045,8 +3218,6 @@ class StudioService:
         provider_payload = (
             job.provider_result.get("payload") if isinstance(job.provider_result, dict) else None
         )
-        normalized = normalize_director_result(provider_payload)
-        self.record_shot_plan_generation_validation(job_id, normalized)
         existing = next(
             (
                 plan
@@ -3057,6 +3228,8 @@ class StudioService:
         )
         if existing is not None:
             return existing
+        normalized = normalize_director_result(provider_payload)
+        self.record_shot_plan_generation_validation(job_id, normalized)
         pending_candidate = next(
             (
                 plan
@@ -3102,7 +3275,19 @@ class StudioService:
             for plan in self._repository.list_shot_plans(project_id)
         ):
             raise StudioConflictError("another shot plan candidate is waiting for review")
-        return self.complete_shot_plan_job(job_id, command.payload)
+        plan = self.complete_shot_plan_job(job_id, command.payload)
+        # The version itself is durable if recording this annotation is interrupted.
+        # Never replace the original validation or provider payload with user edits.
+        validation = dict(job.provider_result.get("validation") or normalize_director_result(
+            job.provider_result["payload"], legacy=True
+        ).validation_document())
+        validation["manualResolution"] = {
+            "resultShotPlanVersionId": str(plan.id),
+            "payloadHash": _hash_document(command.payload.model_dump(mode="json", by_alias=True)),
+            "payload": command.payload.model_dump(mode="json", by_alias=True),
+        }
+        self._repository.record_director_validation(job_id, validation)
+        return plan
 
     def register_asset(
         self,
@@ -3641,6 +3826,7 @@ class StudioService:
             }
         )
 
+    @generation_request
     def create_asset_generation_job(
         self, project_id: uuid.UUID, command: AssetGenerationCommand
     ) -> JobDto:
@@ -3702,6 +3888,7 @@ class StudioService:
             )
         )
 
+    @generation_request
     def create_image_diagnosis_job(
         self, project_id: uuid.UUID, command: ImageDiagnosisCommand
     ) -> JobDto:
@@ -3801,6 +3988,7 @@ class StudioService:
             )
         )
 
+    @generation_request
     def create_video_job(self, project_id: uuid.UUID, command: GenerationCommand) -> JobDto:
         preview = self.preview_video_generation(
             project_id,
@@ -3895,6 +4083,7 @@ class StudioService:
             )
         return persisted
 
+    @generation_request
     def create_video_diagnosis_job(
         self, project_id: uuid.UUID, command: VideoDiagnosisCommand
     ) -> JobDto:
@@ -3954,7 +4143,16 @@ class StudioService:
         if not isinstance(total, int) or total < 1:
             raise StudioConflictError("editing source has no valid frame metadata")
         timeline = build_base_timeline(asset_id=asset.id, sha256=asset.sha256, total_frames=total)
-        if command.source_edit_version_id:
+        source_result = None
+        if command.source_result_job_id:
+            if command.source_edit_version_id or not command.expected_source_timeline_hash:
+                raise StudioValidationError("独立草稿需要来源结果及其准确时间线哈希。")
+            source_result, previous, timeline = self._completed_repair_result(
+                project_id, command.source_result_job_id, command.expected_source_timeline_hash
+            )
+            if timeline.root_video_asset_id != asset.id:
+                raise StudioConflictError("来源结果与原始视频不一致。")
+        elif command.source_edit_version_id:
             previous = self._repository.get_edit(command.source_edit_version_id)
             if previous is None or previous.project_id != project_id:
                 raise StudioNotFoundError("source edit not found")
@@ -4009,6 +4207,11 @@ class StudioService:
                     "style_board",
                 }
             ]
+        if source_result:
+            origin = self.get_video_edit_draft(
+                project_id, uuid.UUID(source_result.frozen_input["editDraftId"])
+            )
+            references = origin.references
         confirmed = len({item["role"] for item in references}) == 5
         if not confirmed and command.confirm_current_references:
             selected = self._repository.current_selections(project_id)
@@ -4042,13 +4245,15 @@ class StudioService:
             active=False,
             timelineHash=_hash_document(timeline.model_dump(mode="json", by_alias=True)),
             editDraftId=draft_id,
-            parentEditVersionId=command.source_edit_version_id,
+            parentEditVersionId=previous.id if source_result else command.source_edit_version_id,
             createdAt=now,
         )
         draft = VideoEditDraftDto(
             id=draft_id,
             projectId=project_id,
             sourceVideoAssetId=asset.id,
+            sourceResultJobId=command.source_result_job_id,
+            expectedSourceTimelineHash=command.expected_source_timeline_hash,
             headEditVersionId=edit.id,
             references=references,
             referencesConfirmed=confirmed,
@@ -4168,6 +4373,46 @@ class StudioService:
             if review.audio_checks != expected:
                 raise StudioConflictError("请完成此准确音画版本的声音意图、同步与接缝判断。")
 
+    def _completed_repair_result(
+        self, project_id: uuid.UUID, job_id: uuid.UUID, expected_hash: str | None
+    ) -> tuple[JobDto, EditVersionDto, FrameEditTimeline]:
+        job = self.get_job(job_id)
+        frozen = job.frozen_input
+        if (
+            job.project_id != project_id
+            or job.kind != "render_edit_preview"
+            or job.provider != "local_ffmpeg"
+            or job.status != "succeeded"
+            or not frozen.get("repairId")
+            or not frozen.get("placement")
+            or not expected_hash
+            or frozen.get("timelineHash") != expected_hash
+        ):
+            raise StudioConflictError("来源必须是已完成、哈希一致的局部修改结果。")
+        parent, timeline = self.draft_preview_timeline(
+            project_id,
+            uuid.UUID(frozen["editDraftId"]),
+            VideoDraftPreviewCommand(
+                expectedEditVersionId=frozen["editVersionId"],
+                expectedTimelineHash=frozen["parentTimelineHash"],
+                repairId=frozen["repairId"],
+                placement=frozen["placement"],
+                idempotencyKey="validate-source-result",
+            ),
+        )
+        document = timeline.model_dump(mode="json", by_alias=True)
+        if document != frozen.get("edl") or _hash_document(document) != expected_hash:
+            raise StudioConflictError("来源结果的完整时间线与冻结决定不一致。")
+        if not any(
+            (asset := self.get_asset(asset_id)).producing_job_id == job.id
+            and asset.project_id == project_id
+            and asset.role == "edit_preview"
+            and asset.metadata.get("timelineHash") == expected_hash
+            for asset_id in job.result_asset_ids
+        ):
+            raise StudioConflictError("来源结果缺少对应的完整视频。")
+        return job, parent, timeline
+
     def draft_preview_timeline(
         self,
         project_id: uuid.UUID,
@@ -4199,6 +4444,23 @@ class StudioService:
             or repair.candidate_asset_id is None
         ):
             raise StudioConflictError("修改候选与试装父版本不一致。")
+        if repair.preview.source_result_job_id:
+            source_job, source_parent, timeline = self._completed_repair_result(
+                project_id,
+                repair.preview.source_result_job_id,
+                repair.preview.expected_source_timeline_hash,
+            )
+            inherited_start = (
+                draft.source_result_job_id == source_job.id
+                and edit.timeline_hash == repair.preview.expected_source_timeline_hash
+            )
+            same_base = source_parent.id == edit.id and source_job.frozen_input[
+                "editDraftId"
+            ] == str(draft.id)
+            if not (inherited_start or same_base):
+                raise StudioConflictError("候选链的最终应用基底不一致。")
+            if timeline != repair.preview.input_edl:
+                raise StudioConflictError("候选链的模型输入时间线不一致。")
         candidate = self.get_asset(repair.candidate_asset_id)
         take = (
             command.placement.candidate_source_range
@@ -4254,6 +4516,7 @@ class StudioService:
     ) -> JobDto:
         edit, timeline = self.draft_preview_timeline(project_id, draft_id, command)
         frozen = {
+            "resultRevision": 3,
             "editDraftId": str(draft_id),
             "editVersionId": str(edit.id),
             "timelineHash": _hash_document(timeline.model_dump(mode="json", by_alias=True)),
@@ -4265,6 +4528,22 @@ class StudioService:
             if command.placement
             else None,
         }
+        if command.repair_id:
+            repair = self.get_video_repair(command.repair_id)
+            frozen["issueRange"] = repair.issue_range.model_dump(mode="json", by_alias=True)
+            frozen["resultRange"] = (repair.preview.result_range or repair.issue_range).model_dump(
+                mode="json", by_alias=True
+            )
+            frozen["sourceResultJobId"] = (
+                str(repair.preview.source_result_job_id)
+                if repair.preview.source_result_job_id
+                else None
+            )
+            frozen["originalBaseEdl"] = frozen["baseEdl"]
+            frozen["baseEdl"] = (repair.preview.input_edl or edit.edl).model_dump(
+                mode="json", by_alias=True
+            )
+            frozen["inputTimelineHash"] = _hash_document(frozen["baseEdl"])
         now = datetime.now(UTC)
         return self._create_job(
             JobDto(
@@ -4282,6 +4561,73 @@ class StudioService:
                 createdAt=now,
                 updatedAt=now,
             )
+        )
+
+    def prepare_video_repair_result(
+        self, project_id: uuid.UUID, draft_id: uuid.UUID, command: VideoRepairResultCommand
+    ) -> JobDto:
+        """Freeze old decisions and deduplicate concurrent requests for local result media."""
+        repair = self.get_video_repair(command.repair_id)
+        if repair.project_id != project_id or repair.preview.edit_draft_id != draft_id:
+            raise StudioConflictError("修改结果不属于此草稿。")
+        if repair.candidate_asset_id is None or repair.base_edit_version_id is None:
+            raise StudioConflictError("修改素材尚未返回。")
+        placement = CandidatePlacement(
+            candidateSourceRange=repair.candidate_core_range,
+            audioPolicy="use_candidate"
+            if repair.preview.audio_mode == "generate_candidate"
+            else "preserve_current",
+        )
+        if command.previous_preview_job_id:
+            previous = self._repository.get_job(command.previous_preview_job_id)
+            if (
+                previous is None
+                or previous.project_id != project_id
+                or previous.kind != "render_edit_preview"
+                or previous.frozen_input.get("repairId") != str(repair.id)
+                or previous.frozen_input.get("editDraftId") != str(draft_id)
+            ):
+                raise StudioConflictError("历史预览与当前候选不一致。")
+            if previous.frozen_input.get("placement"):
+                placement = CandidatePlacement.model_validate(previous.frozen_input["placement"])
+        if command.preserve_original_audio:
+            candidate = self.get_asset(repair.candidate_asset_id)
+            if candidate.metadata.get("hasAudio"):
+                raise StudioConflictError("保留原声恢复仅用于未返回声音的候选。")
+            placement = placement.model_copy(
+                update={"audio_policy": "preserve_current", "fade_in_ms": 0, "fade_out_ms": 0}
+            )
+        digest = _hash_document(
+            {
+                "repair": str(repair.id),
+                "placement": placement.model_dump(mode="json", by_alias=True),
+                "revision": 3,
+            }
+        )
+        key = f"result:{digest}"
+        if command.retry_after_job_id:
+            failed = self._repository.get_job(command.retry_after_job_id)
+            if (
+                failed is None
+                or failed.project_id != project_id
+                or failed.provider != "local_ffmpeg"
+                or failed.status not in {"failed", "cancelled"}
+                or failed.frozen_input.get("repairId") != str(repair.id)
+                or failed.frozen_input.get("placement")
+                != placement.model_dump(mode="json", by_alias=True)
+            ):
+                raise StudioConflictError("只能重试此结果已失败的本地处理。")
+            key = f"result:{_hash_document({'input': digest, 'retry': str(failed.id)})}"
+        return self.create_draft_preview(
+            project_id,
+            draft_id,
+            VideoDraftPreviewCommand(
+                expectedEditVersionId=repair.base_edit_version_id,
+                expectedTimelineHash=repair.base_timeline_hash,
+                repairId=repair.id,
+                placement=placement,
+                idempotencyKey=key,
+            ),
         )
 
     def create_edit_preview(self, project_id: uuid.UUID, command: ExportCommand) -> JobDto:
@@ -4399,6 +4745,12 @@ class StudioService:
                 or timeline.audio != expected_timeline.audio
             ):
                 raise StudioConflictError("草稿的原片、长度和音轨不能被静默替换。")
+        inherited_ranges = []
+        cursor = 0
+        for inherited in parent.edl.video_segments:
+            inherited_ranges.append((cursor, inherited))
+            cursor += inherited.duration_frames
+        segment_start = 0
         for segment in timeline.video_segments:
             asset = self.get_asset(segment.asset_id)
             frames = asset.metadata.get("durationFrames")
@@ -4416,11 +4768,24 @@ class StudioService:
                 repair = self.get_video_repair(segment.repair_id)
                 if (
                     repair.project_id != project_id
-                    or repair.preview.edit_draft_id != draft_id
+                    or (
+                        repair.preview.edit_draft_id != draft_id
+                        and not any(
+                            inherited.asset_id == segment.asset_id
+                            and inherited.repair_id == segment.repair_id
+                            and start <= segment_start
+                            and segment_start + segment.duration_frames
+                            <= start + inherited.duration_frames
+                            and segment.source_in_frame - segment_start
+                            == inherited.source_in_frame - start
+                            for start, inherited in inherited_ranges
+                        )
+                    )
                     or repair.candidate_asset_id != asset.id
                     or repair.status not in {"candidate_ready", "applied_to_draft"}
                 ):
                     raise StudioConflictError("草稿不能引用其他修改任务的候选。")
+            segment_start += segment.duration_frames
         edit = EditVersionDto(
             id=edit_id,
             projectId=project_id,
@@ -4457,6 +4822,44 @@ class StudioService:
             expected_edit_version_id=command.base_edit_version_id,
             edit_draft_id=command.edit_draft_id,
         )
+        apply_timeline = timeline
+        result_range = command.issue_range
+        if command.source_result_job_id:
+            source_job, source_parent, timeline = self._completed_repair_result(
+                project_id, command.source_result_job_id, command.expected_source_timeline_hash
+            )
+            source_draft = (
+                self.get_video_edit_draft(project_id, command.edit_draft_id)
+                if command.edit_draft_id
+                else None
+            )
+            inherited_start = (
+                source_draft
+                and source_draft.source_result_job_id == source_job.id
+                and timeline_hash == command.expected_source_timeline_hash
+            )
+            same_base = (
+                active_edit
+                and source_parent.id == active_edit.id
+                and source_job.frozen_input["editDraftId"] == str(command.edit_draft_id)
+            )
+            if not (inherited_start or same_base):
+                raise StudioConflictError(
+                    "此结果的父版本已变化，请从此结果创建独立编辑草稿并继续。"
+                )
+            result_range = FrameRange.model_validate(
+                source_job.frozen_input.get("resultRange") or source_job.frozen_input["issueRange"]
+            )
+            if not (
+                result_range.start_frame
+                <= command.issue_range.start_frame
+                < command.issue_range.end_frame
+                <= result_range.end_frame
+            ):
+                raise StudioValidationError("继续修改的选区必须位于来源候选的有效范围内。")
+        elif command.expected_source_timeline_hash:
+            raise StudioValidationError("来源时间线哈希必须关联来源结果。")
+        input_timeline_hash = _hash_document(timeline.model_dump(mode="json", by_alias=True))
         frame_rate = timeline.frame_rate
         if frame_rate.numerator != 24 or frame_rate.denominator != 1:
             raise StudioConflictError("video repairs require a 24 fps editing timeline")
@@ -4510,10 +4913,10 @@ class StudioService:
         if missing and command.generation_mode == "edit_existing":
             raise StudioConflictError(f"missing segment repair references: {', '.join(missing)}")
         anchor_in_sha = _hash_document(
-            {"sourceSha256": base_video.sha256, "frame": command.issue_range.start_frame}
+            {"timelineHash": input_timeline_hash, "frame": command.issue_range.start_frame}
         )
         anchor_out_sha = _hash_document(
-            {"sourceSha256": base_video.sha256, "frame": command.issue_range.end_frame - 1}
+            {"timelineHash": input_timeline_hash, "frame": command.issue_range.end_frame - 1}
         )
         image_references = [
             SegmentRepairImageReferenceDto(
@@ -4550,7 +4953,7 @@ class StudioService:
                 SegmentRepairImageReferenceDto(
                     role="first_frame",
                     sha256=_hash_document(
-                        {"timelineHash": timeline_hash, "frame": command.anchor_start_frame}
+                        {"timelineHash": input_timeline_hash, "frame": command.anchor_start_frame}
                     ),
                     frameNumber=command.anchor_start_frame,
                     derived=True,
@@ -4561,7 +4964,7 @@ class StudioService:
                     SegmentRepairImageReferenceDto(
                         role="last_frame",
                         sha256=_hash_document(
-                            {"timelineHash": timeline_hash, "frame": command.anchor_end_frame}
+                            {"timelineHash": input_timeline_hash, "frame": command.anchor_end_frame}
                         ),
                         frameNumber=command.anchor_end_frame,
                         derived=True,
@@ -4581,7 +4984,9 @@ class StudioService:
             desired_end_state=command.desired_end_state,
         )
         compiler_revision = (
-            "segment-edit-v4"
+            "segment-edit-v5"
+            if command.reference_preparation_job_id
+            else "segment-edit-v4"
             if command.audio_mode is not None or command.generation_mode == "from_frame"
             else "segment-edit-v3"
         )
@@ -4611,8 +5016,25 @@ class StudioService:
                 )
             )
         elif command.audio_mode == "preserve_current":
-            prompt += "\n本次仅生成画面，试装时沿用父草稿完整声音。"
+            prompt += "\n本次仅生成画面，接回时沿用本次修改起点的声音。"
+        if command.reference_preparation_job_id and command.generation_mode == "edit_existing":
+            prompt += (
+                "\n【参考与输出时长】\n"
+                f"实际参考为{window.generation_range.duration_frames / 24:.3f}秒，"
+                f"本次输出{window.provider_duration_seconds}秒。上述修改时间使用片段内坐标，"
+                "不要通过变速拉伸参考中的动作；额外输出时间自然延续，不以复制静帧填充。"
+            )
         mode_input = {
+            "sourceResultJobId": str(command.source_result_job_id)
+            if command.source_result_job_id
+            else None,
+            "expectedSourceTimelineHash": command.expected_source_timeline_hash,
+            "referencePreparationJobId": str(command.reference_preparation_job_id)
+            if command.reference_preparation_job_id
+            else None,
+            "inputEdl": timeline.model_dump(mode="json", by_alias=True),
+            "inputTimelineHash": input_timeline_hash,
+            "resultRange": result_range.model_dump(mode="json", by_alias=True),
             "generationMode": command.generation_mode,
             "audioMode": command.audio_mode,
             "generateAudio": command.audio_mode == "generate_candidate",
@@ -4623,7 +5045,7 @@ class StudioService:
         document = {
             **mode_input,
             "editDraftId": str(command.edit_draft_id) if command.edit_draft_id else None,
-            "baseEdl": timeline.model_dump(mode="json", by_alias=True),
+            "baseEdl": apply_timeline.model_dump(mode="json", by_alias=True),
             "endStatePolicy": command.end_state_policy,
             "desiredEndState": command.desired_end_state,
             "promptCompilerRevision": compiler_revision,
@@ -4655,7 +5077,7 @@ class StudioService:
         preview = SegmentRepairPreviewDto(
             **{key: value for key, value in mode_input.items() if key != "generateAudio"},
             editDraftId=command.edit_draft_id,
-            baseEdl=timeline,
+            baseEdl=apply_timeline,
             endStatePolicy=command.end_state_policy,
             desiredEndState=command.desired_end_state,
             projectId=project_id,
@@ -4679,6 +5101,62 @@ class StudioService:
             costEstimateStatus="unmetered_paid",
             inputHash=_hash_document(document),
         )
+        if command.reference_preparation_job_id:
+            preparation = self.get_job(command.reference_preparation_job_id)
+            unprepared = command.model_copy(update={"reference_preparation_job_id": None})
+            expected_preview = self.preview_video_repair(project_id, unprepared)
+            if (
+                preparation.project_id != project_id
+                or preparation.provider != "local_ffmpeg"
+                or preparation.kind != "extract_continuity_frames"
+                or preparation.status != "succeeded"
+                or preparation.frozen_input.get("purpose") != "segment_reference"
+                or preparation.frozen_input.get("previewHash") != expected_preview.input_hash
+            ):
+                raise StudioConflictError("实际参考尚未完成或不再对应当前修改输入，请重新准备。")
+            prepared = {
+                self.get_asset(asset_id).role: self.get_asset(asset_id)
+                for asset_id in preparation.result_asset_ids
+            }
+            actual_images = []
+            for ref in preview.image_references:
+                if ref.derived:
+                    asset = prepared.get(
+                        "repair_anchor_in"
+                        if ref.role in {"anchor_in", "first_frame"}
+                        else "repair_anchor_out"
+                    )
+                    if asset is None or asset.producing_job_id != preparation.id:
+                        raise StudioConflictError("实际参考图片缺失。")
+                    ref = ref.model_copy(update={"asset_id": asset.id, "sha256": asset.sha256})
+                actual_images.append(ref)
+            actual_video = preview.video_reference
+            if actual_video:
+                context = prepared.get("repair_context")
+                if (
+                    context is None
+                    or context.producing_job_id != preparation.id
+                    or context.metadata.get("durationFrames")
+                    != window.generation_range.duration_frames
+                    or context.metadata.get("paddedTailFrames") != 0
+                ):
+                    raise StudioConflictError("实际参考视频与冻结范围不一致。")
+                actual_video = actual_video.model_copy(
+                    update={"asset_id": context.id, "sha256": context.sha256}
+                )
+            document["imageReferences"] = [
+                item.model_dump(mode="json", by_alias=True) for item in actual_images
+            ]
+            document["videoReference"] = (
+                actual_video.model_dump(mode="json", by_alias=True) if actual_video else None
+            )
+            preview = preview.model_copy(
+                update={
+                    "image_references": actual_images,
+                    "video_reference": actual_video,
+                    "input_hash": _hash_document(document),
+                }
+            )
         return preview.model_copy(
             update={
                 "input_snapshot": GenerationInputSnapshotDto.model_validate(
@@ -4689,25 +5167,63 @@ class StudioService:
             }
         )
 
+    def prepare_segment_references(
+        self, project_id: uuid.UUID, command: SegmentReferencePreparationCommand
+    ) -> JobDto:
+        clean = SegmentRepairPreviewCommand.model_validate(
+            command.model_dump(exclude={"retry_after_job_id", "reference_preparation_job_id"})
+        )
+        preview = self.preview_video_repair(project_id, clean)
+        frozen = {
+            **preview.model_dump(mode="json", by_alias=True, exclude={"input_snapshot"}),
+            "purpose": "segment_reference",
+            "referenceRevision": 2,
+            "previewHash": preview.input_hash,
+            "command": clean.model_dump(mode="json", by_alias=True),
+        }
+        key = "segment-reference:" + preview.input_hash
+        if command.retry_after_job_id:
+            failed = self.get_job(command.retry_after_job_id)
+            if (
+                failed.project_id != project_id
+                or failed.provider != "local_ffmpeg"
+                or failed.status not in {"failed", "cancelled"}
+                or failed.frozen_input.get("previewHash") != preview.input_hash
+            ):
+                raise StudioConflictError("只能重试当前输入已失败的本地参考准备。")
+            key = "reference-retry:" + _hash_document(
+                {"hash": preview.input_hash, "failed": str(failed.id)}
+            )
+        now = datetime.now(UTC)
+        return self._create_job(
+            JobDto(
+                id=uuid.uuid4(),
+                projectId=project_id,
+                kind="extract_continuity_frames",
+                status="queued",
+                inputHash=_hash_document(frozen),
+                idempotencyKey=key,
+                provider="local_ffmpeg",
+                model="ffmpeg-segment-reference-v2",
+                expectedCostMicros=0,
+                frozenInput=frozen,
+                resultAssetIds=[],
+                createdAt=now,
+                updatedAt=now,
+            )
+        )
+
+    @generation_request
     def create_video_repair_job(
         self, project_id: uuid.UUID, command: SegmentRepairCreateCommand
     ) -> JobDto:
         self._require_project(project_id)
+        if not command.reference_preparation_job_id:
+            raise StudioConflictError("请先准备并检查实际参考，再提交付费生成。")
         preview = self.preview_video_repair(
             project_id,
-            SegmentRepairPreviewCommand(
-                generationMode=command.generation_mode,
-                audioMode=command.audio_mode,
-                soundDescription=command.sound_description,
-                anchorStartFrame=command.anchor_start_frame,
-                anchorEndFrame=command.anchor_end_frame,
-                baseVideoAssetId=command.base_video_asset_id,
-                baseEditVersionId=command.base_edit_version_id,
-                issueRange=command.issue_range,
-                instruction=command.instruction,
-                editDraftId=command.edit_draft_id,
-                endStatePolicy=command.end_state_policy,
-                desiredEndState=command.desired_end_state,
+            SegmentRepairPreviewCommand.model_validate(
+                command.model_dump(exclude={"expected_input_hash", "idempotency_key"})
             ),
         )
         if preview.input_hash != command.expected_input_hash:
@@ -4754,6 +5270,15 @@ class StudioService:
                 inputSnapshot=input_snapshot,
                 frozenInput={
                     "editDraftId": str(preview.edit_draft_id) if preview.edit_draft_id else None,
+                    "autoPrepareResult": True,
+                    "referencePreparationJobId": str(preview.reference_preparation_job_id),
+                    "sourceResultJobId": str(preview.source_result_job_id)
+                    if preview.source_result_job_id
+                    else None,
+                    "expectedSourceTimelineHash": preview.expected_source_timeline_hash,
+                    "inputEdl": preview.input_edl.model_dump(mode="json", by_alias=True),
+                    "inputTimelineHash": preview.input_timeline_hash,
+                    "resultRange": preview.result_range.model_dump(mode="json", by_alias=True),
                     "baseEdl": preview.base_edl.model_dump(mode="json", by_alias=True),
                     "endStatePolicy": preview.end_state_policy,
                     "desiredEndState": preview.desired_end_state,
@@ -4790,7 +5315,9 @@ class StudioService:
                     if preview.video_reference
                     else None,
                     "referenceAssetIds": [
-                        str(item.asset_id) for item in image_references if item.asset_id is not None
+                        str(item.asset_id)
+                        for item in image_references
+                        if item.asset_id is not None and not item.derived
                     ],
                     "referenceRoles": [item.role for item in image_references],
                     "capabilityRevision": preview.capability_revision,
@@ -4823,9 +5350,22 @@ class StudioService:
         )
         if job is None or job.video_repair_id != repair_id:
             raise StudioConflictError("repair candidate is not produced by this repair job")
-        return self._repository.set_video_repair_status(
+        ready = self._repository.set_video_repair_status(
             repair_id, status="candidate_ready", candidate_asset_id=candidate_asset_id
         )
+        if job.frozen_input.get("autoPrepareResult") and ready.preview.edit_draft_id:
+            try:
+                self.prepare_video_repair_result(
+                    ready.project_id,
+                    ready.preview.edit_draft_id,
+                    VideoRepairResultCommand(repairId=ready.id),
+                )
+            except (StudioConflictError, StudioValidationError) as exc:
+                # Media remains available; the viewer displays the same validation failure.
+                logging.getLogger(__name__).warning(
+                    "Repair %s local result needs input: %s", repair_id, exc
+                )
+        return ready
 
     def list_video_repairs(self, project_id: uuid.UUID) -> list[VideoRepairDto]:
         self._require_project(project_id)
@@ -4934,7 +5474,7 @@ class StudioService:
         job = self._repository.get_job(job_id)
         if job is None:
             raise StudioNotFoundError("job not found")
-        return job
+        return job.execution_summary()
 
     def get_job_usage(self, job_id: uuid.UUID) -> JobUsageDto:
         return _job_usage(self.get_job(job_id))
@@ -4955,8 +5495,11 @@ class StudioService:
             jobs=usages,
             totals=totals,
             calculatedCostMicros=sum(item.calculated_cost_micros or 0 for item in usages),
-            unpricedJobCount=sum(item.billing_status == "unpriced" for item in usages),
+            unpricedJobCount=sum(item.billing_status in {"unpriced", "pending"} for item in usages),
         )
+
+    def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
+        return self._repository.recover_job(job_id, command)
 
     def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
         return self._repository.resume_job_storage(job_id)
@@ -4964,8 +5507,12 @@ class StudioService:
     def cancel_job(self, job_id: uuid.UUID) -> JobDto:
         return self._repository.cancel_job(job_id)
 
-    def list_job_events(self, *, after_event_id: int) -> list[JobEventDto]:
-        return self._repository.list_job_events(after_event_id=after_event_id)
+    def list_job_events(
+        self, *, after_event_id: int, job_id: uuid.UUID | None = None, limit: int = 100
+    ) -> list[JobEventDto]:
+        return self._repository.list_job_events(
+            after_event_id=after_event_id, job_id=job_id, limit=limit
+        )
 
     def create_edit(self, project_id: uuid.UUID, command: EditCreateCommand) -> EditVersionDto:
         self._require_project(project_id)
@@ -5153,6 +5700,24 @@ class StudioService:
         return self._repository.create_job(job)
 
     def _with_pricing_snapshot(self, job: JobDto) -> JobDto:
+        if job.provider == "ark" and "executionContract" not in job.frozen_input:
+            contract = execution_contract(job.kind)
+            contract["apiBaseUrl"] = self._provider_runtime.api_base_url.rstrip("/")
+            contract["model"] = job.model
+            if contract["protocol"] == "responses":
+                contract["retentionSeconds"] = self._provider_runtime.response_retention_seconds
+            job = job.model_copy(
+                update={
+                    "frozen_input": {
+                        **job.frozen_input,
+                        "executionContract": contract,
+                        "executionInputHash": _hash_document(
+                            {"inputHash": job.input_hash, "executionContract": contract}
+                        ),
+                    },
+                    "execution_facts": {"contractVersion": 2, **contract, "stage": "prepare"},
+                }
+            )
         if job.provider is not None and job.model is not None and job.pricing_snapshot is None:
             now = datetime.now(UTC)
             card = next(
@@ -5177,6 +5742,46 @@ class StudioService:
                             "rates": [
                                 rate.model_dump(mode="json", by_alias=True) for rate in card.rates
                             ],
+                        },
+                    }
+                )
+        command = generation_command.get()
+        if job.provider == "ark" and command is not None:
+            if command.prepare_only:
+                raise GenerationPrepared(
+                    {
+                        "preparedOnly": True,
+                        "kind": job.kind,
+                        "provider": job.provider,
+                        "model": job.model,
+                        "inputHash": job.input_hash,
+                        "executionInputHash": job.frozen_input["executionInputHash"],
+                        "input": public_result(job.frozen_input),
+                        "expectedCostMicros": job.expected_cost_micros,
+                        "replacesJobId": str(command.replacement_job_id)
+                        if command.replacement_job_id
+                        else None,
+                    }
+                )
+            if command.replacement is not None:
+                consent = command.replacement
+                old = self.get_job(consent.job_id)
+                if (
+                    old.status != "submission_unknown"
+                    or "prepare_replacement" not in old.execution.available_actions
+                ):
+                    raise StudioConflictError("旧任务状态已变化，请先核实原任务。")
+                if consent.input_hash != job.frozen_input["executionInputHash"]:
+                    raise StudioConflictError("生成输入或执行配置已变化，请重新准备。")
+                job = job.model_copy(
+                    update={
+                        "supersedes_job_id": old.id,
+                        "frozen_input": {
+                            **job.frozen_input,
+                            "replacementConsent": {
+                                **consent.model_dump(mode="json", by_alias=True),
+                                "submissionKey": job.idempotency_key,
+                            },
                         },
                     }
                 )
@@ -5217,6 +5822,8 @@ def _job_usage(job: JobDto) -> JobUsageDto:
 
 def _story_import_job(job: JobDto) -> StoryImportAnalysisJobDto:
     return StoryImportAnalysisJobDto(
+        execution=job.execution,
+        revision=job.revision,
         id=job.id,
         status=job.status,
         provider=job.provider,
@@ -5537,6 +6144,17 @@ def _segment_generation_input_snapshot(
         prompt=preview.prompt,
         negativePrompt=preview.negative_prompt,
         references=references,
+        videoReferences=[
+            {
+                "assetId": preview.video_reference.asset_id,
+                "role": "reference_video",
+                "sha256": preview.video_reference.sha256,
+                "durationSeconds": preview.generation_range.duration_frames / 24,
+                "included": True,
+            }
+        ]
+        if preview.reference_preparation_job_id and preview.video_reference
+        else [],
         video={
             "durationSeconds": preview.provider_duration_seconds,
             "generateAudio": preview.audio_mode == "generate_candidate",
@@ -5551,6 +6169,11 @@ def _segment_generation_input_snapshot(
             "editDraftId": preview.edit_draft_id,
         },
         segmentEdit={
+            "sourceResultJobId": preview.source_result_job_id,
+            "referencePreparationJobId": preview.reference_preparation_job_id,
+            "inputEdl": preview.input_edl,
+            "inputTimelineHash": preview.input_timeline_hash,
+            "resultRange": preview.result_range,
             "generationMode": preview.generation_mode,
             "audioMode": preview.audio_mode,
             "soundDescription": preview.sound_description,
@@ -5564,7 +6187,9 @@ def _segment_generation_input_snapshot(
             "generationRange": preview.generation_range,
             "candidateCoreRange": preview.candidate_core_range,
         },
-        promptCompilerRevision="segment-edit-v4"
+        promptCompilerRevision="segment-edit-v5"
+        if preview.reference_preparation_job_id
+        else "segment-edit-v4"
         if preview.audio_mode is not None or preview.generation_mode == "from_frame"
         else "segment-edit-v3"
         if preview.base_edl is not None

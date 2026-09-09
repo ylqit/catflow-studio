@@ -25,6 +25,13 @@ from catflow.application.continuity import (
     SeriesAssetBindingDto,
     SeriesAssetBindingsPatchCommand,
 )
+from catflow.application.job_execution import (
+    GenerationPrepared,
+    JobRecoveryCommand,
+    ReplacementGenerationCommand,
+    public_result,
+)
+from catflow.application.job_replacement import replace_unknown_job
 from catflow.application.project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -89,6 +96,7 @@ from catflow.application.service import (
     ProjectUsageSummaryDto,
     RateCardRevisionCreateCommand,
     RateCardRevisionDto,
+    SegmentReferencePreparationCommand,
     SegmentRepairApproveCommand,
     SegmentRepairCreateCommand,
     SegmentRepairPreviewCommand,
@@ -114,6 +122,7 @@ from catflow.application.service import (
     VideoEditDraftCreateCommand,
     VideoEditDraftDto,
     VideoRepairDto,
+    VideoRepairResultCommand,
     VideoReviewCreateCommand,
     VideoReviewDto,
 )
@@ -133,6 +142,7 @@ from catflow.application.story_imports import (
     StoryImportPreviewCommand,
     StoryImportPreviewDto,
     StoryImportReanalyzeCommand,
+    StoryProductionTargetsCommand,
     StorySourceDocumentDto,
 )
 from catflow.domain.contract import ContractModel
@@ -789,6 +799,12 @@ def create_app(
     def story_imports() -> list[StorySourceDocumentDto]:
         return service.list_story_imports()
 
+    @app.patch("/api/v1/story-imports/{document_id}/production-targets")
+    def update_story_production_targets(
+        document_id: uuid.UUID, command: StoryProductionTargetsCommand
+    ) -> StorySourceDocumentDto:
+        return service.update_story_production_targets(document_id, command)
+
     @app.get("/api/v1/story-imports/{document_id}", response_model=StorySourceDocumentDto)
     def get_story_import(document_id: uuid.UUID) -> StorySourceDocumentDto:
         return service.get_story_import(document_id)
@@ -1113,6 +1129,17 @@ def create_app(
         return service.preview_video_repair(project_id, command)
 
     @app.post(
+        "/api/v1/projects/{project_id}/video-edits/references",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def prepare_edit_references(
+        project_id: uuid.UUID, command: SegmentReferencePreparationCommand
+    ) -> JobDto:
+        return service.prepare_segment_references(project_id, command)
+
+    @app.post(
         "/api/v1/projects/{project_id}/video-edits",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
@@ -1213,6 +1240,17 @@ def create_app(
         return service.create_draft_preview(project_id, draft_id, command)
 
     @app.post(
+        "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/results",
+        response_model=JobDto,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def prepare_repair_result(
+        project_id: uuid.UUID, draft_id: uuid.UUID, command: VideoRepairResultCommand
+    ) -> JobDto:
+        return service.prepare_video_repair_result(project_id, draft_id, command)
+
+    @app.post(
         "/api/v1/projects/{project_id}/edit-previews",
         response_model=JobDto,
         status_code=202,
@@ -1238,6 +1276,59 @@ def create_app(
     @app.get("/api/v1/jobs/{job_id}", response_model=JobDto)
     def job(job_id: uuid.UUID) -> JobDto:
         return service.get_job(job_id)
+
+    @app.exception_handler(GenerationPrepared)
+    async def generation_prepared(_request: Request, exc: GenerationPrepared) -> JSONResponse:
+        # Input preparation never persists a Job or dispatches a provider request.
+        return JSONResponse(exc.document)
+
+    @app.get("/api/v1/jobs/{job_id}/events")
+    def job_events(
+        job_id: uuid.UUID, after: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)
+    ):
+        service.get_job(job_id)
+        items = service.list_job_events(after_event_id=after, job_id=job_id, limit=limit)
+        return {
+            "items": items,
+            "nextCursor": items[-1].id if items else after,
+            "hasMore": len(items) == limit,
+        }
+
+    @app.post("/api/v1/jobs/{job_id}/replacement-preview")
+    def replacement_preview(job_id: uuid.UUID):
+        return replace_unknown_job(service, job_id)
+
+    @app.post(
+        "/api/v1/jobs/{job_id}/replacement",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def replacement_create(job_id: uuid.UUID, command: ReplacementGenerationCommand):
+        return replace_unknown_job(service, job_id, command)
+
+    @app.get("/api/v1/jobs/{job_id}/result")
+    def job_result(job_id: uuid.UUID):
+        job = service.get_job(job_id)
+        return {
+            "jobId": str(job.id),
+            "revision": job.revision,
+            "state": job.execution.result_state,
+            "result": public_result(job.provider_result),
+            "error": public_result(job.error),
+            "assetIds": job.result_asset_ids,
+            "historical": job.execution.historical_result,
+            "message": "尚未收到正文。" if job.execution.result_state == "missing" else None,
+        }
+
+    @app.post(
+        "/api/v1/jobs/{job_id}/recovery",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def recover_job(job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
+        return service.recover_job(job_id, command)
 
     @app.get("/api/v1/jobs/{job_id}/usage", response_model=JobUsageDto)
     def job_usage(job_id: uuid.UUID) -> JobUsageDto:
@@ -1267,7 +1358,10 @@ def create_app(
     @app.get("/api/v1/events")
     async def events(request: Request, afterEventId: int = 0) -> StreamingResponse:  # noqa: N803
         async def stream():  # type: ignore[no-untyped-def]
-            cursor = afterEventId
+            try:
+                cursor = max(afterEventId, int(request.headers.get("last-event-id", "0")))
+            except ValueError:
+                cursor = afterEventId
             yield "event: connected\ndata: {}\n\n"
             while not await request.is_disconnected():
                 batch = await asyncio.to_thread(service.list_job_events, after_event_id=cursor)
@@ -1276,7 +1370,12 @@ def create_app(
                         cursor = item.id
                         payload = {
                             "jobId": str(item.job_id),
-                            "projectId": str(item.project_id),
+                            "projectId": str(item.project_id) if item.project_id else None,
+                            "seriesId": str(item.series_id) if item.series_id else None,
+                            "storySourceDocumentId": str(item.story_source_document_id)
+                            if item.story_source_document_id
+                            else None,
+                            "revision": item.payload.get("revision", 0),
                             "eventType": item.event_type,
                             "payload": item.payload,
                         }

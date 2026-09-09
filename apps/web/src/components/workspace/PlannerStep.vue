@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import JobStatusCard from "../JobStatusCard.vue";
+import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
-import type { LifeStoryProposalDto, PlannerSnapshotDto } from "../../api/types";
+import type { LifeStoryProposalDto, PlannerSnapshotDto, ProjectSeriesContextDto, SeriesSourceBeatDto, SeriesEpisodeStoryPreviewDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
 
-const props = defineProps<{ projectId: string; runtime?: PaidModelRuntime | null }>();
+const props = defineProps<{ projectId: string; runtime?: PaidModelRuntime | null; seriesContext?: ProjectSeriesContextDto | null }>();
 const emit = defineEmits<{ changed: [] }>();
 const snapshot = ref<PlannerSnapshotDto | null>(null);
 const message = ref("");
@@ -14,6 +16,34 @@ const sending = ref(false);
 const adopting = ref<string | null>(null);
 const error = ref("");
 const errorDetail = ref("");
+const episodePreview = ref<SeriesEpisodeStoryPreviewDto | null>(null);
+const episodePreviewLoading = ref(false);
+const editingStory = ref(false);
+const sourceBeats = ref<SeriesSourceBeatDto[]>([]);
+const sourceError = ref('');
+async function loadSourceBeats() {
+  if (!props.seriesContext) return;
+  sourceError.value = '';
+  try { sourceBeats.value = await api.seriesSourceBeats(props.seriesContext.series.id); }
+  catch (reason) { sourceError.value = errorPresentation(reason, '本集来源暂未加载').message; }
+}
+const adopted = computed(() => snapshot.value?.proposals.find(item => item.status === 'adopted'));
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
+let previewSequence = 0;
+async function refreshEpisodePreview() {
+  const context = props.seriesContext; if (!context) return;
+  const sequence = ++previewSequence; episodePreviewLoading.value = true;
+  try {
+    const value = await api.previewSeriesEpisodeStory(context.series.id, context.episode.id, message.value.trim() || null);
+    if (sequence === previewSequence) episodePreview.value = value;
+  } catch (reason) { if (sequence === previewSequence) { episodePreview.value = null; error.value = errorPresentation(reason, '本集生成内容暂时无法准备').message; } }
+  finally { if (sequence === previewSequence) episodePreviewLoading.value = false; }
+}
+watch(message, () => { ++previewSequence; episodePreviewLoading.value = !!props.seriesContext;
+  if (!props.seriesContext) return;
+  episodePreview.value = null; clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => void refreshEpisodePreview(), 300);
+});
 
 const latestJobPresentation = computed(() => snapshot.value?.latestJob
   ? jobPresentation(snapshot.value.latestJob.status)
@@ -31,20 +61,19 @@ function proposalStatus(status: "draft" | "adopted" | "outdated") {
   return { draft: "待采用", adopted: "已采用", outdated: "已过期" }[status];
 }
 
-function compactTitle(title: string) {
-  return title.length > 16 ? `${title.slice(0, 14)}…` : title;
-}
-
 function isRedundantSummary(proposal: LifeStoryProposalDto) {
   const normalized = proposal.summary.replace(/[“”"'，。；：、\s]/g, "");
   const title = proposal.title.replace(/[“”"'，。；：、\s]/g, "");
   return normalized === title || (normalized.includes(title) && /^(围绕|通过|以)/.test(proposal.summary));
 }
 
+let snapshotRequest = 0;
 async function load() {
+  const sequence = ++snapshotRequest;
   error.value = "";
   try {
-    snapshot.value = await api.planner(props.projectId);
+    const current = await api.planner(props.projectId);
+    if (sequence === snapshotRequest) snapshot.value = current;
   } catch (reason) {
     const failure = errorPresentation(reason, "故事灵感暂时无法读取");
     error.value = failure.message;
@@ -53,14 +82,19 @@ async function load() {
 }
 
 async function sendMessage() {
-  if (!snapshot.value || !message.value.trim() || paidBlockedReason.value || latestJobRunning.value || sending.value) return;
+  if (!snapshot.value || (!props.seriesContext && !message.value.trim()) || (props.seriesContext && (!episodePreview.value || episodePreviewLoading.value)) || paidBlockedReason.value || latestJobRunning.value || sending.value) return;
   sending.value = true;
   error.value = "";
   const text = message.value.trim();
   const scope = `planner:${props.projectId}`;
-  const fingerprint = `${snapshot.value.contextRevision}:${text}`;
+  const fingerprint = episodePreview.value?.inputHash ?? (String(snapshot.value.contextRevision) + ":" + text);
   try {
-    await api.plannerMessage(props.projectId, {
+    if (props.seriesContext && episodePreview.value) {
+      await api.generateSeriesEpisodeStory(props.seriesContext.series.id, props.seriesContext.episode.id, {
+        additionalNotes: text || null, expectedInputHash: episodePreview.value.inputHash,
+        idempotencyKey: pendingIdempotencyKey(scope, fingerprint),
+      });
+    } else await api.plannerMessage(props.projectId, {
       text,
       expectedContextRevision: snapshot.value.contextRevision,
       idempotencyKey: pendingIdempotencyKey(scope, fingerprint),
@@ -93,36 +127,22 @@ async function adopt(proposalId: string) {
 }
 
 defineExpose({ reload: load });
-onMounted(load);
+let unsubscribeJobs: (() => void) | undefined;
+onMounted(async () => { unsubscribeJobs = subscribeJobs(() => ({ projectId: props.projectId }), load, () => snapshot.value?.latestJob?.execution?.waitingForProvider ?? false); void loadSourceBeats(); await refreshEpisodePreview(); });
+onBeforeUnmount(() => { unsubscribeJobs?.(); ++previewSequence; clearTimeout(previewTimer); });
 </script>
 
 <template>
-  <section class="planner-layout">
+  <section class="planner-layout" :class="{ 'episode-planner': seriesContext }">
+    <section v-if="seriesContext" class="card episode-context"><h2>本集剧情 · 第 {{ seriesContext.episode.order }} 集{{ seriesContext.series.plannedEpisodeCount ? ' / 共 ' + seriesContext.series.plannedEpisodeCount + ' 集' : '' }}</h2><p>{{ seriesContext.series.title }} · {{ seriesContext.episode.targetDurationSeconds }} 秒</p><dl><dt>本集任务</dt><dd>{{ seriesContext.episode.outline.premise }}</dd><dt>开场与承接</dt><dd>{{ episodePreview?.incomingContinuity || seriesContext.episode.outline.openingState }}</dd><dt>本集结尾要求</dt><dd>{{ seriesContext.episode.outline.endingState }}</dd></dl><details v-if="seriesContext.episode.outline.sourceCoverage?.length"><summary>本集来源内容</summary><article v-for="source in seriesContext.episode.outline.sourceCoverage" :key="source.sourceUnitOrdinal"><b>来源 {{ source.sourceUnitOrdinal }}</b><p>{{ sourceBeats.find(beat => beat.bindingOrder === source.sourceUnitOrdinal)?.rawText || "正在读取原文…" }}</p><small v-if="source.coverageNote">{{ source.coverageNote }}</small></article><p v-if="sourceError" role="alert">{{ sourceError }} <button type="button" class="secondary" @click="loadSourceBeats">重新读取来源</button></p></details><RouterLink :to="'/series/' + seriesContext.series.id">返回系列路线与连续性设定</RouterLink></section>
     <div class="conversation card">
       <header class="panel-head">
-        <div><p class="eyebrow">故事灵感</p><h2>聊聊这个小故事</h2></div>
+        <div><p class="eyebrow">{{ seriesContext ? '按已采用的系列路线制作' : '故事灵感' }}</p><h2>{{ seriesContext ? '本集故事与修改' : '聊聊这个小故事' }}</h2></div>
         <button class="ghost" @click="load">刷新</button>
       </header>
-      <section v-if="snapshot?.latestJob && latestJobPresentation" class="job-status" :class="latestJobPresentation.tone">
-        <div data-testid="planner-job-summary" class="job-summary">
-          <b>{{ latestJobPresentation.label }}</b>
-          <span>{{ snapshot.latestJob.error?.message || latestJobPresentation.description }}</span>
-        </div>
-        <details data-testid="planner-job-details" class="job-record">
-          <summary>查看生成记录</summary>
-          <dl>
-            <div><dt>任务编号</dt><dd><code>{{ snapshot.latestJob.id }}</code></dd></div>
-            <div><dt>模型服务</dt><dd>{{ snapshot.latestJob.provider || "旧任务未记录" }} · {{ snapshot.latestJob.model || "旧任务未记录" }}</dd></div>
-            <div><dt>原始状态</dt><dd>{{ snapshot.latestJob.status }}</dd></div>
-            <div v-if="snapshot.latestJob.actualUsage"><dt>实际用量</dt><dd>{{ JSON.stringify(snapshot.latestJob.actualUsage) }}</dd></div>
-            <div v-if="latestBillingPresentation"><dt>费用</dt><dd>{{ latestBillingPresentation.label }} · {{ latestBillingPresentation.detail }}</dd></div>
-            <div v-if="snapshot.latestJob.error?.code"><dt>错误代码</dt><dd>{{ snapshot.latestJob.error.code }}</dd></div>
-            <div v-if="snapshot.latestJob.error?.requestId"><dt>请求编号</dt><dd>{{ snapshot.latestJob.error.requestId }}</dd></div>
-          </dl>
-        </details>
-      </section>
+      <JobStatusCard v-if="snapshot?.latestJob" :job-id="snapshot.latestJob.id" title="故事任务" @replacement="load" />
       <div class="messages">
-        <div v-if="!snapshot?.messages.length" class="welcome-message">
+        <div v-if="!snapshot?.messages.length && !seriesContext" class="welcome-message">
           <span class="director-avatar">导</span>
           <div>
             <strong>先告诉我一个很小的日常瞬间。</strong>
@@ -135,18 +155,20 @@ onMounted(load);
         <details v-if="snapshot?.messages.length && snapshot.proposals.length" data-testid="planner-conversation-history" class="conversation-history"><summary>查看历史对话（{{ snapshot.messages.length }} 条）</summary><article v-for="item in snapshot.messages" :key="item.id" class="message" :class="item.role"><span>{{ item.role === "assistant" ? "导" : "我" }}</span><p>{{ item.content }}</p></article></details>
         <template v-else><article v-for="item in snapshot?.messages" :key="item.id" class="message" :class="item.role"><span>{{ item.role === "assistant" ? "导" : "我" }}</span><p>{{ item.content }}</p></article></template>
       </div>
-      <form class="composer" @submit.prevent="sendMessage">
-        <textarea v-model="message" rows="3" maxlength="4000" placeholder="例如：雨停后，孩子发现猫咪在门口留下一串湿脚印……" @keydown.ctrl.enter="sendMessage" />
-        <div><small>{{ latestJobRunning ? "当前故事任务正在处理，完成前不会创建第二条任务。" : paidBlockedReason || "Ctrl + Enter · 本次会使用付费模型，完成后显示实际用量。" }}</small><button class="primary" :disabled="sending || latestJobRunning || !message.trim() || Boolean(paidBlockedReason)"><span v-if="sending" class="spinner" />生成提案</button></div>
+      <button v-if="seriesContext && adopted && !editingStory" class="secondary story-edit-entry" @click="editingStory = true">修改本集故事</button>
+      <form v-if="!seriesContext || !adopted || editingStory" class="composer" @submit.prevent="sendMessage">
+        <textarea v-model="message" rows="3" maxlength="4000" :placeholder="seriesContext ? '补充本集修改要求，保留整季路线、时长和前后集承接（可留空）' : '例如：雨停后，孩子发现猫咪在门口留下一串湿脚印……'" @keydown.ctrl.enter="sendMessage" />
+        <details v-if="episodePreview"><summary>本集生成指令与承接输入</summary><pre>{{ episodePreview.prompt }}</pre></details>
+        <div><small>{{ latestJobRunning ? "当前故事任务尚未完成或结果未知，请在任务卡中核实。" : paidBlockedReason || "Ctrl + Enter · 本次会使用付费模型，完成后显示实际用量。" }}</small><button class="primary" :disabled="sending || latestJobRunning || (seriesContext ? !episodePreview || episodePreviewLoading : !message.trim()) || Boolean(paidBlockedReason)"><span v-if="sending" class="spinner" />{{ seriesContext ? '生成本集故事候选（付费）' : '生成提案' }}</button></div>
       </form>
     </div>
 
     <aside class="proposal-panel card">
-      <header class="panel-head"><div><p class="eyebrow">故事候选</p><h2>选择一个故事</h2></div><span class="pill">{{ snapshot?.proposals.length ?? 0 }} 个</span></header>
+      <header class="panel-head"><div><p class="eyebrow">{{ seriesContext ? '本集剧本' : '故事候选' }}</p><h2>{{ seriesContext && adopted ? '当前采用的故事' : '选择一个故事' }}</h2></div><span class="pill">{{ snapshot?.proposals.length ?? 0 }} 个</span></header>
       <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
       <div v-if="!snapshot?.proposals.length" class="empty">故事生成后会出现在这里。</div>
       <article v-for="proposal in snapshot?.proposals" :key="proposal.id" class="proposal">
-        <div class="proposal-title"><h3 :title="proposal.title">{{ compactTitle(proposal.title) }}</h3><span class="pill" :class="{ good: proposal.status === 'adopted', warn: proposal.status === 'outdated' }">{{ proposalStatus(proposal.status) }}</span></div>
+        <div class="proposal-title"><h3 >{{ proposal.title }}</h3><span class="pill" :class="{ good: proposal.status === 'adopted', warn: proposal.status === 'outdated' }">{{ proposalStatus(proposal.status) }}</span></div>
         <p v-if="!isRedundantSummary(proposal)" class="proposal-summary">{{ proposal.summary }}</p><details v-else class="legacy-summary"><summary>查看原摘要</summary><p class="proposal-summary">{{ proposal.summary }}</p></details>
         <ol class="micro-chain">
           <li><b>触发</b><span>{{ proposal.microEvent.trigger }}</span></li>
@@ -163,6 +185,7 @@ onMounted(load);
 
 <style scoped>
 .planner-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(390px, .8fr); gap: 20px; min-height: calc(100vh - 215px); }
+.episode-context { grid-column:1/-1; padding:20px; }.episode-context h2 { margin:0; }.episode-context dl { display:grid; grid-template-columns:110px 1fr; gap:10px; }.episode-context dd { margin:0; }.episode-planner .messages { min-height:0; flex:initial; }.episode-planner .proposal-panel { grid-column:1; grid-row:2; }.episode-planner .conversation { grid-column:2; grid-row:2; }.episode-planner { min-height:0; }.story-edit-entry { margin:20px; }.composer pre { white-space:pre-wrap; font:inherit; max-height:300px; overflow:auto; }@media(max-width:800px){.episode-planner{display:flex;flex-direction:column;}.episode-planner .proposal-panel{order:1}.episode-planner .conversation{order:2}}
 .conversation, .proposal-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 17px; border-bottom: 1px solid var(--line); }
 .panel-head h2 { margin: 0; font-size: 20px; }
@@ -195,8 +218,9 @@ onMounted(load);
 .proposal-panel { max-height: calc(100vh - 215px); overflow-y: auto; }
 .proposal { margin: 16px; padding: 17px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
 .proposal + .proposal { margin-top: 0; }
+.proposal-title .pill { flex-shrink: 0; }
 .proposal-title, .proposal-foot { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-.proposal-title h3 { margin: 0; font: 600 17px Georgia, "Songti SC", serif; }
+.proposal-title h3 { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; margin: 0; font: 600 17px Georgia, "Songti SC", serif; }
 .proposal-summary { margin: 10px 0 14px; color: var(--muted); line-height: 1.55; font-size: 12px; }
 .micro-chain { list-style: none; display: grid; gap: 7px; margin: 0 0 15px; padding: 0; }
 .micro-chain li { display: grid; grid-template-columns: 38px 1fr; gap: 8px; color: #6b635d; font-size: 11px; line-height: 1.45; }

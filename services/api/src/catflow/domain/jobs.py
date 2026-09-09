@@ -16,32 +16,57 @@ class JobStatus(StrEnum):
     SUBMISSION_UNKNOWN = "submission_unknown"
 
 
-_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
-    JobStatus.QUEUED: frozenset({JobStatus.SUBMITTING, JobStatus.CANCELLED}),
-    JobStatus.SUBMITTING: frozenset(
-        {
-            JobStatus.SUBMITTED,
-            JobStatus.FAILED,
-            JobStatus.CANCEL_REQUESTED,
-            JobStatus.SUBMISSION_UNKNOWN,
-        }
-    ),
-    JobStatus.SUBMITTED: frozenset(
-        {JobStatus.POLLING, JobStatus.FAILED, JobStatus.CANCEL_REQUESTED}
-    ),
-    JobStatus.POLLING: frozenset(
-        {JobStatus.STORING, JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCEL_REQUESTED}
-    ),
-    JobStatus.STORING: frozenset({JobStatus.SUCCEEDED, JobStatus.FAILED}),
-    JobStatus.CANCEL_REQUESTED: frozenset({JobStatus.CANCELLED, JobStatus.FAILED}),
-    JobStatus.SUCCEEDED: frozenset(),
-    JobStatus.FAILED: frozenset(),
-    JobStatus.CANCELLED: frozenset(),
-    JobStatus.SUBMISSION_UNKNOWN: frozenset(),
+# Recovery transitions are guarded by execution evidence and API capabilities at
+# their ownership boundary. This table is also enforced on ORM status writes.
+_TRANSITIONS = {
+    JobStatus.QUEUED: {
+        JobStatus.SUBMITTING,
+        JobStatus.STORING,
+        JobStatus.CANCELLED,
+        JobStatus.FAILED,
+    },
+    JobStatus.SUBMITTING: {
+        JobStatus.SUBMITTED,
+        JobStatus.POLLING,
+        JobStatus.STORING,
+        JobStatus.SUCCEEDED,
+        JobStatus.FAILED,
+        JobStatus.CANCEL_REQUESTED,
+        JobStatus.CANCELLED,
+        JobStatus.SUBMISSION_UNKNOWN,
+    },
+    JobStatus.SUBMITTED: {
+        JobStatus.POLLING,
+        JobStatus.STORING,
+        JobStatus.SUCCEEDED,
+        JobStatus.FAILED,
+        JobStatus.CANCEL_REQUESTED,
+        JobStatus.CANCELLED,
+        JobStatus.SUBMISSION_UNKNOWN,
+    },
+    JobStatus.POLLING: {
+        JobStatus.STORING,
+        JobStatus.SUCCEEDED,
+        JobStatus.FAILED,
+        JobStatus.CANCEL_REQUESTED,
+        JobStatus.CANCELLED,
+        JobStatus.SUBMISSION_UNKNOWN,
+    },
+    JobStatus.STORING: {JobStatus.SUCCEEDED, JobStatus.FAILED},
+    JobStatus.CANCEL_REQUESTED: {
+        JobStatus.CANCELLED,
+        JobStatus.FAILED,
+        JobStatus.POLLING,
+        JobStatus.SUBMISSION_UNKNOWN,
+    },
+    JobStatus.SUCCEEDED: set(),
+    JobStatus.FAILED: {JobStatus.POLLING, JobStatus.STORING},
+    JobStatus.CANCELLED: set(),
+    JobStatus.SUBMISSION_UNKNOWN: {JobStatus.POLLING, JobStatus.STORING},
 }
 
 
 def transition_job(current: JobStatus, target: JobStatus) -> JobStatus:
-    if target not in _TRANSITIONS[current]:
+    if target != current and target not in _TRANSITIONS[current]:
         raise ValueError(f"illegal job transition {current.value} -> {target.value}")
     return target

@@ -20,6 +20,7 @@ from catflow.application.service import (
     ProjectCreate,
     SegmentRepairCreateCommand,
     SegmentRepairPreviewCommand,
+    SegmentReferencePreparationCommand,
     StudioService,
 )
 from catflow.infrastructure.database import (
@@ -494,6 +495,46 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
                 audioMode="generate_candidate" if requested_audio else None,
             ),
         )
+        # Isolated landing fixture: bind a completed local reference preparation.
+        # This does not claim that these bytes are a real model/media result.
+        prepared = service.prepare_segment_references(
+            project.id,
+            SegmentReferencePreparationCommand(
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                instruction="只重拍擦爪动作。",
+                audioMode="generate_candidate" if requested_audio else None,
+            ),
+        )
+        for index, role in enumerate(
+            ("repair_anchor_in", "repair_anchor_out", "repair_context"), start=4
+        ):
+            service.register_asset(
+                project.id,
+                role=role,
+                producing_job_id=prepared.id,
+                sha256=str(index) * 64,
+                media_type="video" if role == "repair_context" else "image",
+                metadata={
+                    "durationFrames": preview.generation_range.end_frame
+                    - preview.generation_range.start_frame,
+                    "paddedTailFrames": 0,
+                },
+            )
+        with sessions.begin() as session:
+            prepared_row = session.get(JobRecord, prepared.id)
+            prepared_row.status = "storing"
+            prepared_row.status = "succeeded"
+        preview = service.preview_video_repair(
+            project.id,
+            SegmentRepairPreviewCommand(
+                baseVideoAssetId=base.id,
+                issueRange={"startFrame": 96, "endFrame": 192},
+                instruction="只重拍擦爪动作。",
+                audioMode="generate_candidate" if requested_audio else None,
+                referencePreparationJobId=prepared.id,
+            ),
+        )
         job = service.create_video_repair_job(
             project.id,
             SegmentRepairCreateCommand(
@@ -502,6 +543,7 @@ def test_ark_segment_result_lands_as_candidate_and_never_changes_the_edit(
                 instruction="只重拍擦爪动作。",
                 audioMode="generate_candidate" if requested_audio else None,
                 expectedInputHash=preview.input_hash,
+                referencePreparationJobId=prepared.id,
                 idempotencyKey=f"ark-segment-landing-{project.id}",
             ),
         )

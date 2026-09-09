@@ -65,6 +65,30 @@ describe("StoryboardStep", () => {
     client.shotPlanGenerationAttempts.mockResolvedValue([]);
   });
 
+  it("saves the edited overall sound direction without changing other treatment facts or calling a model", async () => {
+    const treatment = { soundIntent: "轻钢琴", theme: "一起回家", nested: { keep: "原始事实" } };
+    const accepted = {
+      id: "sound-plan", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {}, shots: [professionalShot], totalDurationSeconds: 12, directorTreatment: treatment,
+      reviewStatus: "accepted" as const, active: true, outdated: false, createdAt: "2026-09-01T00:00:00Z",
+    };
+    client.shotPlans.mockResolvedValue([accepted]);
+    client.createShotPlan.mockResolvedValue({ ...accepted, id: "sound-plan-2", revision: 2 });
+    const wrapper = mountStoryboard(accepted);
+    await flushPromises();
+    await wrapper.get('textarea[aria-label="整体声音方向"]').setValue("无配乐；仅林间环境声、塑料接触和脚步声，无对白。");
+    const saveButton = wrapper.findAll("button").find(button => button.text() === "保存新版本")!;
+    expect(saveButton.attributes("disabled")).toBeUndefined();
+    await saveButton.trigger("click");
+    await flushPromises();
+    expect(client.createShotPlan).toHaveBeenCalledWith("project-1", expect.objectContaining({
+      baseShotPlanVersionId: "sound-plan",
+      directorTreatment: { ...treatment, soundIntent: "无配乐；仅林间环境声、塑料接触和脚步声，无对白。" },
+    }));
+    expect(treatment.soundIntent).toBe("轻钢琴");
+    expect(client.generateShotPlan).not.toHaveBeenCalled();
+  });
+
   it("settles the request key as soon as the server returns a durable job", async () => {
     let resolveJob!: (value: { id: string; status: string }) => void;
     client.generateShotPlan.mockReturnValue(new Promise((resolve) => { resolveJob = resolve; }));
@@ -625,7 +649,7 @@ describe("StoryboardStep", () => {
     expect(wrapper.text()).toContain("水流声、水壶轻碰声、水滴声、托盘摩擦声");
   });
 
-  it("materializes a corrected blocking draft without calling the model again", async () => {
+  it.each([true, false])("materializes a corrected blocking draft without calling the model again (existing plan: %s)", async (hasExistingPlan) => {
     const accepted = {
       id: "plan-1", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
       clip: {}, shots: [professionalShot], totalDurationSeconds: 12,
@@ -661,12 +685,13 @@ describe("StoryboardStep", () => {
         ],
       },
     };
-    client.shotPlans.mockResolvedValueOnce([accepted]).mockResolvedValue([correctedCandidate, accepted]);
+    client.shotPlans.mockResolvedValueOnce(hasExistingPlan ? [accepted] : []).mockResolvedValue([correctedCandidate, ...(hasExistingPlan ? [accepted] : [])]);
     client.shotPlanGenerationAttempts
       .mockResolvedValueOnce([needsInputAttempt])
       .mockResolvedValue([{ ...needsInputAttempt, resultShotPlanVersionId: "plan-2" }]);
     client.materializeShotPlanGeneration.mockResolvedValue(correctedCandidate);
     const needsInputWorkspace = workspace(accepted);
+    if (!hasExistingPlan) needsInputWorkspace.activeShotPlan = null;
     needsInputWorkspace.latestDirectorJob = {
       id: "director-job-needs-input", projectId: "project-1", kind: "plan_shots", status: "succeeded",
       inputHash: "f".repeat(64), frozenInput: { storyVersionId: "story-1" }, resultAssetIds: [],
@@ -697,6 +722,30 @@ describe("StoryboardStep", () => {
     );
     expect(client.generateShotPlan).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("版本 2 · 新生成 · 待确认");
+  });
+
+  it('shows an adopted correction as resolved while preserving raw validation history', async () => {
+    const accepted = {
+      id: 'resolved-plan', projectId: 'project-1', revision: 1, sourceStoryVersionId: 'story-1', sourceSelectionHash: 'a'.repeat(64),
+      clip: {}, shots: [professionalShot], totalDurationSeconds: 12, producingJobId: 'resolved-job',
+      reviewStatus: 'accepted' as const, active: true, outdated: false, createdAt: '2026-09-01T00:00:00Z',
+    };
+    client.shotPlans.mockResolvedValue([accepted]);
+    client.shotPlanGenerationAttempts.mockResolvedValue([{
+      jobId: 'resolved-job', status: 'succeeded', storyVersionId: 'story-1', resultShotPlanVersionId: accepted.id,
+      createdAt: accepted.createdAt, updatedAt: accepted.createdAt, billingStatus: 'usage_reported',
+      result: { disposition: 'needs_input', recoverable: true, resolution: 'accepted', resultRevision: 1, resultActive: true,
+        issues: [{ code: 'missing', severity: 'blocking', path: 'shots.0.catBlocking', message: '原始动作字段层级错误' }] },
+    }]);
+    const current = workspace(accepted);
+    current.latestDirectorJob = { id: 'resolved-job', kind: 'plan_shots', status: 'succeeded', projectId: 'project-1', inputHash: 'f'.repeat(64), frozenInput: {}, resultAssetIds: [], createdAt: accepted.createdAt, updatedAt: accepted.createdAt };
+    const wrapper = mount(StoryboardStep, { props: { projectId: 'project-1', workspace: current }, global: { stubs: { RouterLink: true } } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('原返回结构问题已修订，分镜 v1 正在使用');
+    expect(wrapper.find('[data-testid="materialize-director-result"]').exists()).toBe(false);
+    expect(wrapper.find('.validation-issues').exists()).toBe(false);
+    expect(wrapper.text()).toContain('原始动作字段层级错误');
+    expect(client.generateShotPlan).not.toHaveBeenCalled();
   });
 
   it("shows a ready queued job as waiting for worker pickup", async () => {

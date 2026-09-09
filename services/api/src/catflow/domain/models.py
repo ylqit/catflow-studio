@@ -291,6 +291,24 @@ class DirectorStoryTreatment(ContractModel):
     )
 
 
+class ProfessionalShotOutput(ShotSpec):
+    """Generation boundary: required fields are visible in the provider's schema.
+
+    ShotSpec remains nullable for historical, hand-authored timelines.
+    """
+
+    duration_frames: int = Field(alias="durationFrames", ge=48, le=360)
+    lens: LensDesign
+    composition: CompositionDesign
+    child_blocking: BlockingDesign = Field(alias="childBlocking")
+    cat_blocking: BlockingDesign = Field(alias="catBlocking")
+    physical_change: PhysicalChangeDesign = Field(alias="physicalChange")
+    continuity: ContinuityDesign
+    lighting: LightingDesign
+    sound: ShotSoundDesign
+    director_intent: str = Field(alias="directorIntent", min_length=1, max_length=500)
+
+
 class DirectorPlanPayload(ContractModel):
     target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=15)
     director_treatment: DirectorStoryTreatment = Field(alias="directorTreatment")
@@ -321,6 +339,10 @@ class DirectorPlanPayload(ContractModel):
                 raise ValueError(f"professional shot {shot.order} is missing: {', '.join(missing)}")
         _validate_professional_semantics(self.shots)
         return self
+
+
+class ProfessionalDirectorOutput(DirectorPlanPayload):
+    shots: list[ProfessionalShotOutput] = Field(min_length=1, max_length=4)
 
 
 class ProfessionalShotPlanDraft(ShotPlanDraft):

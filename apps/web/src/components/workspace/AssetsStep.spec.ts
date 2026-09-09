@@ -124,6 +124,7 @@ describe("AssetsStep", () => {
         updatedAt: "2026-09-04T08:00:01Z",
       },
     };
+    client.job.mockResolvedValue(runningWorkspace.latestAssetJob);
     const wrapper = mount(AssetsStep, {
       props: { projectId: "project-1", workspace: runningWorkspace, runtime },
       global: { plugins: [createPinia()] },
@@ -132,7 +133,7 @@ describe("AssetsStep", () => {
 
     const generateButton = wrapper.findAll("button").find((item) => item.text().includes("环境候选"))!;
     expect(generateButton.attributes("disabled")).toBeDefined();
-    expect(wrapper.text()).toContain("环境生成：正在准备");
+    expect(wrapper.text()).toContain("环境生成");
     expect(wrapper.text()).toContain("环境生成任务正在处理");
     await generateButton.trigger("click");
     expect(client.createAssetGeneration).not.toHaveBeenCalled();

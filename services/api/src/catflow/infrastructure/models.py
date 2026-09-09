@@ -158,6 +158,9 @@ class StorySeriesRecord(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     premise: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptation_policy: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="preserve_all", server_default="preserve_all"
+    )
     narrative_mode: Mapped[str] = mapped_column(String(24), nullable=False)
     length_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="fixed")
     planned_episode_count: Mapped[int | None] = mapped_column(BigInteger)
@@ -276,6 +279,14 @@ class JobRecord(Base):
     provider: Mapped[str | None] = mapped_column(String(80))
     model: Mapped[str | None] = mapped_column(String(120))
     provider_task_id: Mapped[str | None] = mapped_column(String(200))
+    provider_response_id: Mapped[str | None] = mapped_column(String(200))
+    provider_client_request_id: Mapped[str | None] = mapped_column(String(200))
+    execution_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    revision: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    lease_epoch: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     validation_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(f"{SCHEMA_NAME}.validation_runs.id", ondelete="RESTRICT"),
@@ -328,6 +339,7 @@ class StorySourceDocumentRecord(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     source_format: Mapped[str] = mapped_column(String(16), nullable=False)
     file_name: Mapped[str | None] = mapped_column(String(260))
+    production_targets_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     analysis_job_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -1114,6 +1126,7 @@ class JobEventRecord(Base):
     __tablename__ = "job_events"
     __table_args__ = (
         Index("ix_job_events_project_id", "project_id", "id"),
+        Index("ix_job_events_job_id", "job_id", "id"),
         CheckConstraint(
             "num_nonnulls(project_id, series_id, story_source_document_id) = 1",
             name="ck_job_events_exactly_one_scope",
@@ -1199,6 +1212,10 @@ class VideoEditDraftRecord(Base):
     source_video_asset_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.assets.id", ondelete="RESTRICT")
     )
+    source_result_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.jobs.id", ondelete="RESTRICT")
+    )
+    source_timeline_hash: Mapped[str | None] = mapped_column(String(64))
     head_edit_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(

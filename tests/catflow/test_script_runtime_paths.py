@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 
-def test_powershell_runtime_paths_respect_relative_environment(tmp_path: Path) -> None:
+
+@pytest.fixture(params=["powershell.exe", "pwsh.exe"])
+def powershell_executable(request: pytest.FixtureRequest) -> str:
+    executable = shutil.which(request.param)
+    if executable is None:
+        pytest.skip(f"{request.param} is not installed")
+    return executable
+
+
+def test_powershell_runtime_paths_respect_relative_environment(
+    tmp_path: Path, powershell_executable: str
+) -> None:
     script = Path(__file__).resolve().parents[2] / "scripts" / "runtime-paths.ps1"
     command = (
+        "$ErrorActionPreference='Stop'; "
         f". '{script}'; "
         "$env:CATFLOW_MEDIA_ROOT='var/media-custom'; "
         f"$paths=Get-CatFlowRuntimePaths -ProjectRoot '{tmp_path}'; "
@@ -14,33 +28,51 @@ def test_powershell_runtime_paths_respect_relative_environment(tmp_path: Path) -
     )
 
     completed = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", command],
+        [powershell_executable, "-NoProfile", "-Command", command],
         check=False,
         capture_output=True,
         text=True,
+        timeout=15,
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert not completed.stderr
     assert Path(completed.stdout.strip()) == (tmp_path / "var/media-custom").resolve()
 
 
-def test_powershell_runtime_paths_reject_repository_escape(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("configured", "error"),
+    [
+        ("../outside", "must remain inside the repository"),
+        ("../repository-sibling/media", "must remain inside the repository"),
+        (r"C:\outside", "must be a relative repository path"),
+        (r"\\server\share\media", "must be a relative repository path"),
+        (r"\outside", "must be a relative repository path"),
+        ("/outside", "must be a relative repository path"),
+        ("C:outside", "must be a relative repository path"),
+    ],
+)
+def test_powershell_runtime_paths_reject_non_repository_paths(
+    tmp_path: Path, powershell_executable: str, configured: str, error: str
+) -> None:
     script = Path(__file__).resolve().parents[2] / "scripts" / "runtime-paths.ps1"
     command = (
+        "$ErrorActionPreference='Stop'; "
         f". '{script}'; "
-        "$env:CATFLOW_MEDIA_ROOT='../outside'; "
-        f"Get-CatFlowRuntimePaths -ProjectRoot '{tmp_path}'"
+        f"$env:CATFLOW_MEDIA_ROOT='{configured}'; "
+        f"Get-CatFlowRuntimePaths -ProjectRoot '{tmp_path / 'repository'}'"
     )
 
     completed = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", command],
+        [powershell_executable, "-NoProfile", "-Command", command],
         check=False,
         capture_output=True,
         text=True,
+        timeout=15,
     )
 
     assert completed.returncode != 0
-    assert "repository" in completed.stderr
+    assert error in completed.stderr
 
 
 def test_start_script_discards_stale_worker_readiness_before_launch() -> None:

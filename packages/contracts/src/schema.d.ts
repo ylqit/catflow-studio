@@ -811,6 +811,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/story-imports/{document_id}/production-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Story Production Targets */
+        patch: operations["update_story_production_targets_api_v1_story_imports__document_id__production_targets_patch"];
+        trace?: never;
+    };
     "/api/v1/story-imports/{document_id}": {
         parameters: {
             query?: never;
@@ -1376,6 +1393,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-edits/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Edit References */
+        post: operations["prepare_edit_references_api_v1_projects__project_id__video_edits_references_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/video-edits": {
         parameters: {
             query?: never;
@@ -1531,6 +1565,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Repair Result */
+        post: operations["prepare_repair_result_api_v1_projects__project_id__video_edit_drafts__draft_id__results_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-previews": {
         parameters: {
             query?: never;
@@ -1577,6 +1628,91 @@ export interface paths {
         get: operations["job_api_v1_jobs__job_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Events */
+        get: operations["job_events_api_v1_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/replacement-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replacement Preview */
+        post: operations["replacement_preview_api_v1_jobs__job_id__replacement_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/replacement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replacement Create */
+        post: operations["replacement_create_api_v1_jobs__job_id__replacement_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Result */
+        get: operations["job_result_api_v1_jobs__job_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover Job */
+        post: operations["recover_job_api_v1_jobs__job_id__recovery_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1741,6 +1877,16 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdaptationRiskDraft */
+        AdaptationRiskDraft: {
+            /** Message */
+            message: string;
+            /**
+             * Blocking
+             * @default true
+             */
+            blocking: boolean;
+        };
         /** AssetDto */
         AssetDto: {
             /**
@@ -1779,6 +1925,14 @@ export interface components {
         };
         /** AssetGenerationCommand */
         AssetGenerationCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /**
              * Includepreviousepisodevideo
              * @default false
@@ -2541,6 +2695,14 @@ export interface components {
         };
         /** GenerationCommand */
         GenerationCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /**
              * Includepreviousepisodevideo
              * @default false
@@ -2648,9 +2810,9 @@ export interface components {
             assetId: string;
             /**
              * Role
-             * @constant
+             * @enum {string}
              */
-            role: "previous_episode_video";
+            role: "previous_episode_video" | "reference_video";
             /** Sha256 */
             sha256: string;
             /** Durationseconds */
@@ -2781,6 +2943,14 @@ export interface components {
         };
         /** ImageDiagnosisCommand */
         ImageDiagnosisCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /**
              * Assetid
              * Format: uuid
@@ -2842,6 +3012,18 @@ export interface components {
         };
         /** JobDto */
         JobDto: {
+            execution?: components["schemas"]["JobExecutionDto"] | null;
+            /** Providerresponseid */
+            providerResponseId?: string | null;
+            /** Providerclientrequestid */
+            providerClientRequestId?: string | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Nextactionat */
+            nextActionAt?: string | null;
             /**
              * Id
              * Format: uuid
@@ -2924,6 +3106,8 @@ export interface components {
             resultAssetIds?: string[];
             /** Supersedesjobid */
             supersedesJobId?: string | null;
+            /** Successorjobids */
+            successorJobIds?: string[];
             /** Error */
             error?: {
                 [key: string]: unknown;
@@ -2938,6 +3122,86 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** JobExecutionDto */
+        JobExecutionDto: {
+            /**
+             * Contractversion
+             * @default 1
+             */
+            contractVersion: number;
+            /** Protocol */
+            protocol?: string | null;
+            /**
+             * Stage
+             * @default prepare
+             */
+            stage: string;
+            /** Stagestartedat */
+            stageStartedAt?: string | null;
+            /** Providerstatus */
+            providerStatus?: string | null;
+            /** Providerobservedat */
+            providerObservedAt?: string | null;
+            /** Providerresponseid */
+            providerResponseId?: string | null;
+            /** Providerclientrequestid */
+            providerClientRequestId?: string | null;
+            /** Providererror */
+            providerError?: {
+                [key: string]: unknown;
+            } | null;
+            /** Responseexpiresat */
+            responseExpiresAt?: string | null;
+            /** Resultreceivedat */
+            resultReceivedAt?: string | null;
+            /**
+             * Recoverystate
+             * @default none
+             * @enum {string}
+             */
+            recoveryState: "none" | "automatic" | "needs_attention" | "unavailable";
+            /** Lastqueryat */
+            lastQueryAt?: string | null;
+            /** Nextactionat */
+            nextActionAt?: string | null;
+            /**
+             * Queryfailurecount
+             * @default 0
+             */
+            queryFailureCount: number;
+            /** Queryerror */
+            queryError?: {
+                [key: string]: unknown;
+            } | null;
+            /** Availableactions */
+            availableActions?: string[];
+            /**
+             * Waitingforprovider
+             * @default false
+             */
+            waitingForProvider: boolean;
+            /**
+             * Needsattention
+             * @default false
+             */
+            needsAttention: boolean;
+            /**
+             * Usageunconfirmed
+             * @default false
+             */
+            usageUnconfirmed: boolean;
+            /**
+             * Resultstate
+             * @default missing
+             * @enum {string}
+             */
+            resultState: "missing" | "partial" | "complete";
+            /**
+             * Historicalresult
+             * @default false
+             */
+            historicalResult: boolean;
         };
         /** JobPublicationDto */
         JobPublicationDto: {
@@ -2960,6 +3224,18 @@ export interface components {
              * Format: date-time
              */
             deleteAfter: string;
+        };
+        /** JobRecoveryCommand */
+        JobRecoveryCommand: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "query_provider" | "process_result";
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Idempotencykey */
+            idempotencyKey: string;
         };
         /** JobUsageDto */
         JobUsageDto: {
@@ -3121,6 +3397,12 @@ export interface components {
         };
         /** PlannerJobDto */
         PlannerJobDto: {
+            execution?: components["schemas"]["JobExecutionDto"] | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
             /**
              * Id
              * Format: uuid
@@ -3174,6 +3456,14 @@ export interface components {
         };
         /** PlannerMessageCommand */
         PlannerMessageCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Text */
             text: string;
             /** Expectedcontextrevision */
@@ -3222,6 +3512,15 @@ export interface components {
             /** Proposals */
             proposals: components["schemas"]["LifeStoryProposalDto"][];
             latestJob?: components["schemas"]["PlannerJobDto"] | null;
+        };
+        /** PreservedRequirementDraft */
+        PreservedRequirementDraft: {
+            /** Requirement */
+            requirement: string;
+            /** Handling */
+            handling: string;
+            /** Episodeorders */
+            episodeOrders?: number[];
         };
         /** ProjectCollectionCreate */
         ProjectCollectionCreate: {
@@ -3635,8 +3934,29 @@ export interface components {
              */
             continuityRule: string;
         };
+        /** ReplacementGenerationCommand */
+        ReplacementGenerationCommand: {
+            /** Inputhash */
+            inputHash: string;
+            /**
+             * Acknowledgeduplicatecharge
+             * @constant
+             */
+            acknowledgeDuplicateCharge: true;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
         /** SegmentEditInputDto */
         SegmentEditInputDto: {
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Referencepreparationjobid */
+            referencePreparationJobId?: string | null;
+            /** Inputedl */
+            inputEdl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
+            /** Inputtimelinehash */
+            inputTimelineHash?: string | null;
+            resultRange?: components["schemas"]["FrameRange"] | null;
             /**
              * Generationmode
              * @default edit_existing
@@ -3673,6 +3993,57 @@ export interface components {
             generationRange: components["schemas"]["FrameRange"];
             candidateCoreRange: components["schemas"]["FrameRange"];
         };
+        /** SegmentReferencePreparationCommand */
+        SegmentReferencePreparationCommand: {
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
+            /** Referencepreparationjobid */
+            referencePreparationJobId?: string | null;
+            /**
+             * Generationmode
+             * @default edit_existing
+             * @enum {string}
+             */
+            generationMode: "edit_existing" | "from_frame";
+            /** Audiomode */
+            audioMode?: ("preserve_current" | "generate_candidate") | null;
+            /**
+             * Sounddescription
+             * @default
+             */
+            soundDescription: string;
+            /** Anchorstartframe */
+            anchorStartFrame?: number | null;
+            /** Anchorendframe */
+            anchorEndFrame?: number | null;
+            /**
+             * Basevideoassetid
+             * Format: uuid
+             */
+            baseVideoAssetId: string;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
+            issueRange: components["schemas"]["FrameRange"];
+            /** Instruction */
+            instruction: string;
+            /** Editdraftid */
+            editDraftId?: string | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
+            /** Retryafterjobid */
+            retryAfterJobId?: string | null;
+        };
         /** SegmentRepairApproveCommand */
         SegmentRepairApproveCommand: {
             /**
@@ -3697,6 +4068,20 @@ export interface components {
         };
         /** SegmentRepairCreateCommand */
         SegmentRepairCreateCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
+            /** Referencepreparationjobid */
+            referencePreparationJobId?: string | null;
             /**
              * Generationmode
              * @default edit_existing
@@ -3763,6 +4148,12 @@ export interface components {
         };
         /** SegmentRepairPreviewCommand */
         SegmentRepairPreviewCommand: {
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
+            /** Referencepreparationjobid */
+            referencePreparationJobId?: string | null;
             /**
              * Generationmode
              * @default edit_existing
@@ -3806,6 +4197,17 @@ export interface components {
         };
         /** SegmentRepairPreviewDto */
         SegmentRepairPreviewDto: {
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
+            /** Referencepreparationjobid */
+            referencePreparationJobId?: string | null;
+            /** Inputedl */
+            inputEdl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
+            /** Inputtimelinehash */
+            inputTimelineHash?: string | null;
+            resultRange?: components["schemas"]["FrameRange"] | null;
             /**
              * Generationmode
              * @default edit_existing
@@ -4007,6 +4409,12 @@ export interface components {
         };
         /** SeriesCreateCommand */
         SeriesCreateCommand: {
+            /**
+             * Adaptationpolicy
+             * @default preserve_all
+             * @enum {string}
+             */
+            adaptationPolicy: "preserve_all" | "condense_mainline";
             /** Title */
             title: string;
             /** Premise */
@@ -4181,6 +4589,14 @@ export interface components {
         };
         /** SeriesEpisodeStoryGenerationCommand */
         SeriesEpisodeStoryGenerationCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Additionalnotes */
@@ -4241,6 +4657,12 @@ export interface components {
         };
         /** SeriesPatchCommand */
         SeriesPatchCommand: {
+            /** Plannedepisodecount */
+            plannedEpisodeCount?: number | null;
+            /** Defaultepisodedurationseconds */
+            defaultEpisodeDurationSeconds?: number | null;
+            /** Mustkeep */
+            mustKeep?: string[] | null;
             /** Title */
             title?: string | null;
             /** Premise */
@@ -4263,12 +4685,26 @@ export interface components {
         };
         /** SeriesPlanDraft */
         SeriesPlanDraft: {
+            /** Sourcetreatments */
+            sourceTreatments?: components["schemas"]["SourceTreatmentDraft"][];
+            /** Adaptationrisks */
+            adaptationRisks?: components["schemas"]["AdaptationRiskDraft"][];
+            /** Preservedrequirements */
+            preservedRequirements?: components["schemas"]["PreservedRequirementDraft"][];
             seriesBible: components["schemas"]["SeriesBibleDraft"];
             /** Episodes */
             episodes: components["schemas"]["SeriesEpisodeOutlineDraft"][];
         };
         /** SeriesPlanGenerationCommand */
         SeriesPlanGenerationCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
@@ -4350,6 +4786,14 @@ export interface components {
         };
         /** SeriesPlanSegmentGenerationCommand */
         SeriesPlanSegmentGenerationCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Startepisodeorder */
             startEpisodeOrder: number;
             /** Requestedepisodecount */
@@ -4608,6 +5052,14 @@ export interface components {
         };
         /** ShotMediaCommand */
         ShotMediaCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /**
              * Shotplanversionid
              * Format: uuid
@@ -4673,6 +5125,12 @@ export interface components {
         };
         /** ShotPlanGenerationAttemptDto */
         ShotPlanGenerationAttemptDto: {
+            execution?: components["schemas"]["JobExecutionDto"] | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
             /**
              * Jobid
              * Format: uuid
@@ -4743,6 +5201,14 @@ export interface components {
         };
         /** ShotPlanGenerationCommand */
         ShotPlanGenerationCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Idempotencykey */
             idempotencyKey: string;
         };
@@ -4771,6 +5237,23 @@ export interface components {
             draft?: components["schemas"]["DirectorPlanDraftDto"] | null;
             /** Issues */
             issues?: components["schemas"]["DirectorValidationIssueDto"][];
+            /** Normalizationrevision */
+            normalizationRevision?: string | null;
+            /** Adjustments */
+            adjustments?: components["schemas"]["DirectorValidationIssueDto"][];
+            /**
+             * Resolution
+             * @default unresolved
+             * @enum {string}
+             */
+            resolution: "unresolved" | "candidate" | "accepted" | "rejected" | "superseded";
+            /** Resultrevision */
+            resultRevision?: number | null;
+            /**
+             * Resultactive
+             * @default false
+             */
+            resultActive: boolean;
         };
         /** ShotPlanVersionDto */
         ShotPlanVersionDto: {
@@ -4915,6 +5398,20 @@ export interface components {
             /** Shotid */
             shotId: string;
         };
+        /** SourceTreatmentDraft */
+        SourceTreatmentDraft: {
+            /** Sourceunitordinal */
+            sourceUnitOrdinal: number;
+            /**
+             * Treatment
+             * @enum {string}
+             */
+            treatment: "retained" | "merged" | "simplified" | "omitted";
+            /** Episodeorders */
+            episodeOrders?: number[];
+            /** Reason */
+            reason: string;
+        };
         /** StoryCreateCommand */
         StoryCreateCommand: {
             /** Title */
@@ -4934,6 +5431,12 @@ export interface components {
         };
         /** StoryImportAnalysisJobDto */
         StoryImportAnalysisJobDto: {
+            execution?: components["schemas"]["JobExecutionDto"] | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
             /**
              * Id
              * Format: uuid
@@ -4994,11 +5497,34 @@ export interface components {
             seriesLengthMode?: ("fixed" | "ongoing") | null;
             /** Plannedepisodecount */
             plannedEpisodeCount?: number | null;
+            /**
+             * Defaultepisodedurationseconds
+             * @default 12
+             */
+            defaultEpisodeDurationSeconds: number;
+            /** Narrativemode */
+            narrativeMode?: ("continuous" | "lightly_serialized" | "anthology") | null;
+            /**
+             * Adaptationpolicy
+             * @default preserve_all
+             * @enum {string}
+             */
+            adaptationPolicy: "preserve_all" | "condense_mainline";
+            /** Mustkeep */
+            mustKeep?: string[];
             /** Idempotencykey */
             idempotencyKey: string;
         };
         /** StoryImportCreateCommand */
         StoryImportCreateCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Rawtext */
             rawText: string;
             /**
@@ -5008,6 +5534,10 @@ export interface components {
             sourceFormat: "paste" | "txt" | "md";
             /** Filename */
             fileName?: string | null;
+            /** Productiontargets */
+            productionTargets?: {
+                [key: string]: components["schemas"]["StoryProductionTarget"];
+            } | null;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
@@ -5095,13 +5625,72 @@ export interface components {
         };
         /** StoryImportReanalyzeCommand */
         StoryImportReanalyzeCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
             idempotencyKey: string;
         };
+        /** StoryProductionTarget */
+        StoryProductionTarget: {
+            /**
+             * Lengthmode
+             * @default fixed
+             * @enum {string}
+             */
+            lengthMode: "fixed" | "ongoing";
+            /**
+             * Plannedepisodecount
+             * @default 3
+             */
+            plannedEpisodeCount: number | null;
+            /**
+             * Defaultepisodedurationseconds
+             * @default 15
+             */
+            defaultEpisodeDurationSeconds: number;
+            /**
+             * Narrativemode
+             * @default continuous
+             * @enum {string}
+             */
+            narrativeMode: "continuous" | "lightly_serialized" | "anthology";
+            /**
+             * Adaptationpolicy
+             * @default condense_mainline
+             * @constant
+             */
+            adaptationPolicy: "condense_mainline";
+            /** Mustkeep */
+            mustKeep?: string[];
+        };
+        /** StoryProductionTargetsCommand */
+        StoryProductionTargetsCommand: {
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+            /** Productiontargets */
+            productionTargets: {
+                [key: string]: components["schemas"]["StoryProductionTarget"];
+            };
+        };
         /** StorySeriesDto */
         StorySeriesDto: {
+            /**
+             * Adaptationpolicy
+             * @default preserve_all
+             * @enum {string}
+             */
+            adaptationPolicy: "preserve_all" | "condense_mainline";
             /** Title */
             title: string;
             /** Premise */
@@ -5196,6 +5785,10 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "analyzing" | "analyzed" | "confirmed" | "failed";
+            /** Productiontargets */
+            productionTargets?: {
+                [key: string]: components["schemas"]["StoryProductionTarget"];
+            } | null;
             /** Analysisjobid */
             analysisJobId?: string | null;
             /** Units */
@@ -5321,6 +5914,21 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** UnknownJobReplacement */
+        UnknownJobReplacement: {
+            /**
+             * Jobid
+             * Format: uuid
+             */
+            jobId: string;
+            /** Inputhash */
+            inputHash: string;
+            /**
+             * Acknowledgeduplicatecharge
+             * @constant
+             */
+            acknowledgeDuplicateCharge: true;
         };
         /** ValidationCanonReferenceDto */
         ValidationCanonReferenceDto: {
@@ -5456,6 +6064,14 @@ export interface components {
         };
         /** VideoDiagnosisCommand */
         VideoDiagnosisCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
             /**
              * Assetid
              * Format: uuid
@@ -5500,6 +6116,10 @@ export interface components {
         };
         /** VideoEditDraftCreateCommand */
         VideoEditDraftCreateCommand: {
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
             /**
              * Sourcevideoassetid
              * Format: uuid
@@ -5517,6 +6137,10 @@ export interface components {
         };
         /** VideoEditDraftDto */
         VideoEditDraftDto: {
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
             /**
              * Id
              * Format: uuid
@@ -5625,6 +6249,23 @@ export interface components {
             createdAt: string;
             /** Approvedat */
             approvedAt?: string | null;
+        };
+        /** VideoRepairResultCommand */
+        VideoRepairResultCommand: {
+            /**
+             * Repairid
+             * Format: uuid
+             */
+            repairId: string;
+            /** Previouspreviewjobid */
+            previousPreviewJobId?: string | null;
+            /**
+             * Preserveoriginalaudio
+             * @default false
+             */
+            preserveOriginalAudio: boolean;
+            /** Retryafterjobid */
+            retryAfterJobId?: string | null;
         };
         /** VideoReviewCreateCommand */
         VideoReviewCreateCommand: {
@@ -7447,6 +8088,41 @@ export interface operations {
             };
         };
     };
+    update_story_production_targets_api_v1_story_imports__document_id__production_targets_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryProductionTargetsCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorySourceDocumentDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_story_import_api_v1_story_imports__document_id__get: {
         parameters: {
             query?: never;
@@ -8729,6 +9405,41 @@ export interface operations {
             };
         };
     };
+    prepare_edit_references_api_v1_projects__project_id__video_edits_references_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentReferencePreparationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     video_edits_api_v1_projects__project_id__video_edits_get: {
         parameters: {
             query?: never;
@@ -9103,6 +9814,42 @@ export interface operations {
             };
         };
     };
+    prepare_repair_result_api_v1_projects__project_id__video_edit_drafts__draft_id__results_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoRepairResultCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     render_edit_preview_api_v1_projects__project_id__edit_previews_post: {
         parameters: {
             query?: never;
@@ -9219,6 +9966,172 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_events_api_v1_jobs__job_id__events_get: {
+        parameters: {
+            query?: {
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replacement_preview_api_v1_jobs__job_id__replacement_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replacement_create_api_v1_jobs__job_id__replacement_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplacementGenerationCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_result_api_v1_jobs__job_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recover_job_api_v1_jobs__job_id__recovery_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobRecoveryCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

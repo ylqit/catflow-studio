@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from PIL import Image
+from volcenginesdkarkruntime._exceptions import ArkAPITimeoutError
 
 from catflow.application.gateways import ProviderGatewayError, SegmentVideoGenerationRequest
-from catflow_worker.ark_gateway import ArkGatewaySettings, ArkTypedGateway
+from catflow_worker.ark_gateway import ArkGatewaySettings, ArkTypedGateway, _provider_error
 
 
 class Recorder:
@@ -95,6 +97,17 @@ def test_director_planner_gets_a_larger_output_budget_without_changing_story_bud
     assert responses.calls[1]["max_output_tokens"] == 8000
 
 
+def test_storyboard_image_request_does_not_instruct_model_to_diagnose(tmp_path: Path) -> None:
+    responses = Recorder(_response({"shots": []}))
+    gateway = ArkTypedGateway(_settings(), client=SimpleNamespace(responses=responses))
+    images = (_image(tmp_path / "ref.png", "blue"),)
+    gateway.plan_shots(prompt="分镜", output_schema={}, image_paths=images)
+    gateway.diagnose(prompt="检查", output_schema={}, image_paths=images)
+    assert "规划分镜" in responses.calls[0]["input"][0]["content"][0]["text"]
+    assert "返回诊断" not in responses.calls[0]["input"][0]["content"][0]["text"]
+    assert "返回诊断" in responses.calls[1]["input"][0]["content"][0]["text"]
+
+
 def test_incomplete_structured_response_preserves_reason_usage_and_response_id() -> None:
     response = SimpleNamespace(
         id="response-incomplete-1",
@@ -116,7 +129,8 @@ def test_incomplete_structured_response_preserves_reason_usage_and_response_id()
         "outputTokens": 8000,
         "totalTokens": 8321,
     }
-    assert captured.value.request_id == "response-incomplete-1"
+    assert captured.value.response_id == "response-incomplete-1"
+    assert captured.value.request_id is None
     assert captured.value.as_error_document()["incompleteReason"] == "max_output_tokens"
 
 
@@ -560,3 +574,26 @@ def test_ark_submission_timeout_is_never_presented_as_safe_to_retry() -> None:
     assert captured.value.submission_unknown is True
     assert captured.value.retryable is False
     assert captured.value.timed_out is True
+
+
+def test_real_ark_client_disables_implicit_submission_retries() -> None:
+    gateway = ArkTypedGateway(_settings())
+    try:
+        assert gateway._client.max_retries == 0
+    finally:
+        gateway._client.close()
+
+
+def test_real_ark_timeout_without_code_preserves_unknown_outcome() -> None:
+    timeout = ArkAPITimeoutError(
+        request=httpx.Request("POST", "https://ark.cn-beijing.volces.com/api/v3/responses"),
+        request_id="timeout-classification-check",
+    )
+    error = _provider_error(timeout, submission=True)
+
+    assert error.code == "provider_timeout"
+    assert error.client_request_id == "timeout-classification-check"
+    assert error.request_id is None
+    assert error.submission_unknown is True
+    assert error.retryable is False
+    assert error.timed_out is True

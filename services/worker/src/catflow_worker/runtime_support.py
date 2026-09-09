@@ -13,6 +13,7 @@ from catflow.infrastructure.models import AssetRecord, JobRecord
 
 from .ark_results import ArkResultLandingService
 from .media_jobs import LocalMediaJobExecutor
+from .media_probe import inspect_video
 
 
 class AssetMediaResolver:
@@ -25,11 +26,13 @@ class AssetMediaResolver:
         *,
         ffmpeg_path: Path,
         timeline_renderer: LocalMediaJobExecutor | None = None,
+        ffprobe_path: Path | None = None,
     ) -> None:
         self._sessions = sessions
         self._media_store = media_store
         self._ffmpeg_path = ffmpeg_path
         self._timeline_renderer = timeline_renderer
+        self._ffprobe_path = ffprobe_path
 
     def resolve_paths(self, asset_ids: tuple[uuid.UUID, ...]) -> tuple[Path, ...]:
         paths: list[Path] = []
@@ -41,6 +44,8 @@ class AssetMediaResolver:
                 path = self._media_store.resolve(asset.storage_key)
                 if not path.is_file():
                     raise ValueError(f"frozen asset content is missing: {asset_id}")
+                if _sha256(path) != asset.sha256:
+                    raise ValueError(f"frozen asset bytes changed: {asset_id}")
                 paths.append(path)
         return tuple(paths)
 
@@ -81,6 +86,27 @@ class AssetMediaResolver:
             frames.append(destination)
         return tuple(frames)
 
+    def store_reference_preparation(self, job_id: uuid.UUID) -> None:
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if (
+                job is None
+                or job.provider != "local_ffmpeg"
+                or job.frozen_input_json.get("purpose") != "segment_reference"
+            ):
+                raise ValueError("invalid local reference preparation")
+            frozen = dict(job.frozen_input_json)
+        generation, issue = frozen["generationRange"], frozen["issueRange"]
+        self.prepare_segment_media(
+            job_id,
+            uuid.UUID(frozen["baseVideoAssetId"]),
+            generation["startFrame"],
+            generation["endFrame"],
+            issue["startFrame"],
+            issue["endFrame"],
+            frozen["providerDurationSeconds"],
+        )
+
     def prepare_segment_media(
         self,
         job_id: uuid.UUID,
@@ -106,12 +132,18 @@ class AssetMediaResolver:
                 or asset is None
                 or asset.project_id != job.project_id
                 or asset.media_type != "video"
-                or job.video_repair_id is None
+                or (
+                    job.video_repair_id is None
+                    and job.frozen_input_json.get("purpose") != "segment_reference"
+                )
             ):
                 raise ValueError("segment media source does not match the repair job")
             source = self._media_store.resolve(asset.storage_key)
             project_id = job.project_id
-            frozen_timeline = job.frozen_input_json.get("baseEdl")
+            exact_reference = job.frozen_input_json.get("referenceRevision", 0) >= 2
+            frozen_timeline = job.frozen_input_json.get("inputEdl") or job.frozen_input_json.get(
+                "baseEdl"
+            )
             from_frame = job.frozen_input_json.get("generationMode") == "from_frame"
             anchor_start = (
                 job.frozen_input_json.get("anchorStartFrame") if from_frame else issue_start_frame
@@ -119,6 +151,8 @@ class AssetMediaResolver:
             anchor_end = (
                 job.frozen_input_json.get("anchorEndFrame") if from_frame else issue_end_frame - 1
             )
+            if exact_reference and job.frozen_input_json.get("endStatePolicy") == "replace":
+                anchor_end = None
             if from_frame and not isinstance(anchor_start, int):
                 raise ValueError("strict frame generation requires a selected start")
         if not source.is_file():
@@ -144,7 +178,9 @@ class AssetMediaResolver:
 
         if not from_frame:
             context_frames = generation_end_frame - generation_start_frame
-            pad_seconds = max(0.0, provider_duration_seconds - context_frames / 24)
+            pad_seconds = (
+                0 if exact_reference else max(0.0, provider_duration_seconds - context_frames / 24)
+            )
             context_filter = (
                 f"fps=24,trim=start_frame={generation_start_frame}:"
                 f"end_frame={generation_end_frame},setpts=PTS-STARTPTS"
@@ -152,8 +188,8 @@ class AssetMediaResolver:
             if pad_seconds:
                 context_filter += f",tpad=stop_mode=clone:stop_duration={pad_seconds:.6f}"
             context_filter += (
-                f",trim=duration={provider_duration_seconds},"
-                "scale=480:854:force_original_aspect_ratio=decrease,"
+                ("," if exact_reference else f",trim=duration={provider_duration_seconds},")
+                + "scale=480:854:force_original_aspect_ratio=decrease,"
                 "pad=480:854:(ow-iw)/2:(oh-ih)/2:color=0x1F1C1A,setsar=1,format=yuv420p"
             )
             self._render_atomic(
@@ -184,6 +220,13 @@ class AssetMediaResolver:
             self._extract_exact_frame(source, anchor_end, anchor_out)
 
         if not from_frame:
+            facts = {}
+            if exact_reference:
+                if self._ffprobe_path is None:
+                    raise ValueError("actual reference inspection is unavailable")
+                facts = inspect_video(context, self._ffprobe_path)
+                if facts["durationFrames"] != context_frames or facts["hasAudio"]:
+                    raise ValueError("reference frames or audio differ from the frozen range")
             self._persist_prepared_asset(
                 job_id,
                 project_id,
@@ -195,8 +238,15 @@ class AssetMediaResolver:
                     "frameRateDenominator": 1,
                     "sourceStartFrame": generation_start_frame,
                     "sourceEndFrame": generation_end_frame,
-                    "durationFrames": provider_duration_seconds * 24,
-                    "paddedTailFrames": provider_duration_seconds * 24 - context_frames,
+                    "durationFrames": context_frames
+                    if exact_reference
+                    else provider_duration_seconds * 24,
+                    "paddedTailFrames": 0
+                    if exact_reference
+                    else provider_duration_seconds * 24 - context_frames,
+                    "audioRemoved": True,
+                    "outputDurationSeconds": provider_duration_seconds,
+                    **facts,
                 },
             )
         self._persist_prepared_asset(
@@ -262,8 +312,8 @@ class AssetMediaResolver:
         metadata: dict[str, object],
     ) -> None:
         sha256 = _sha256(path)
-        width: int | None = None
-        height: int | None = None
+        width: int | None = metadata.get("width")
+        height: int | None = metadata.get("height")
         media_type = "video" if path.suffix.lower() == ".mp4" else "image"
         if media_type == "image":
             with Image.open(path) as image:
@@ -272,7 +322,7 @@ class AssetMediaResolver:
         with self._sessions.begin() as session:
             existing = (
                 session.query(AssetRecord)
-                .filter_by(project_id=project_id, role=role, sha256=sha256)
+                .filter_by(producing_job_id=job_id, role=role)
                 .one_or_none()
             )
             if existing is not None:
@@ -307,10 +357,12 @@ class JobResultDispatcher:
         *,
         local: LocalMediaJobExecutor,
         ark: ArkResultLandingService | None,
+        references: AssetMediaResolver | None = None,
     ) -> None:
         self._sessions = sessions
         self._local = local
         self._ark = ark
+        self._references = references
 
     def store_result(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:
@@ -319,6 +371,12 @@ class JobResultDispatcher:
                 raise ValueError("job not found")
             provider = job.provider
             kind = job.kind
+            reference_preparation = job.frozen_input_json.get("purpose") == "segment_reference"
+        if provider == "local_ffmpeg" and reference_preparation:
+            if self._references is None:
+                raise ValueError("reference preparation owner is not configured")
+            self._references.store_reference_preparation(job_id)
+            return
         if kind == "render_export" or provider == "local_ffmpeg":
             self._local.store_result(job_id)
             return

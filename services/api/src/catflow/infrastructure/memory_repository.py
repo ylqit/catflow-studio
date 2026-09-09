@@ -14,6 +14,7 @@ from catflow.application.continuity import (
     SeriesAssetBindingsPatchCommand,
     planned_continuity_state,
 )
+from catflow.application.job_execution import JobRecoveryCommand
 from catflow.application.project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -85,6 +86,7 @@ from catflow.application.story_imports import (
     StoryImportCreateCommand,
     StoryImportMaterializationDto,
     StoryImportProjectDto,
+    StoryProductionTargetsCommand,
     StorySourceDocumentDto,
     StorySourceRelationSuggestionDto,
     StorySourceUnitDto,
@@ -711,6 +713,30 @@ class MemoryStudioRepository:
         series = self._story_series.get(series_id)
         if series is None:
             raise StudioNotFoundError("story series not found")
+        target_fields = {"planned_episode_count", "default_episode_duration_seconds", "must_keep"}
+        if command.model_fields_set & target_fields:
+            if (
+                series.adaptation_policy != "condense_mainline"
+                or series.active_plan_version_id is not None
+            ):
+                raise StudioConflictError("只能调整尚未采用方案的新缩编系列的生产目标。")
+            if (
+                series.length_mode == "ongoing"
+                and "planned_episode_count" in command.model_fields_set
+            ):
+                raise StudioConflictError("持续连载不设置总集数。")
+            if any(
+                getattr(command, field) is None
+                for field in command.model_fields_set & target_fields
+            ):
+                raise StudioConflictError("生产目标不能为空。")
+            if any(
+                job.series_id == series_id
+                and job.kind in {"plan_series", "plan_series_segment"}
+                and job.status not in {"succeeded", "failed", "cancelled"}
+                for job in self._jobs.values()
+            ):
+                raise StudioConflictError("规划任务尚未终结，请等待结果后调整目标。")
         changes = {
             name: value
             for name, value in command.model_dump(mode="python").items()
@@ -752,6 +778,9 @@ class MemoryStudioRepository:
                 plan,
                 expected_episode_count=expected_episode_count,
                 narrative_mode=series.narrative_mode,
+                adaptation_policy=series.adaptation_policy,
+                expected_duration_seconds=series.default_episode_duration_seconds,
+                must_keep=series.must_keep,
                 source_unit_ordinals={
                     beat.binding_order for beat in self._series_source_beats.get(series_id, [])
                 },
@@ -827,6 +856,9 @@ class MemoryStudioRepository:
                 MAX_SERIES_PLANNING_BATCH,
             ),
             narrative_mode=series.narrative_mode,
+            adaptation_policy=series.adaptation_policy,
+            expected_duration_seconds=series.default_episode_duration_seconds,
+            must_keep=series.must_keep,
             source_unit_ordinals={
                 beat.binding_order for beat in self._series_source_beats.get(series_id, [])
             },
@@ -1386,6 +1418,7 @@ class MemoryStudioRepository:
         now = datetime.now(UTC)
         document = StorySourceDocumentDto(
             id=document_id,
+            productionTargets=command.production_targets,
             contentHash=content_hash,
             sourceFormat=command.source_format,
             fileName=command.file_name,
@@ -1400,6 +1433,28 @@ class MemoryStudioRepository:
         self._story_source_documents[document.id] = document
         self.create_job(job)
         return document
+
+    def update_story_production_targets(
+        self, document_id: uuid.UUID, command: StoryProductionTargetsCommand
+    ) -> StorySourceDocumentDto:
+        document = self._story_source_documents.get(document_id)
+        if document is None:
+            raise StudioNotFoundError("story source document not found")
+        if document.updated_at != command.expected_updated_at:
+            raise StudioConflictError("来源设置已在其他页面变化，请刷新后保存。")
+        if not set(command.production_targets) <= {
+            "default",
+            *(str(item.id) for item in document.relation_suggestions),
+        }:
+            raise StudioConflictError("生产目标引用了不存在的故事组。")
+        updated = document.model_copy(
+            update={
+                "production_targets": command.production_targets,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._story_source_documents[document_id] = updated
+        return updated
 
     def restart_story_source_analysis(self, document_id: uuid.UUID, job: JobDto) -> JobDto:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
@@ -1549,14 +1604,17 @@ class MemoryStudioRepository:
                 SeriesCreateCommand(
                     title=suggestion.title,
                     premise="\n".join(item.raw_text for item in units),
-                    narrativeMode=suggestion.narrative_mode or "continuous",
+                    adaptationPolicy=command.adaptation_policy,
+                    narrativeMode=command.narrative_mode
+                    or suggestion.narrative_mode
+                    or "continuous",
                     lengthMode=command.series_length_mode,
                     plannedEpisodeCount=command.planned_episode_count,
-                    defaultEpisodeDurationSeconds=12,
+                    defaultEpisodeDurationSeconds=command.default_episode_duration_seconds,
                     worldSetting="由已导入原文中的地点、时间和环境归纳",
                     emotionalDirection="保持原文的情绪变化",
                     recurringElements=[],
-                    mustKeep=["保留来源文本中的核心事件"],
+                    mustKeep=command.must_keep or ["保留来源文本中的核心事件"],
                     mustAvoid=["不得无依据改写来源事实"],
                     additionalNotes=f"来源文档 {document.id}",
                 ),
@@ -1569,16 +1627,21 @@ class MemoryStudioRepository:
             if series is None:
                 raise StudioNotFoundError("target story series not found")
         elif command.target == "independent":
+            stories = (
+                [(suggestion.title, "\n".join(item.raw_text for item in units))]
+                if command.adaptation_policy == "condense_mainline"
+                else [(item.title, item.raw_text) for item in units]
+            )
             projects = [
                 self.create_project(
                     ProjectCreate(
-                        title=item.title,
-                        theme=item.raw_text,
-                        targetDurationSeconds=12,
+                        title=title,
+                        theme=text,
+                        targetDurationSeconds=command.default_episode_duration_seconds,
                     ),
                     canon_profile_id=self._canon_profile_id,
                 )
-                for item in units
+                for title, text in stories
             ]
         elif command.target_series_id is not None:
             series = self._story_series.get(command.target_series_id)
@@ -1688,6 +1751,8 @@ class MemoryStudioRepository:
             ),
             latestJob=(
                 PlannerJobDto(
+                    execution=latest_job.execution,
+                    revision=latest_job.revision,
                     id=latest_job.id,
                     status=latest_job.status,
                     provider=latest_job.provider,
@@ -2073,7 +2138,13 @@ class MemoryStudioRepository:
         return job
 
     def get_job(self, job_id: uuid.UUID) -> JobDto | None:
-        return self._jobs.get(job_id)
+        job = self._jobs.get(job_id)
+        if job is not None:
+            job.successor_job_ids = [
+                item.id for item in self._jobs.values() if item.supersedes_job_id == job_id
+            ]
+            job.execution_summary()
+        return job
 
     def record_director_validation(
         self, job_id: uuid.UUID, validation: dict[str, object]
@@ -2082,9 +2153,23 @@ class MemoryStudioRepository:
         if job is None:
             raise StudioNotFoundError("job not found")
         provider_result = dict(job.provider_result or {})
+        previous = provider_result.get("validation")
+        if previous == validation:
+            return job
+        if previous is not None:
+            provider_result["validationHistory"] = [
+                *provider_result.get("validationHistory", []), previous,
+            ]
         provider_result["validation"] = validation
-        updated = job.model_copy(update={"provider_result": provider_result})
+        updated = job.model_copy(update={
+            "provider_result": provider_result, "revision": job.revision + 1,
+            "updated_at": datetime.now(UTC),
+        })
         self._jobs[job_id] = updated
+        self._record_event(updated, "job.director_validation", {
+            "normalizationRevision": str(validation.get("normalizationRevision", "")),
+            "disposition": str(validation.get("disposition", "")),
+        })
         return updated
 
     def record_series_plan_validation(
@@ -2117,26 +2202,64 @@ class MemoryStudioRepository:
             default=None,
         )
 
-    def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
-        job = self._jobs.get(job_id)
+    def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
+        job = self.get_job(job_id)
         if job is None:
             raise StudioNotFoundError("job not found")
-        if (
-            job.status != "failed"
-            or not isinstance(job.error, dict)
-            or job.error.get("code") != "result_storage_failed"
-            or job.kind not in {"generate_image", "generate_video"}
-            or not isinstance(job.provider_result, dict)
-            or not (job.provider_result.get("url") or job.provider_result.get("videoUrl"))
-            or (job.kind == "generate_video" and not job.provider_task_id)
-        ):
-            raise StudioConflictError("job is not eligible for result storage recovery")
-        updated = job.model_copy(
-            update={"status": "storing", "error": None, "updated_at": datetime.now(UTC)}
+        prior = next(
+            (
+                event
+                for event in self._job_events
+                if event.job_id == job_id
+                and event.payload.get("recoveryKey") == command.idempotency_key
+            ),
+            None,
         )
+        if prior:
+            if prior.payload.get("action") != command.action:
+                raise StudioIdempotencyInputConflictError("恢复幂等键已用于不同操作。")
+            return job
+        job.execution_summary()
+        if (
+            job.revision != command.expected_revision
+            or command.action not in job.execution.available_actions
+        ):
+            raise StudioConflictError("任务状态已变化或不支持此恢复操作。")
+        now = datetime.now(UTC)
+        updated = job.model_copy(
+            update={
+                "status": "polling" if command.action == "query_provider" else "storing",
+                "error": None,
+                "updated_at": now,
+                "revision": job.revision + 1,
+                "execution_facts": {
+                    **(job.execution_facts or {}),
+                    "recoveryState": "automatic",
+                    "queryFailureCount": 0,
+                    "queryWindowStartedAt": now.isoformat(),
+                },
+            }
+        )
+        updated.execution_summary()
         self._jobs[job_id] = updated
-        self._record_event(updated, "job.storing")
+        self._record_event(updated, "job.recovery_requested")
+        self._job_events[-1].payload.update(
+            recoveryKey=command.idempotency_key, action=command.action
+        )
         return updated
+
+    def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
+        job = self.get_job(job_id)
+        if job is None:
+            raise StudioNotFoundError("job not found")
+        return self.recover_job(
+            job_id,
+            JobRecoveryCommand(
+                action="process_result",
+                expectedRevision=job.revision,
+                idempotencyKey=f"resume-storage:{job.id}:{job.revision}",
+            ),
+        )
 
     def cancel_job(self, job_id: uuid.UUID) -> JobDto:
         job = self._jobs.get(job_id)
@@ -2145,14 +2268,23 @@ class MemoryStudioRepository:
         if job.status in {"succeeded", "failed", "cancelled"}:
             return job
         now = datetime.now(UTC)
-        status = "cancelled" if job.status == "queued" else "cancel_requested"
+        job.execution_summary()
+        if "cancel" not in job.execution.available_actions:
+            raise StudioConflictError("尚无远端取消确认。")
+        status = "cancelled"
         updated = job.model_copy(update={"status": status, "updated_at": now})
         self._jobs[job_id] = updated
         self._record_event(updated, f"job.{status}")
         return updated
 
-    def list_job_events(self, *, after_event_id: int, limit: int = 100) -> list[JobEventDto]:
-        return [event for event in self._job_events if event.id > after_event_id][:limit]
+    def list_job_events(
+        self, *, after_event_id: int, limit: int = 100, job_id: uuid.UUID | None = None
+    ) -> list[JobEventDto]:
+        return [
+            event
+            for event in self._job_events
+            if event.id > after_event_id and (job_id is None or event.job_id == job_id)
+        ][:limit]
 
     def latest_job_event_id(self) -> int:
         return self._job_events[-1].id if self._job_events else 0

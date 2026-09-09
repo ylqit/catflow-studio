@@ -76,6 +76,7 @@ export type SeriesNarrativeMode = "continuous" | "lightly_serialized" | "antholo
 export type SeriesLengthMode = "fixed" | "ongoing";
 
 export interface SeriesCreateCommand {
+  adaptationPolicy?: "preserve_all" | "condense_mainline";
   title: string;
   premise: string;
   narrativeMode: SeriesNarrativeMode;
@@ -126,6 +127,9 @@ export interface SeriesEpisodeOutlineDraft {
 }
 
 export interface SeriesPlanDraft {
+  sourceTreatments?: Array<{ sourceUnitOrdinal: number; treatment: "retained" | "merged" | "simplified" | "omitted"; episodeOrders: number[]; reason: string }>;
+  adaptationRisks?: Array<{ message: string; blocking: boolean }>;
+  preservedRequirements?: Array<{ requirement: string; handling: string; episodeOrders: number[] }>;
   seriesBible: {
     logline: string;
     centralTheme: string;
@@ -357,6 +361,7 @@ export interface StorySourceRelationSuggestionDto {
 }
 
 export interface StorySourceDocumentDto {
+  productionTargets?: Record<string, StoryProductionTarget> | null;
   id: string;
   contentHash: string;
   sourceFormat: "paste" | "txt" | "md";
@@ -472,6 +477,8 @@ export type GenerationPromptSectionDto = components["schemas"]["GenerationPrompt
 export type ImageGenerationInputSnapshotDto = components["schemas"]["ImageGenerationInputSnapshotDto"];
 
 export interface JobDto {
+  execution?: JobExecutionDto | null;
+  revision?: number;
   id: string;
   projectId?: string | null;
   seriesId?: string | null;
@@ -492,6 +499,8 @@ export interface JobDto {
   provider?: string;
   model?: string;
   providerTaskId?: string;
+  successorJobIds?: string[];
+  supersedesJobId?: string | null;
   providerSubmissionStartedAt?: string | null;
   validationRunId?: string;
   videoRepairId?: string;
@@ -514,7 +523,7 @@ export interface JobDto {
   imageInputSnapshot?: ImageGenerationInputSnapshotDto | null;
   frozenInput: Record<string, unknown>;
   resultAssetIds: string[];
-  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; timedOut?: boolean; incompleteReason?: string; providerStatus?: string; maxOutputTokens?: number };
+  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; httpStatus?: number; timedOut?: boolean; incompleteReason?: string; providerStatus?: string; maxOutputTokens?: number };
   createdAt: string;
   updatedAt: string;
 }
@@ -570,6 +579,8 @@ export interface PlannerMessageDto {
 }
 
 export interface PlannerJobDto {
+  execution?: JobExecutionDto | null;
+  revision?: number;
   id: string;
   status: JobDto["status"];
   provider?: string;
@@ -732,6 +743,8 @@ export interface ShotPlanVersionDto {
 }
 
 export interface ShotPlanGenerationAttemptDto {
+  execution?: JobExecutionDto | null;
+  revision?: number;
   jobId: string;
   status: JobDto["status"];
   storyVersionId: string;
@@ -754,6 +767,11 @@ export interface ShotPlanGenerationAttemptDto {
   } | null;
   result?: {
     disposition: "candidate_ready" | "needs_input" | "invalid";
+    normalizationRevision?: string | null;
+    adjustments?: Array<{ code: string; path: string; message: string; providerValue?: unknown }>;
+    resolution?: "unresolved" | "candidate" | "accepted" | "rejected" | "superseded";
+    resultRevision?: number | null;
+    resultActive?: boolean;
     resultShotPlanVersionId?: string | null;
     recoverable: boolean;
     draft?: {
@@ -864,7 +882,7 @@ export type FrameEditTimelineDto = EditDecisionListV2Dto | EditDecisionListV3Dto
 export type EditDecisionListV2Dto = components["schemas"]["EditDecisionListV2"];
 export type SegmentRepairPreviewCommand = components["schemas"]["SegmentRepairPreviewCommand"];
 export type SegmentRepairPreviewDto = components["schemas"]["SegmentRepairPreviewDto"];
-export type SegmentRepairCreateCommand = components["schemas"]["SegmentRepairCreateCommand"];
+export type SegmentRepairCreateCommand = Omit<components["schemas"]["SegmentRepairCreateCommand"], "prepareOnly"> & { prepareOnly?: boolean };
 export type SegmentRepairApproveCommand = components["schemas"]["SegmentRepairApproveCommand"];
 export type VideoRepairDto = components["schemas"]["VideoRepairDto"];
 export type VideoEditDraftDto = components["schemas"]["VideoEditDraftDto"];
@@ -887,3 +905,25 @@ export interface WorkspaceDto {
   latestRepairJob?: JobDto | null;
   latestAssetJob?: JobDto | null;
 }
+
+export type StoryProductionTarget = Required<components["schemas"]["StoryProductionTarget"]>;
+
+export type StoryProductionTargetsCommand = components["schemas"]["StoryProductionTargetsCommand"];
+
+export type SeriesPatchCommand = components["schemas"]["SeriesPatchCommand"];
+
+
+export interface JobExecutionDto {
+  contractVersion: number; protocol: string | null; stage: string;
+  providerStatus: string | null; providerObservedAt: string | null;
+  providerResponseId: string | null; providerClientRequestId: string | null;
+  providerError: Record<string, unknown> | null; responseExpiresAt: string | null;
+  recoveryState: "none" | "automatic" | "needs_attention" | "unavailable";
+  lastQueryAt: string | null; nextActionAt: string | null; queryFailureCount: number;
+  queryError: Record<string, unknown> | null; availableActions: string[];
+  waitingForProvider: boolean; needsAttention: boolean; usageUnconfirmed: boolean;
+  resultState: "missing" | "partial" | "complete"; historicalResult: boolean;
+}
+export interface JobResultDto { jobId: string; revision: number; state: string; result: Record<string, unknown> | null; error: Record<string, unknown> | null; assetIds: string[]; historical: boolean; message?: string | null }
+export interface JobEventsDto { items: { id: number; eventType: string; createdAt: string; payload: Record<string, unknown> }[]; nextCursor: number; hasMore: boolean }
+export interface GenerationPreparationDto { preparedOnly: true; kind: string; provider: string; model: string; inputHash: string; executionInputHash: string; input: Record<string, unknown>; expectedCostMicros: number | null; replacesJobId: string | null }

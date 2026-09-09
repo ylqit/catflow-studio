@@ -97,18 +97,27 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
   .topbar-center { display: none; }
 }
 
-/* The editing workspace supports in-app side panels and narrow comparison views. */
-body:has(.draft-editor) { min-width: 320px; }
+/* Editing and storyboard pages reflow inside narrow windows and at browser zoom. */
+body:has(.draft-editor, .storyboard-workspace) { min-width: 320px; }
 @media (max-width: 760px) {
-  body:has(.draft-editor) .topbar { padding-inline: 12px; grid-template-columns: auto 1fr; gap: 10px; }
-  body:has(.draft-editor) .topbar-center { display: none; }
-  body:has(.draft-editor) .topbar-actions { gap: 10px; font-size: 12px; }
-  body:has(.draft-editor) .brand strong, body:has(.draft-editor) .brand small { display: none; }
-  body:has(.draft-editor) .workspace-heading { width: calc(100% - 24px); height: auto; min-height: 84px; padding-block: 12px; gap: 8px; }
-  body:has(.draft-editor) .workspace-title { min-width: 0; gap: 8px; }
-  body:has(.draft-editor) .workspace-title h1 { font-size: 20px; overflow-wrap: anywhere; }
-  body:has(.draft-editor) .workspace-title .eyebrow { max-width: 180px; }
-  body:has(.draft-editor) .step-nav { padding-inline: 12px; overflow-x: auto; grid-template-columns: repeat(5, 132px); }
-  body:has(.draft-editor) .step-nav a { padding-inline: 10px; }
-  body:has(.draft-editor) .workspace-content { width: calc(100% - 24px); }
+  body:has(.draft-editor, .storyboard-workspace) .topbar { padding-inline: 12px; grid-template-columns: auto 1fr; gap: 10px; }
+  body:has(.draft-editor, .storyboard-workspace) .topbar-center { display: none; }
+  body:has(.draft-editor, .storyboard-workspace) .topbar-actions { gap: 10px; font-size: 12px; }
+  body:has(.draft-editor, .storyboard-workspace) .brand strong, body:has(.draft-editor, .storyboard-workspace) .brand small { display: none; }
+  body:has(.draft-editor, .storyboard-workspace) .workspace-heading { width: calc(100% - 24px); height: auto; min-height: 84px; padding-block: 12px; gap: 8px; }
+  body:has(.draft-editor, .storyboard-workspace) .workspace-title { min-width: 0; gap: 8px; }
+  body:has(.draft-editor, .storyboard-workspace) .workspace-title h1 { font-size: 20px; overflow-wrap: anywhere; }
+  body:has(.draft-editor, .storyboard-workspace) .workspace-title .eyebrow { max-width: 180px; }
+  body:has(.draft-editor, .storyboard-workspace) .step-nav { padding-inline: 12px; overflow-x: auto; grid-template-columns: repeat(5, 132px); }
+  body:has(.draft-editor, .storyboard-workspace) .step-nav a { padding-inline: 10px; }
+  body:has(.draft-editor, .storyboard-workspace) .workspace-content { width: calc(100% - 24px); }
+}
+
+@media (max-width: 760px) {
+  body:has(.storyboard-workspace) .workspace-heading { align-items: flex-start; }
+  body:has(.storyboard-workspace) .workspace-title > a { flex-shrink: 0; }
+  body:has(.storyboard-workspace) .workspace-status { flex-wrap: wrap; flex-shrink: 0; }
+  body:has(.storyboard-workspace) .episode-switcher { width: calc(100% - 24px); }
+  body:has(.storyboard-workspace) .episode-switcher label { width: 100%; min-width: 0; }
+  body:has(.storyboard-workspace) .episode-switcher select { min-width: 0; width: 100%; flex: 1; }
 }

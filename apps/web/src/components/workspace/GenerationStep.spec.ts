@@ -95,6 +95,51 @@ describe("GenerationStep", () => {
     wrapper.unmount();
   });
 
+  it("waits for saved reviews before allowing edits and saves notes without quality approval", async () => {
+    client.assets.mockResolvedValue([{ id: "video-1", projectId: "project-1", role: "video", mediaType: "video", sha256: "e".repeat(64), metadata: { durationFrames: 361 } }]);
+    let resolveReviews!: (value: unknown[]) => void;
+    client.videoReviews.mockReturnValueOnce(new Promise(resolve => { resolveReviews = resolve; }));
+    const wrapper = mount(GenerationStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()] } });
+    await flushPromises();
+    await wrapper.findAll("button").find(button => button.text() === "检查视频")!.trigger("click");
+    await flushPromises();
+    const save = wrapper.findAll("button").find(button => button.text() === "保存问题与验收记录")!;
+    expect(wrapper.text()).toContain("正在读取已保存的验收记录");
+    expect(wrapper.get("textarea").attributes("disabled")).toBeDefined();
+    expect(save.attributes("disabled")).toBeDefined();
+    expect(client.createVideoReview).not.toHaveBeenCalled();
+    resolveReviews([{ notes: "瓶子留在袋内，声音待试听", checks: {}, audioChecks: {} }]);
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("瓶子留在袋内，声音待试听");
+    expect(save.attributes("disabled")).toBeUndefined();
+    await wrapper.get("textarea").setValue("补记：切镜提前");
+    await save.trigger("click");
+    await flushPromises();
+    expect(client.createVideoReview).toHaveBeenCalledWith("project-1", expect.objectContaining({ notes: "补记：切镜提前", checks: {}, audioChecks: {} }));
+    expect(wrapper.text()).toContain("问题与验收记录已保存");
+    expect(client.selectAsset).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps an unread review blocked after a load error and allows a normal UI retry", async () => {
+    client.assets.mockResolvedValue([{ id: "video-1", projectId: "project-1", role: "video", mediaType: "video", sha256: "e".repeat(64), metadata: {} }]);
+    client.videoReviews.mockRejectedValueOnce(new Error("读取中断"));
+    const wrapper = mount(GenerationStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()] } });
+    await flushPromises();
+    const inspect = wrapper.findAll("button").find(button => button.text() === "检查视频")!;
+    await inspect.trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toBeTruthy();
+    expect(wrapper.get("textarea").attributes("disabled")).toBeDefined();
+    client.videoReviews.mockResolvedValueOnce([{ notes: "原记录仍在", checks: {} }]);
+    await inspect.trigger("click");
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("原记录仍在");
+    expect(wrapper.get("textarea").attributes("disabled")).toBeUndefined();
+    expect(client.createVideoJob).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("keeps video generation locked after the API accepts a queued job", async () => {
     const wrapper = mount(GenerationStep, {
       props: { projectId: "project-1", workspace, runtime },

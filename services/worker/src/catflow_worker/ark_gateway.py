@@ -3,12 +3,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from PIL import Image
+from volcenginesdkarkruntime._response import to_raw_response_wrapper
 
 from catflow.application.gateways import (
     ImageProviderResult,
@@ -19,6 +22,9 @@ from catflow.application.gateways import (
     VideoSubmissionResult,
 )
 from catflow.application.image_generation import compile_provider_image_prompt
+
+from .ark_responses import parse_response, receive_response_stream, response_usage, save_response
+from .provider_receipts import provider_call, read_http_receipt, receipt_document, receive_receipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +74,55 @@ class ArkTypedGateway:
         if client is None:
             from volcenginesdkarkruntime import Ark
 
-            client = Ark(api_key=settings.api_key, base_url=settings.base_url)
+            # A paid submission with an unknown outcome must remain a single
+            # attempt; only CatFlow can decide whether another job is allowed.
+            client = Ark(api_key=settings.api_key, base_url=settings.base_url, max_retries=0)
         self._client = client
+
+    def validate_execution_contract(
+        self, contract: dict[str, Any], kind: str | None = None
+    ) -> None:
+        """Do not send a frozen request or task ID to a different runtime environment."""
+        endpoint = contract.get("apiBaseUrl")
+        expected_model = contract.get("model")
+        model = (
+            self._settings.image_model
+            if kind == "generate_image"
+            else self._settings.video_model
+            if kind in {"generate_video", "regenerate_video_segment"}
+            else self._settings.diagnostic_model
+            if kind in {"diagnose_image", "diagnose_video"}
+            else self._settings.planning_model
+        )
+        if (endpoint and endpoint != self._settings.base_url.rstrip("/")) or (
+            kind and expected_model and expected_model != model
+        ):
+            raise ProviderGatewayError(
+                code="execution_environment_changed",
+                message="当前外部接口或模型与冻结配置不符，请恢复原执行配置后继续。",
+                retryable=False,
+                submission_unknown=False,
+            )
+        if kind:
+            # Check both submission and recovery before recording a paid attempt.
+            paths = (
+                ("images.generate",)
+                if kind == "generate_image"
+                else ("content_generation.tasks.create", "content_generation.tasks.get")
+                if kind in {"generate_video", "regenerate_video_segment"}
+                else ("responses.create", "responses.retrieve")
+            )
+            for path in paths:
+                operation = self._client
+                for part in path.split("."):
+                    operation = getattr(operation, part, None)
+                if not callable(operation):
+                    raise ProviderGatewayError(
+                        code="local_adapter_error",
+                        message=f"本地 Ark SDK 缺少可调用接口 {path}；尚未提交模型请求。",
+                        retryable=False,
+                        submission_unknown=False,
+                    )
 
     def plan_story(
         self, *, prompt: str, output_schema: dict[str, object]
@@ -83,7 +136,8 @@ class ArkTypedGateway:
         )
 
     def plan_shots(
-        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = ()
+        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = (),
+        input_instruction: str = "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
     ) -> StructuredProviderResult:
         return self._structured_response(
             model=self._settings.planning_model,
@@ -91,6 +145,7 @@ class ArkTypedGateway:
             image_paths=image_paths,
             output_schema=output_schema,
             max_output_tokens=8000,
+            input_instruction=input_instruction,
         )
 
     def plan_series(
@@ -141,6 +196,7 @@ class ArkTypedGateway:
             image_paths=image_paths,
             output_schema=output_schema,
             max_output_tokens=4000,
+            input_instruction="按顺序比较所有图片并返回诊断。",
         )
 
     def generate_image(
@@ -169,9 +225,47 @@ class ArkTypedGateway:
         if reference_paths:
             request["image"] = [_image_data_url(path) for path in reference_paths]
         try:
-            response = self._client.images.generate(**request)
+            call = provider_call.get()
+            if call is not None and call.contract.get("version", 1) >= 2:
+                request["timeout"] = httpx.Timeout(
+                    call.contract.get("imageTimeoutSeconds", 600), connect=10
+                )
+                raw = to_raw_response_wrapper(self._client.images.generate)(**request)
+                document = read_http_receipt(raw)
+                image_error = document.get("error") or next(
+                    (item.get("error") for item in document.get("data", []) if item.get("error")),
+                    None,
+                )
+                receive_receipt(
+                    {
+                        "serverRequestId": raw.headers.get("x-request-id"),
+                        "complete": True,
+                        "providerStatus": "failed" if image_error else "completed",
+                        "providerError": image_error,
+                        "result": {"rawResponse": document},
+                        "usage": _usage_document(document.get("usage")),
+                    }
+                )
+                if image_error:
+                    raise ProviderGatewayError(
+                        code="image_generation_failed",
+                        message=str(image_error),
+                        retryable=False,
+                        submission_unknown=False,
+                    )
+                response = raw.parse()
+            else:
+                response = self._client.images.generate(**request)
         except Exception as exc:
             raise _provider_error(exc, submission=True) from exc
+        receive_receipt(
+            {
+                "complete": True,
+                "providerStatus": "completed",
+                "result": {"rawResponse": receipt_document(response)},
+                "usage": _usage_document(getattr(response, "usage", None)),
+            }
+        )
         data = list(getattr(response, "data", ()) or ())
         if len(data) != 1 or not getattr(data[0], "url", None):
             raise ProviderGatewayError(
@@ -253,52 +347,62 @@ class ArkTypedGateway:
                     "role": "reference_video",
                 }
             )
-        try:
-            response = self._client.content_generation.tasks.create(
-                model=self._settings.video_model,
-                content=content,
-                return_last_frame=True,
-                generate_audio=generate_audio,
-                watermark=False,
-                resolution=resolution,
-                ratio="9:16",
-                duration=duration_seconds,
-                timeout=self._settings.request_timeout_seconds,
-            )
-        except Exception as exc:
-            raise _provider_error(exc, submission=True) from exc
-        task_id = str(getattr(response, "id", "")).strip()
-        if not task_id:
-            raise ProviderGatewayError(
-                code="empty_task_id",
-                message="Seedance did not return a task ID",
-                retryable=False,
-                submission_unknown=True,
-            )
-        return VideoSubmissionResult(
-            task_id=task_id,
-            request_id=_optional_string(
-                getattr(response, "request_id", None) or getattr(response, "_request_id", None)
-            ),
+        return self._submit_video_task(
+            content=content,
+            generate_audio=generate_audio,
+            resolution=resolution,
+            ratio="9:16",
+            duration=duration_seconds,
         )
 
     def poll_video(self, task_id: str) -> VideoPollResult:
+        if call := provider_call.get():
+            self.validate_execution_contract(call.contract)
         try:
-            task = self._client.content_generation.tasks.get(
-                task_id=task_id,
-                timeout=self._settings.request_timeout_seconds,
-            )
+            call = provider_call.get()
+            if call is not None and call.contract.get("version", 1) >= 2:
+                raw = to_raw_response_wrapper(self._client.content_generation.tasks.get)(
+                    task_id=task_id,
+                    timeout=httpx.Timeout(30, connect=10),
+                )
+                document = read_http_receipt(raw)
+                receive_receipt(
+                    {
+                        "taskId": document.get("id"),
+                        "providerStatus": document.get("status"),
+                        "complete": document.get("status") == "succeeded",
+                        "providerError": document.get("error"),
+                        "result": {"rawResponse": document},
+                        "usage": _usage_document(document.get("usage")),
+                    }
+                )
+                task = raw.parse()
+            else:
+                task = self._client.content_generation.tasks.get(
+                    task_id=task_id,
+                    timeout=httpx.Timeout(30, connect=10),
+                )
         except Exception as exc:
             raise _provider_error(exc, submission=False) from exc
-        status = str(getattr(task, "status", "failed"))
+        status = str(getattr(task, "status", "unknown"))
+        receive_receipt(
+            {
+                "providerStatus": status,
+                "complete": status == "succeeded",
+                "providerError": receipt_document(getattr(task, "error", None)),
+                "result": {"rawResponse": receipt_document(task)},
+                "usage": _usage_document(getattr(task, "usage", None)),
+            }
+        )
         if status in {"queued", "running"}:
-            return VideoPollResult(status="running")
+            return VideoPollResult(status="running", provider_status=status)
         if status == "succeeded":
             content = getattr(task, "content", None)
             video_url = None if content is None else getattr(content, "video_url", None)
             if not video_url:
                 return VideoPollResult(
-                    status="failed",
+                    status="succeeded",
+                    provider_status=status,
                     error={
                         "code": "missing_video_url",
                         "message": "Seedance succeeded without a video URL",
@@ -307,6 +411,7 @@ class ArkTypedGateway:
                 )
             return VideoPollResult(
                 status="succeeded",
+                provider_status=status,
                 video_url=str(video_url),
                 last_frame_url=(
                     None
@@ -319,9 +424,19 @@ class ArkTypedGateway:
                 resolution=_optional_string(getattr(task, "resolution", None)),
                 usage=_usage_document(getattr(task, "usage", None)),
             )
+        if status not in {"failed", "cancelled", "expired"}:
+            return VideoPollResult(
+                status="unknown",
+                provider_status=status,
+                error={
+                    "code": "provider_state_unrecognized",
+                    "message": f"无法识别外部状态：{status}",
+                },
+            )
         error = getattr(task, "error", None)
         return VideoPollResult(
             status="failed",
+            provider_status=status,
             error={
                 "code": str(getattr(error, "code", "provider_failed")),
                 "message": str(getattr(error, "message", "Seedance task failed")),
@@ -346,7 +461,8 @@ class ArkTypedGateway:
                 "type": "text",
                 "text": (
                     f"{request.prompt}\n需要避免的问题：{request.negative_prompt}"
-                    if request.prompt_compiler_revision in {"segment-edit-v3", "segment-edit-v4"}
+                    if request.prompt_compiler_revision
+                    in {"segment-edit-v3", "segment-edit-v4", "segment-edit-v5"}
                     else (
                         f"本区间修改目标：{request.instruction}\n"
                         f"精确问题时间：{request.issue_start_seconds:.3f}–"
@@ -376,44 +492,59 @@ class ArkTypedGateway:
             }
             for index, path in enumerate(image_paths)
         )
+        return self._submit_video_task(
+            content=content,
+            generate_audio=request.generate_audio,
+            resolution=request.resolution,
+            ratio=request.ratio,
+            duration=request.duration_seconds,
+        )
+
+    def _submit_video_task(self, **parameters) -> VideoSubmissionResult:
+        """One creation boundary for full, shot and repair videos, with durable receipts."""
+        call = provider_call.get()
+        request = {
+            "model": self._settings.video_model,
+            "return_last_frame": True,
+            "watermark": False,
+            "timeout": self._settings.request_timeout_seconds,
+            **parameters,
+        }
         try:
-            response = self._client.content_generation.tasks.create(
-                model=self._settings.video_model,
-                content=content,
-                return_last_frame=True,
-                generate_audio=request.generate_audio,
-                watermark=False,
-                resolution=request.resolution,
-                ratio=request.ratio,
-                duration=request.duration_seconds,
-                timeout=self._settings.request_timeout_seconds,
-            )
+            if call is not None and call.contract.get("version", 1) >= 2:
+                client_id = str(uuid.uuid4())
+                call.receive({"clientRequestId": client_id})
+                raw = self._client.content_generation.tasks.with_raw_response.create(
+                    **request, extra_headers={"X-Client-Request-Id": client_id}
+                )
+                request_id = raw.headers.get("x-request-id")
+                document = read_http_receipt(raw)
+            else:
+                response = self._client.content_generation.tasks.create(**request)
+                document = receipt_document(response)
+                request_id = _optional_string(getattr(response, "request_id", None))
         except Exception as exc:
             raise _provider_error(exc, submission=True) from exc
-        task_id = str(getattr(response, "id", "")).strip()
+        task_id = _optional_string(document.get("id"))
+        receive_receipt(
+            {
+                "taskId": task_id,
+                "serverRequestId": request_id,
+                "providerStatus": "submitted",
+                "result": {"createReceipt": document},
+            }
+        )
         if not task_id:
             raise ProviderGatewayError(
                 code="empty_task_id",
-                message="Seedance did not return a segment repair task ID",
+                message="Seedance did not return a task ID",
                 retryable=False,
                 submission_unknown=True,
             )
         return VideoSubmissionResult(
             task_id=task_id,
-            request_id=_optional_string(
-                getattr(response, "request_id", None) or getattr(response, "_request_id", None)
-            ),
+            request_id=request_id,
         )
-
-    def cancel_video(self, task_id: str) -> bool:
-        try:
-            self._client.content_generation.tasks.delete(
-                task_id=task_id,
-                timeout=self._settings.request_timeout_seconds,
-            )
-        except Exception as exc:
-            raise _provider_error(exc, submission=False) from exc
-        return True
 
     def _structured_response(
         self,
@@ -423,11 +554,12 @@ class ArkTypedGateway:
         image_paths: tuple[Path, ...],
         output_schema: dict[str, object],
         max_output_tokens: int,
+        input_instruction: str = "只返回符合 Schema 的 JSON 对象。",
     ) -> StructuredProviderResult:
-        input_content: object = "只返回符合 Schema 的 JSON 对象。"
+        input_content: object = input_instruction
         if image_paths:
             content: list[dict[str, str]] = [
-                {"type": "input_text", "text": "按顺序比较所有图片并返回诊断。"}
+                {"type": "input_text", "text": input_instruction}
             ]
             for index, path in enumerate(image_paths, 1):
                 content.append({"type": "input_text", "text": f"有序图片{index}"})
@@ -447,103 +579,107 @@ class ArkTypedGateway:
             "prompt": prompt,
             "schema": output_schema,
             "imageSha256": [_sha256(path) for path in image_paths],
+            "inputInstruction": input_instruction,
         }
+        request = {
+            "model": model,
+            "instructions": schema_instruction,
+            "input": input_content,
+            "text": {"format": text_format},
+            "temperature": 0.2,
+            "max_output_tokens": max_output_tokens,
+            "thinking": {"type": "disabled"},
+        }
+        call = provider_call.get()
         try:
-            response = self._client.responses.create(
-                model=model,
-                instructions=schema_instruction,
-                input=input_content,
-                text={"format": text_format},
-                temperature=0.2,
-                max_output_tokens=max_output_tokens,
-                thinking={"type": "disabled"},
-                store=False,
-                timeout=self._settings.request_timeout_seconds,
-            )
+            if call is not None and call.contract.get("version", 1) >= 2:
+                document = receive_response_stream(self._client, request)
+            else:
+                response = self._client.responses.create(
+                    **request, store=False, timeout=self._settings.request_timeout_seconds
+                )
+                document = save_response(response)
+        except ProviderGatewayError:
+            raise
         except Exception as exc:
             raise _provider_error(exc, submission=True) from exc
-        provider_status = _optional_string(getattr(response, "status", None))
-        if provider_status != "completed":
-            incomplete_details = getattr(response, "incomplete_details", None)
-            raise ProviderGatewayError(
-                code="response_not_completed",
-                message=f"Ark response status is {provider_status!r}",
-                retryable=False,
-                submission_unknown=False,
-                request_id=_optional_string(getattr(response, "id", None)),
-                provider_status=provider_status,
-                incomplete_reason=_optional_string(getattr(incomplete_details, "reason", None)),
-                max_output_tokens=max_output_tokens,
-                usage=_usage_document(getattr(response, "usage", None)),
-            )
-        response_text = _response_text(response)
-        if len(response_text.encode("utf-8")) > 2 * 1024 * 1024:
-            raise ProviderGatewayError(
-                code="structured_output_too_large",
-                message="Ark structured output exceeded the 2 MiB safety limit",
-                retryable=False,
-                submission_unknown=False,
-                request_id=_optional_string(getattr(response, "id", None)),
-            )
         try:
-            payload = json.loads(response_text)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ProviderGatewayError(
-                code="invalid_structured_output",
-                message="Ark did not return a valid JSON object",
-                retryable=False,
-                submission_unknown=False,
-                request_id=_optional_string(getattr(response, "id", None)),
-            ) from exc
-        if not isinstance(payload, dict):
-            raise ProviderGatewayError(
-                code="invalid_structured_output",
-                message="Ark structured output must be a JSON object",
-                retryable=False,
-                submission_unknown=False,
-                request_id=_optional_string(getattr(response, "id", None)),
-            )
-        if _json_depth(payload) > 40:
-            raise ProviderGatewayError(
-                code="structured_output_too_deep",
-                message="Ark structured output exceeded the nesting safety limit",
-                retryable=False,
-                submission_unknown=False,
-                request_id=_optional_string(getattr(response, "id", None)),
-            )
+            parsed = parse_response(document)
+        except ProviderGatewayError as exc:
+            exc.max_output_tokens = max_output_tokens
+            raise
         return StructuredProviderResult(
-            payload=payload,
-            response_id=str(response.id),
-            model=str(response.model),
-            usage=_usage_document(getattr(response, "usage", None)),
+            payload=parsed["payload"],
+            response_id=parsed["responseId"],
+            model=parsed["model"],
+            usage=response_usage(document),
             request_hash=hashlib.sha256(
                 json.dumps(
-                    request_document,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
+                    request_document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 ).encode()
             ).hexdigest(),
         )
 
-
-def _json_depth(value: object) -> int:
-    if isinstance(value, dict):
-        return 1 + max((_json_depth(item) for item in value.values()), default=0)
-    if isinstance(value, list):
-        return 1 + max((_json_depth(item) for item in value), default=0)
-    return 0
+    def retrieve_response(self, response_id: str) -> dict[str, Any]:
+        if call := provider_call.get():
+            self.validate_execution_contract(call.contract)
+        try:
+            raw = to_raw_response_wrapper(self._client.responses.retrieve)(
+                response_id, timeout=httpx.Timeout(30, connect=10)
+            )
+            document = read_http_receipt(raw)
+        except Exception as exc:
+            raise _provider_error(exc, submission=False) from exc
+        return save_response(document)
 
 
 def _provider_error(exc: Exception, *, submission: bool) -> ProviderGatewayError:
+    if isinstance(exc, ProviderGatewayError):
+        return exc
     name = type(exc).__name__.lower()
     timed_out = isinstance(exc, TimeoutError) or "timeout" in name
-    connection_error = "connection" in name or "connect" in name
     status_code = getattr(exc, "status_code", None)
-    request_id = _optional_string(getattr(exc, "request_id", None))
-    known_rejection = isinstance(status_code, int)
-    submission_unknown = submission and not known_rejection and (timed_out or connection_error)
-    code = str(getattr(exc, "code", "provider_timeout" if timed_out else "provider_error"))
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {})
+    request = getattr(exc, "request", None)
+    client_id = getattr(request, "headers", {}).get("x-client-request-id")
+    if client_id is None and type(exc).__module__.startswith("volcenginesdkarkruntime"):
+        client_id = _optional_string(getattr(exc, "request_id", None))
+    server_id = headers.get("x-request-id")
+    known_rejection = status_code in {400, 401, 403, 404, 413, 415, 422, 429}
+    submission_unknown = submission and not known_rejection
+    receive_receipt(
+        {
+            "serverRequestId": server_id,
+            "clientRequestId": client_id,
+            "result": {
+                "requestError": {
+                    "message": str(exc),
+                    "httpStatus": status_code,
+                    "body": receipt_document(getattr(exc, "body", None)),
+                }
+            },
+        }
+    )
+    retry_after = headers.get("retry-after")
+    try:
+        retry_after = float(retry_after) if retry_after else None
+    except (TypeError, ValueError):
+        from datetime import UTC, datetime
+        from email.utils import parsedate_to_datetime
+
+        try:
+            retry_after = max(
+                0, (parsedate_to_datetime(retry_after) - datetime.now(UTC)).total_seconds()
+            )
+        except (ValueError, TypeError):
+            retry_after = None
+    code = (
+        "local_adapter_error"
+        if isinstance(exc, (AttributeError, TypeError)) and status_code is None
+        else _optional_string(getattr(exc, "code", None))
+        or ("provider_timeout" if timed_out else "provider_error")
+    )
     return ProviderGatewayError(
         code=code,
         message=str(exc) or "Ark request failed",
@@ -553,7 +689,10 @@ def _provider_error(exc: Exception, *, submission: bool) -> ProviderGatewayError
             and (status_code == 429 or status_code >= 500)
         ),
         submission_unknown=submission_unknown,
-        request_id=request_id,
+        request_id=server_id,
+        client_request_id=client_id,
+        http_status=status_code,
+        retry_after_seconds=retry_after,
         timed_out=timed_out,
     )
 
@@ -573,22 +712,6 @@ def _image_data_url(path: Path) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
-def _response_text(response: object) -> str:
-    direct = getattr(response, "output_text", None)
-    if isinstance(direct, str) and direct.strip():
-        return direct
-    parts: list[str] = []
-    for output in getattr(response, "output", ()):
-        if getattr(output, "type", None) != "message":
-            continue
-        for content in getattr(output, "content", ()):
-            if getattr(content, "type", None) == "output_text":
-                parts.append(str(content.text))
-    if not parts:
-        raise TypeError("Ark response contains no output text")
-    return "".join(parts)
-
-
 def _usage_document(usage: object | None) -> dict[str, int]:
     if usage is None:
         return {}
@@ -602,7 +725,11 @@ def _usage_document(usage: object | None) -> dict[str, int]:
     )
     document: dict[str, int] = {}
     for public_name, provider_name in fields:
-        value = getattr(usage, provider_name, None)
+        value = (
+            usage.get(provider_name)
+            if isinstance(usage, dict)
+            else getattr(usage, provider_name, None)
+        )
         if value is not None:
             document[public_name] = int(value)
     return document

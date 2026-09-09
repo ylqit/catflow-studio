@@ -7,7 +7,9 @@ function Resolve-CatFlowRepositoryPath {
 
     $configured = [Environment]::GetEnvironmentVariable($EnvironmentName, 'Process')
     if ([string]::IsNullOrWhiteSpace($configured)) { $configured = $DefaultValue }
-    if ([System.IO.Path]::IsPathFullyQualified($configured)) {
+    # IsPathRooted supports Windows PowerShell 5.1 and also rejects drive-relative
+    # (C:media) and root-relative (\media) paths, which are not repository-relative.
+    if ([System.IO.Path]::IsPathRooted($configured)) {
         throw "$EnvironmentName must be a relative repository path."
     }
     $root = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/')

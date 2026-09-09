@@ -53,3 +53,4 @@ apps/web/dist/
 
 # Docker persistent media
 docker-data/
+.work

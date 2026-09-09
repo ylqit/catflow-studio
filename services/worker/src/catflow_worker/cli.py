@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import typer
@@ -82,6 +83,7 @@ def _run_worker(*, once: bool, poll_interval: float) -> None:
         media_store,
         ffmpeg_path=ffmpeg_path,
         timeline_renderer=local_results,
+        ffprobe_path=ffprobe_path,
     )
     segment_publisher = (
         SegmentReferencePublisher(sessions, object_publisher_runtime.store)
@@ -105,27 +107,46 @@ def _run_worker(*, once: bool, poll_interval: float) -> None:
         poster_generator=poster_generator,
     )
     worker_id = f"{socket.gethostname()}-{os.getpid()}"
-    worker = DurableJobWorker(
-        sessions,
-        provider,
-        worker_id=worker_id,
-        result_handler=JobResultDispatcher(
-            sessions,
-            local=local_results,
-            ark=ark_results,
-        ),
+    dispatcher = JobResultDispatcher(
+        sessions, local=local_results, ark=ark_results, references=resolver
     )
+    workers = [
+        DurableJobWorker(
+            sessions,
+            provider,
+            worker_id=f"{worker_id}:{lane}",
+            result_handler=dispatcher,
+            receipt_root=paths.work_root / "provider-receipts",
+            lane=None if once else lane,
+        )
+        for lane in (["once"] if once else ["submit", "query", "local"])
+    ]
     ready_file = paths.work_root / "worker-ready.json"
     try:
-        with WorkerHeartbeat(ready_file, worker_id=worker_id):
+        with (
+            WorkerHeartbeat(ready_file, worker_id=worker_id),
+            ThreadPoolExecutor(max_workers=3) as executor,
+        ):
             next_publication_cleanup = time.monotonic()
             database_failures = 0
+            pending = {}
             while True:
                 if segment_publisher is not None and time.monotonic() >= next_publication_cleanup:
                     segment_publisher.delete_due()
                     next_publication_cleanup = time.monotonic() + 60
                 try:
-                    handled = worker.run_once()
+                    handled = False
+                    for index, worker in enumerate(workers):
+                        future = pending.get(index)
+                        if future is not None and not future.done():
+                            continue
+                        if future is not None:
+                            del pending[index]
+                            handled = future.result() or handled
+                        if once:
+                            worker.run_once()
+                            return
+                        pending[index] = executor.submit(worker.run_once)
                     database_failures = 0
                 except SQLAlchemyError:
                     database_failures += 1

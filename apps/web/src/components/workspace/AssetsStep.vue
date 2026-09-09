@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import JobStatusCard from "../JobStatusCard.vue";
+import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
 import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, FixedCanonRole, JobDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
-import { projectJobEvent } from "../../projectJobEvents";
 import { useUiStore } from "../../stores/ui";
 import AssetImageViewer from "./AssetImageViewer.vue";
 
@@ -28,7 +29,7 @@ const viewerPrompt = ref<string | null>(null);
 const viewerNegativePrompt = ref<string | null>(null);
 const viewerPromptUnavailable = ref(false);
 const viewerQualityReport = ref<Record<string, unknown> | null>(null);
-let events: EventSource | null = null;
+let unsubscribeJobs: (() => void) | undefined;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewRequest = 0;
 let viewerRequest = 0;
@@ -249,16 +250,8 @@ async function loadViewerPrompt(asset: AssetDto) {
 }
 
 function connectEvents() {
-  events = new EventSource(api.eventsUrl(store.lastEventId));
-  const refresh = async (event: Event) => {
-    const message = event as MessageEvent;
-    if (message.lastEventId) store.lastEventId = Number(message.lastEventId);
-    const jobEvent = projectJobEvent(message, props.projectId);
-    if (!jobEvent) return;
-    if (currentJob.value?.id === jobEvent.jobId) currentJob.value = await api.job(jobEvent.jobId);
-    if (jobEvent.eventType === "job.succeeded") await load();
-  };
-  for (const type of ["job.queued", "job.submitting", "job.submitted", "job.polling", "job.storing", "job.succeeded", "job.failed", "job.submission_unknown", "job.cancel_requested", "job.cancelled"]) events.addEventListener(type, (event) => { void refresh(event); });
+  unsubscribeJobs?.();
+  unsubscribeJobs = subscribeJobs(() => ({ projectId: props.projectId }), async () => { if (currentJob.value) currentJob.value = await api.job(currentJob.value.id); await load(); }, () => currentJob.value?.execution?.waitingForProvider ?? false);
 }
 
 watch(
@@ -279,7 +272,7 @@ onMounted(async () => {
   connectEvents();
 });
 onBeforeUnmount(() => {
-  events?.close();
+  unsubscribeJobs?.();
   if (previewTimer) clearTimeout(previewTimer);
   previewRequest += 1;
 });
@@ -298,10 +291,7 @@ onBeforeUnmount(() => {
 
     <div class="slot-list">
       <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
-      <section v-if="currentJob && currentJobPresentation" class="notice job-notice" :class="{ error: currentJobPresentation.tone === 'danger' || currentJobPresentation.tone === 'warn' }">
-        <b>{{ currentJobLabel }}：{{ currentJobPresentation.label }}</b><span>{{ currentJob.error?.message || currentJobPresentation.description }}</span>
-        <details><summary>查看生成记录</summary><p>任务编号：<code>{{ currentJob.id }}</code></p><p>模型服务：{{ currentJob.provider || "旧任务未记录" }} · {{ currentJob.model || "旧任务未记录" }}</p><p>原始状态：{{ currentJob.status }}</p><p v-if="currentJob.actualUsage">实际用量：{{ JSON.stringify(currentJob.actualUsage) }}</p><p v-if="currentBillingPresentation">费用：{{ currentBillingPresentation.label }} · {{ currentBillingPresentation.detail }}</p><p v-if="currentJob.error?.code">错误代码：{{ currentJob.error.code }}</p></details>
-      </section>
+      <JobStatusCard v-if="currentJob" :job-id="currentJob.id" :title="currentJobLabel" @replacement="currentJob = $event" />
 
       <article v-for="slot in slots" :key="slot.id" class="asset-slot card">
         <div class="slot-order">{{ slot.order }}</div>

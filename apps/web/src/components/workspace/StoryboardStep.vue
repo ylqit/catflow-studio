@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
+import JobStatusCard from "../JobStatusCard.vue";
 import { api } from "../../api/client";
 import ShotProduction from "./ShotProduction.vue";
+import DirectorDraftEditor from "./DirectorDraftEditor.vue";
 import type { AssetDto, JobDto, ShotPlanGenerationAttemptDto, ShotPlanVersionDto, ShotSpecDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
 import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason, type PaidModelRuntime } from "../../presentation";
@@ -27,6 +29,8 @@ const failedAttemptCount = computed(() => attempts.value.filter((attempt) => (
 )).length);
 const selectedPlanId = ref<string | null>(null);
 const originalShotsJson = ref("[]");
+const soundIntent = ref("");
+const originalSoundIntent = ref("");
 const compareOpen = ref(false);
 const compareButton = ref<HTMLButtonElement | null>(null);
 const storyboardRoot = ref<HTMLElement | null>(null);
@@ -53,6 +57,15 @@ const displayedAttempt = computed(() => attempts.value.find(
   (attempt) => attempt.jobId === displayedDirectorJob.value?.id,
 ) ?? null);
 const displayedGenerationResult = computed(() => displayedAttempt.value?.result ?? null);
+const displayedResultResolved = computed(() => Boolean(displayedAttempt.value?.resultShotPlanVersionId));
+function issuePathLabel(path: string) {
+  const labels: Record<string, string> = {
+    childBlocking: '儿童动作', catBlocking: '猫咪动作', initialState: '开始状态', movementPath: '动作过程', endState: '结束状态',
+    durationFrames: '帧数', durationSeconds: '时长', sound: '声音', musicIntent: '音乐意图', physicalChange: '画面变化',
+    continuity: '连续性', finalFrame: '最后画面', directorTreatment: '故事导演解析', lens: '镜头设计', composition: '构图', lighting: '光照', directorIntent: '导演意图',
+  };
+  return path.replace(/^shots\.(\d+)/, (_, index) => `镜头 ${Number(index) + 1}`).split('.').map(part => labels[part] ?? part).join(' → ') || '整体分镜';
+}
 const displayedResultIsCandidateReady = computed(() => (
   displayedGenerationResult.value?.disposition === "candidate_ready"
 ));
@@ -80,7 +93,7 @@ const workerReady = computed(() => props.runtime?.worker?.ready ?? true);
 const queuedWhileWorkerUnavailable = computed(() => Boolean(
   displayedDirectorJob.value?.status === "queued" && !workerReady.value,
 ));
-const shotsDirty = computed(() => JSON.stringify(shots) !== originalShotsJson.value);
+const shotsDirty = computed(() => JSON.stringify(shots) !== originalShotsJson.value || soundIntent.value !== originalSoundIntent.value);
 const canEditSelected = computed(() => Boolean(
   selectedPlan.value && !selectedPlan.value.outdated
     && (selectedPlan.value.active || selectedPlan.value.reviewStatus === "candidate"),
@@ -138,21 +151,23 @@ const directorProgressHeadline = computed(() => {
   const current = activePlan.value;
   if (!job) return "";
   if (
-    displayedResultIsCandidateReady.value
-    && displayedAttempt.value?.resultShotPlanVersionId
+    displayedAttempt.value?.resultShotPlanVersionId
   ) {
     const issueCount = displayedGenerationResult.value?.issues.length ?? 0;
     const resultPlan = availablePlans.value.find(
       (plan) => plan.id === displayedAttempt.value?.resultShotPlanVersionId,
     );
     if (resultPlan?.active && resultPlan.reviewStatus === "accepted") {
+      if (displayedGenerationResult.value?.disposition === "needs_input") return `原返回结构问题已修订，分镜 v${resultPlan.revision} 正在使用。`;
       return `分镜版本 ${resultPlan.revision} 已采用，包含 ${issueCount} 项制作提示。`;
     }
     if (resultPlan?.reviewStatus === "rejected") {
       return `分镜版本 ${resultPlan.revision} 已不采用。`;
     }
     if (resultPlan?.reviewStatus === "superseded") {
-      return `分镜版本 ${resultPlan.revision} 已被较新的候选取代。`;
+      return current
+        ? `原生成分镜 v${resultPlan.revision} 已保留为历史，当前使用分镜 v${current.revision}。`
+        : `分镜版本 ${resultPlan.revision} 已被较新的候选取代。`;
     }
     return `新版分镜已经恢复，包含 ${issueCount} 项制作提示，等待确认。`;
   }
@@ -310,10 +325,6 @@ const professionalComparisonRows = computed(() => {
   ));
 });
 
-function compactStoryTitle(title: string) {
-  return title.length > 20 ? `${title.slice(0, 18)}…` : title;
-}
-
 function versionStatus(plan: ShotPlanVersionDto) {
   if (plan.active && plan.outdated) return "当前使用 · 输入已变化";
   if (plan.active) return "当前使用";
@@ -329,10 +340,12 @@ function versionSource(plan: ShotPlanVersionDto) {
 }
 
 function versionIssueCount(plan: ShotPlanVersionDto) {
-  return attempts.value.find((attempt) => (
+  const result = attempts.value.find((attempt) => (
     attempt.resultShotPlanVersionId === plan.id
       || attempt.result?.resultShotPlanVersionId === plan.id
-  ))?.result?.issues.length ?? 0;
+  ))?.result;
+  if (result?.disposition === "needs_input" && plan.reviewStatus === "accepted") return 0;
+  return result?.issues.filter(issue => issue.severity === "warning").length ?? 0;
 }
 
 function generationAttemptLabel(attempt: ShotPlanGenerationAttemptDto) {
@@ -367,6 +380,8 @@ function hydratePlan(plan: ShotPlanVersionDto | null) {
   const cloned = plan ? JSON.parse(JSON.stringify(plan.shots)) as ShotSpecDto[] : [];
   shots.splice(0, shots.length, ...cloned);
   originalShotsJson.value = JSON.stringify(cloned);
+  soundIntent.value = typeof plan?.directorTreatment?.soundIntent === "string" ? plan.directorTreatment.soundIntent : "";
+  originalSoundIntent.value = soundIntent.value;
 }
 
 async function loadVersionData(preferCandidate = false) {
@@ -592,7 +607,7 @@ async function save() {
         expectedActiveShotPlanVersionId: activePlan.value?.id ?? null,
         clip: plan.clip,
         shots: shots.map(synchronizedShot),
-        directorTreatment: plan.directorTreatment,
+        directorTreatment: plan.directorTreatment ? { ...plan.directorTreatment, soundIntent: soundIntent.value } : plan.directorTreatment,
         directorPromptRevision: plan.directorPromptRevision,
         directorModel: plan.directorModel,
         directorInputHash: plan.directorInputHash,
@@ -632,6 +647,22 @@ function openComparison() {
   compareOpen.value = true;
 }
 
+function scrollStoryWithKeyboard(event: KeyboardEvent) {
+  const panel = event.currentTarget as HTMLElement;
+  if (event.altKey || event.ctrlKey || event.metaKey || getComputedStyle(panel).overflowY !== "auto") return;
+  const positions: Record<string, number> = {
+    Home: 0,
+    End: panel.scrollHeight - panel.clientHeight,
+    PageUp: panel.scrollTop - panel.clientHeight * 0.85,
+    PageDown: panel.scrollTop + panel.clientHeight * 0.85,
+    ArrowUp: panel.scrollTop - 40,
+    ArrowDown: panel.scrollTop + 40,
+  };
+  if (positions[event.key] === undefined) return;
+  event.preventDefault();
+  panel.scrollTop = positions[event.key];
+}
+
 async function closeComparison() {
   compareOpen.value = false;
   await nextTick();
@@ -645,9 +676,10 @@ async function closeComparison() {
   </section>
 
   <section v-else ref="storyboardRoot" class="storyboard-layout">
-    <aside class="story-source card">
+    <aside class="story-source card" tabindex="0" aria-label="当前故事与导演参考" @keydown.self="scrollStoryWithKeyboard">
       <p class="eyebrow">当前故事 · 版本 {{ workspace.activeStory.revision }}</p>
-      <h2 :title="workspace.activeStory.title">{{ compactStoryTitle(workspace.activeStory.title) }}</h2>
+      <h2>{{ workspace.activeStory.title }}</h2>
+      <p class="story-scroll-hint">在此栏滚动查看完整剧情与导演参考</p>
       <details class="story-body"><summary>查看故事全文</summary><p>{{ workspace.activeStory.body }}</p></details>
       <div class="story-rule"><b>{{ workspace.activeStory.targetDurationSeconds }} 秒</b><span>9:16</span><span>24 fps</span><span>{{ workspace.activeStory.dialoguePolicy === "none" ? "无对白" : "极少对白" }}</span></div>
       <ol>
@@ -658,22 +690,24 @@ async function closeComparison() {
         <li><b>温暖结尾</b>{{ workspace.activeStory.microEvent.warmEnding }}</li>
       </ol>
       <details class="director-references"><summary>本次分镜将实际读取的参考（5 张）</summary><p>儿童身份、猫咪身份、同框比例、环境外观与空间关系、画风。环境允许镜头重新构图；空间冲突会在同一次结果中提示，故事因果链仍需保留。</p><div><figure v-for="role in (['episode_child', 'episode_cat', 'pair_scale', 'environment', 'style_board'] as const)" :key="role"><img v-if="workspace.selections[role]" :src="`/api/v1/assets/${workspace.selections[role]!.id}/content`" :alt="role" /><figcaption>{{ role }}</figcaption></figure></div></details>
-      <p v-if="selectedPlan?.directorPromptRevision">此版本来源规划方式：{{ selectedPlan.directorPromptRevision === 'catflow-director-v4-vision' ? '视觉规划；后续手工修改未再次调用模型' : '历史文本规划；当时未发送参考图片' }}</p>
-      <details v-if="selectedPlan?.directorTreatment" class="treatment"><summary>故事导演解析</summary><pre>{{ JSON.stringify(selectedPlan.directorTreatment, null, 2) }}</pre></details>
+      <p v-if="selectedPlan?.directorPromptRevision">此版本来源规划方式：{{ ['catflow-director-v4-vision', 'catflow-director-v5-contract'].includes(selectedPlan.directorPromptRevision) ? '视觉规划；后续手工修改未再次调用模型' : '历史文本规划；当时未发送参考图片' }}</p>
+      <details v-if="selectedPlan?.directorTreatment" class="treatment">
+        <summary>故事导演解析</summary>
+        <label>整体声音方向<textarea v-model="soundIntent" aria-label="整体声音方向" :disabled="!canEditSelected" rows="4" maxlength="300" /></label>
+        <p>与各镜头的音乐、环境声和对白共同进入视频指令；修改后保存为新分镜版本。</p>
+        <details><summary>查看完整导演解析</summary><pre>{{ JSON.stringify({ ...selectedPlan.directorTreatment, soundIntent }, null, 2) }}</pre></details>
+      </details>
       <p v-if="selectedPlan?.outdated" class="notice error">故事、角色或环境已经更新，这版分镜仅作历史参考。</p>
     </aside>
 
-    <div v-if="!selectedPlan" class="director-empty card">
+    <div class="shot-editor card">
+    <div v-if="!selectedPlan" class="director-empty">
       <p class="eyebrow">分镜建议</p><h2>把故事拆成可拍的镜头</h2>
       <p>根据当前故事生成 1–4 个镜头，安排机位、构图、孩子与猫咪的动作、画面变化和前后衔接。生成后仍可逐项修改。</p>
       <div class="paid-note"><b>{{ paidBlockedReason || "本次会使用付费模型，完成后显示实际用量。" }}</b><span>离开页面后仍会继续，完成时会自动保存。</span></div>
       <button data-testid="generate-director-plan" class="primary" :disabled="generating || jobBusy || Boolean(paidBlockedReason)" @click="generateDirectorPlan"><span v-if="generating" class="spinner" />生成分镜</button>
-      <section v-if="displayedDirectorJob && directorJobPresentation" class="notice director-job" :class="{ error: ['warn', 'danger'].includes(directorJobPresentation.tone) }" aria-live="polite"><b>{{ directorProgressHeadline }}</b><span v-if="queuedWhileWorkerUnavailable">系统恢复后会继续同一任务。</span><span v-else-if="jobBusy">任务已经保存，可以离开此页面。</span><details><summary>查看生成记录</summary><p>任务编号：<code>{{ displayedDirectorJob.id }}</code></p><p>原始状态：{{ displayedDirectorJob.status }}</p><p v-if="displayedDirectorJob.error?.incompleteReason">未完成原因：{{ displayedDirectorJob.error.incompleteReason }}</p><p v-else-if="displayedDirectorJob.error?.code === 'response_not_completed'">旧任务未记录具体 incomplete 原因</p><p v-if="displayedDirectorJob.error">原始错误：<code>{{ displayedDirectorJob.error.message }}</code></p><p v-if="displayedDirectorJob.actualUsage">实际用量：{{ JSON.stringify(displayedDirectorJob.actualUsage) }}</p><p v-if="directorBillingPresentation">费用：{{ directorBillingPresentation.label }} · {{ directorBillingPresentation.detail }}</p></details></section>
-      <div v-if="error" class="notice error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
     </div>
-
-    <div v-else class="shot-editor card">
-      <header class="editor-head">
+      <header v-else class="editor-head">
         <div><h2>分镜设计</h2><p class="viewing-version">正在查看版本 {{ selectedPlan.revision }} · {{ versionStatus(selectedPlan) }}</p></div>
         <div class="head-actions">
           <button ref="compareButton" data-testid="compare-shot-plan" class="secondary" :disabled="!activePlan || selectedPlan.id === activePlan.id" @click="openComparison">对比当前版本</button>
@@ -682,7 +716,7 @@ async function closeComparison() {
           <button class="primary" :disabled="saving || selectedPlan.outdated || (!shotsDirty && selectedPlan.active)" @click="save"><span v-if="saving" class="spinner" />{{ actionLabel }}</button>
         </div>
       </header>
-      <nav class="version-bar" aria-label="分镜版本">
+      <nav v-if="selectedPlan" class="version-bar" aria-label="分镜版本">
         <button v-for="plan in availablePlans" :key="plan.id" :data-testid="`shot-plan-version-${plan.id}`" :class="{ selected: selectedPlan.id === plan.id, candidate: plan.reviewStatus === 'candidate' && !plan.outdated }" @click="selectedPlanId = plan.id">
           <b>版本 {{ plan.revision }} · {{ versionStatus(plan) }}</b>
           <span>{{ versionSource(plan) }} · {{ new Date(plan.createdAt).toLocaleString() }}</span>
@@ -692,26 +726,28 @@ async function closeComparison() {
       </nav>
       <p v-if="versionsError" class="notice warn editor-error">{{ versionsError }}</p>
       <div v-if="error" class="notice error editor-error creator-error"><p>{{ error }}</p><details v-if="errorDetail && errorDetail !== error"><summary>技术详情</summary><code>{{ errorDetail }}</code></details></div>
+      <JobStatusCard v-if="displayedDirectorJob" :job-id="displayedDirectorJob.id" title="分镜导演任务" :result-summary="displayedResultResolved ? directorProgressHeadline : undefined" @replacement="emit('changed')" />
       <section v-if="displayedDirectorJob && directorJobPresentation" class="generation-progress editor-error" :class="{ failed: displayedDirectorJob.status === 'failed' && !displayedResultIsCandidateReady, advisory: displayedResultIsCandidateReady }" aria-live="polite">
         <div class="progress-copy">
           <b>{{ directorProgressHeadline }}</b>
           <span v-if="queuedWhileWorkerUnavailable">{{ elapsedKind }} {{ elapsedLabel || "片刻" }} · 系统恢复后会继续同一任务。</span>
           <span v-else-if="jobBusy">{{ elapsedKind }} {{ elapsedLabel || "片刻" }} · 任务已经保存，可以离开此页面。</span>
           <span v-if="failureMessage && activePlan?.outdated">版本 {{ activePlan.revision }} 已因故事、角色或环境变化而过期，暂不能用于生成视频。</span>
-          <ul v-if="displayedGenerationResult?.issues.length" class="validation-issues">
+          <ul v-if="displayedGenerationResult?.issues.length && !displayedResultResolved" class="validation-issues">
             <li v-for="issue in displayedGenerationResult.issues" :key="`${issue.path}:${issue.code}`" :class="issue.severity">
               <b>{{ issue.severity === "warning" ? "制作提示" : issue.severity === "blocking" ? "需要补充" : "无法读取" }}</b>
-              <span>{{ issue.message }}</span>
+              <span>{{ issuePathLabel(issue.path) }}：{{ issue.message }}</span>
+              <code v-if="issue.code === 'blocking_path_conflict'">{{ JSON.stringify(issue.providerValue) }}</code>
               <small v-if="issue.suggestedAction">{{ issue.suggestedAction }}</small>
             </li>
           </ul>
           <button v-if="recoverableDisplayedResult" data-testid="recover-director-result" class="secondary recover-result" :disabled="Boolean(recoveringJobId)" @click="recoverDirectorResult">
             <span v-if="recoveringJobId" class="spinner" />从已有结果恢复（不调用模型、不产生费用）
           </button>
-          <details v-if="displayedGenerationResult?.disposition === 'needs_input'" class="draft-editor">
+          <details v-if="displayedGenerationResult?.disposition === 'needs_input' && !displayedResultResolved" class="draft-editor" open>
             <summary>补充已有分镜内容</summary>
             <p>请按上方字段路径补全重要内容。这里只处理已经返回的结果，不会再次调用模型。</p>
-            <textarea v-model="draftEditorText" aria-label="待补充的分镜草稿" spellcheck="false" />
+            <DirectorDraftEditor v-model="draftEditorText" />
             <button data-testid="materialize-director-result" class="secondary" :disabled="Boolean(materializingJobId)" @click="materializeDirectorDraft">
               <span v-if="materializingJobId" class="spinner" />检查并创建待确认版本
             </button>
@@ -724,9 +760,9 @@ async function closeComparison() {
           <li>正在保存新版</li>
           <li>等待确认</li>
         </ol>
-        <details><summary>查看生成记录{{ failedAttemptCount ? `（${failedAttemptCount} 次失败）` : attempts.length ? `（${attempts.length} 次）` : "" }}</summary><ul v-if="attempts.length" class="attempt-list"><li v-for="attempt in attempts" :key="attempt.jobId"><b>{{ new Date(attempt.createdAt).toLocaleString() }} · {{ generationAttemptLabel(attempt) }}</b><span v-if="attempt.resultShotPlanVersionId">生成版本 {{ availablePlans.find((plan) => plan.id === attempt.resultShotPlanVersionId)?.revision ?? "历史" }}</span><span v-if="attempt.result?.issues.length">校验结果：{{ attempt.result.issues.filter((issue) => issue.severity === "warning").length }} 项提示，{{ attempt.result.issues.filter((issue) => issue.severity === "blocking").length }} 项需要补充</span><details v-if="attempt.result?.issues.length" class="attempt-validation"><summary>查看校验与额外说明</summary><ul><li v-for="issue in attempt.result.issues" :key="`${attempt.jobId}:${issue.path}:${issue.code}`"><b>{{ issue.path || "结果" }}</b><span>{{ issue.message }}</span><code v-if="issue.providerValue !== undefined && issue.providerValue !== null">{{ JSON.stringify(issue.providerValue) }}</code></li></ul></details><span v-if="attempt.error?.incompleteReason">未完成原因：{{ attempt.error.incompleteReason }}</span><span v-else-if="attempt.error?.code === 'response_not_completed'">旧任务未记录具体 incomplete 原因</span><code v-if="attempt.error && !attempt.result">{{ attempt.error.message }}</code><small>{{ attempt.jobId }}</small></li></ul><p v-else>任务编号：<code>{{ displayedDirectorJob.id }}</code> · 原始状态：{{ displayedDirectorJob.status }}</p><p v-if="displayedDirectorJob.actualUsage">实际用量：{{ JSON.stringify(displayedDirectorJob.actualUsage) }}</p><p v-if="directorBillingPresentation">费用：{{ directorBillingPresentation.label }} · {{ directorBillingPresentation.detail }}</p></details>
+        <details><summary>查看生成记录{{ failedAttemptCount ? `（${failedAttemptCount} 次失败）` : attempts.length ? `（${attempts.length} 次）` : "" }}</summary><ul v-if="attempts.length" class="attempt-list"><li v-for="attempt in attempts" :key="attempt.jobId"><b>{{ new Date(attempt.createdAt).toLocaleString() }} · {{ generationAttemptLabel(attempt) }}</b><span v-if="attempt.resultShotPlanVersionId">生成版本 {{ availablePlans.find((plan) => plan.id === attempt.resultShotPlanVersionId)?.revision ?? "历史" }}</span><span v-if="attempt.result?.issues.length">校验结果：{{ attempt.result.issues.filter((issue) => issue.severity === "warning").length }} 项提示，{{ attempt.result.issues.filter((issue) => issue.severity === "blocking").length }} 项需要补充</span><details v-if="attempt.result?.issues.length" class="attempt-validation"><summary>查看校验与额外说明</summary><ul><li v-for="issue in attempt.result.issues" :key="`${attempt.jobId}:${issue.path}:${issue.code}`"><b>{{ issue.path || "结果" }}</b><span>{{ issue.message }}</span><code v-if="issue.providerValue !== undefined && issue.providerValue !== null">{{ JSON.stringify(issue.providerValue) }}</code></li></ul></details><span v-if="attempt.error?.incompleteReason">未完成原因：{{ attempt.error.incompleteReason }}</span><span v-else-if="attempt.error?.code === 'response_not_completed'">旧任务未记录具体 incomplete 原因</span><code v-if="attempt.error && !attempt.result">{{ attempt.error.message }}</code><JobStatusCard :job-id="attempt.jobId" title="历史分镜任务" /></li></ul><p v-else>任务编号：<code>{{ displayedDirectorJob.id }}</code> · 原始状态：{{ displayedDirectorJob.status }}</p><p v-if="displayedDirectorJob.actualUsage">实际用量：{{ JSON.stringify(displayedDirectorJob.actualUsage) }}</p><p v-if="directorBillingPresentation">费用：{{ directorBillingPresentation.label }} · {{ directorBillingPresentation.detail }}</p></details>
       </section>
-      <div class="timeline-ruler"><span v-for="tick in 6" :key="tick">{{ Math.round(((tick - 1) / 5) * workspace.activeStory.targetDurationSeconds) }}s</span></div>
+      <div v-if="selectedPlan" class="timeline-ruler"><span v-for="tick in 6" :key="tick">{{ Math.round(((tick - 1) / 5) * workspace.activeStory.targetDurationSeconds) }}s</span></div>
 
       <div class="shot-list">
         <article v-for="shot in shots" :key="shot.id" class="shot-card">
@@ -735,7 +771,7 @@ async function closeComparison() {
           <div class="shot-summary">
             <div class="shot-number">{{ String(shot.order).padStart(2, "0") }}<label><input v-model.number="shot.durationSeconds" type="number" min="2" max="15" :disabled="!canEditSelected" /> 秒</label></div>
             <div class="shot-fields">
-              <div class="field compact"><label>景别</label><input v-model="shot.framing" :disabled="!canEditSelected" /></div><div class="field compact"><label>运镜</label><input v-model="shot.cameraMovement" :disabled="!canEditSelected" /></div>
+              <div class="field"><label :for="`${shot.id}-framing`">景别与构图</label><textarea :id="`${shot.id}-framing`" v-model="shot.framing" rows="2" :disabled="!canEditSelected" /></div><div class="field"><label :for="`${shot.id}-camera`">运镜</label><textarea :id="`${shot.id}-camera`" v-model="shot.cameraMovement" rows="2" :disabled="!canEditSelected" /></div>
               <div data-testid="shot-child-summary" class="field wide derived-summary"><div class="summary-label"><label>人物动作</label><button v-if="shot.childBlocking" type="button" class="quiet" :disabled="!canEditSelected" @click="openShotDetails(shot.id, 'child')">编辑动作</button></div><p>人物：{{ childSummary(shot) }}</p><small v-if="shot.childBlocking?.microMotions.length">{{ shot.childBlocking.microMotions.length }} 项微动作</small></div>
               <div data-testid="shot-cat-summary" class="field wide derived-summary"><div class="summary-label"><label>猫咪动作</label><button v-if="shot.catBlocking" type="button" class="quiet" :disabled="!canEditSelected" @click="openShotDetails(shot.id, 'cat')">编辑动作</button></div><p>猫咪：{{ catSummary(shot) }}</p><small v-if="shot.catBlocking?.microMotions.length">{{ shot.catBlocking.microMotions.length }} 项微动作</small></div>
               <div data-testid="shot-change-summary" class="field wide derived-summary"><div class="summary-label"><label>画面变化</label><button v-if="shot.physicalChange" type="button" class="quiet" :disabled="!canEditSelected" @click="openShotDetails(shot.id, 'change')">编辑变化</button></div><p>变化：{{ changeSummary(shot) }}</p></div>
@@ -750,16 +786,16 @@ async function closeComparison() {
             <fieldset v-if="shot.lens && shot.composition && shot.childBlocking && shot.catBlocking && shot.physicalChange && shot.continuity && shot.lighting && shot.sound" class="professional-editor" :disabled="!canEditSelected">
             <div class="professional-grid">
               <section class="detail-group span-two"><h3>动作与状态</h3><div class="detail-subgrid detail-three">
-                <div class="detail-subgroup"><h4>人物走位</h4><label>初始状态<textarea v-model="shot.childBlocking.initialState" data-detail-target="child" /></label><label>运动路径<textarea v-model="shot.childBlocking.movementPath" :data-testid="`${shot.id}-child-movement`" /></label><label>结束状态<textarea v-model="shot.childBlocking.endState" /></label><div class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.childBlocking.microMotions" :key="`child-motion-${index}`"><input v-model="shot.childBlocking.microMotions[index]" :aria-label="`人物微动作 ${index + 1}`"><button type="button" class="quiet" :aria-label="`移除人物微动作 ${index + 1}`" @click="shot.childBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.childBlocking.microMotions.length">暂无微动作</span></div></div>
-                <div class="detail-subgroup"><h4>猫咪走位</h4><label>初始状态<textarea v-model="shot.catBlocking.initialState" data-detail-target="cat" /></label><label>运动路径<textarea v-model="shot.catBlocking.movementPath" /></label><label>结束状态<textarea v-model="shot.catBlocking.endState" /></label><div class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.catBlocking.microMotions" :key="`cat-motion-${index}`"><input v-model="shot.catBlocking.microMotions[index]" :aria-label="`猫咪微动作 ${index + 1}`"><button type="button" class="quiet" :aria-label="`移除猫咪微动作 ${index + 1}`" @click="shot.catBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.catBlocking.microMotions.length">暂无微动作</span></div></div>
-                <div class="detail-subgroup"><h4>物理变化</h4><label>对象<input v-model="shot.physicalChange.subject" data-detail-target="change" /></label><label>变化前<textarea v-model="shot.physicalChange.before" /></label><label>变化后<textarea v-model="shot.physicalChange.after" /></label></div>
+                <div class="detail-subgroup"><h4>人物走位</h4><label>初始状态<textarea v-model="shot.childBlocking.initialState" data-detail-target="child" /></label><label>运动路径<textarea v-model="shot.childBlocking.movementPath" :data-testid="`${shot.id}-child-movement`" /></label><label>结束状态<textarea v-model="shot.childBlocking.endState" /></label><div class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.childBlocking.microMotions" :key="`child-motion-${index}`"><textarea v-model="shot.childBlocking.microMotions[index]" :aria-label="`人物微动作 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除人物微动作 ${index + 1}`" @click="shot.childBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.childBlocking.microMotions.length">暂无微动作</span></div></div>
+                <div class="detail-subgroup"><h4>猫咪走位</h4><label>初始状态<textarea v-model="shot.catBlocking.initialState" data-detail-target="cat" /></label><label>运动路径<textarea v-model="shot.catBlocking.movementPath" /></label><label>结束状态<textarea v-model="shot.catBlocking.endState" /></label><div class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.catBlocking.microMotions" :key="`cat-motion-${index}`"><textarea v-model="shot.catBlocking.microMotions[index]" :aria-label="`猫咪微动作 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除猫咪微动作 ${index + 1}`" @click="shot.catBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.catBlocking.microMotions.length">暂无微动作</span></div></div>
+                <div class="detail-subgroup"><h4>物理变化</h4><label>对象<textarea v-model="shot.physicalChange.subject" data-detail-target="change" rows="2" /></label><label>变化前<textarea v-model="shot.physicalChange.before" /></label><label>变化后<textarea v-model="shot.physicalChange.after" /></label></div>
               </div></section>
               <section class="detail-group span-two"><h3>镜头画面</h3><div class="detail-subgrid">
-                <div class="detail-subgroup"><h4>焦距与机位</h4><label>等效焦距<input v-model="shot.lens.focalLengthEquivalent" /></label><label>机位高度<input v-model="shot.lens.cameraHeight" /></label><label>机位角度<input v-model="shot.lens.cameraAngle" /></label><label>透视意图<textarea v-model="shot.lens.perspectiveIntent" /></label></div>
-                <div class="detail-subgroup"><h4>构图与轴线</h4><label>主体位置<input v-model="shot.composition.subjectPlacement" /></label><label>前景<input v-model="shot.composition.foreground" /></label><label>中景<input v-model="shot.composition.middleGround" /></label><label>背景<input v-model="shot.composition.background" /></label><label>运动方向<input v-model="shot.composition.screenDirection" /></label><label>视线<input v-model="shot.composition.eyeLine" /></label></div>
+                <div class="detail-subgroup"><h4>焦距与机位</h4><label>等效焦距<input v-model="shot.lens.focalLengthEquivalent" /></label><label>机位高度<textarea v-model="shot.lens.cameraHeight" rows="2" /></label><label>机位角度<textarea v-model="shot.lens.cameraAngle" rows="2" /></label><label>透视意图<textarea v-model="shot.lens.perspectiveIntent" /></label></div>
+                <div class="detail-subgroup"><h4>构图与轴线</h4><label>主体位置<textarea v-model="shot.composition.subjectPlacement" rows="2" /></label><label>前景<textarea v-model="shot.composition.foreground" rows="2" /></label><label>中景<textarea v-model="shot.composition.middleGround" rows="2" /></label><label>背景<textarea v-model="shot.composition.background" rows="2" /></label><label>运动方向<textarea v-model="shot.composition.screenDirection" rows="2" /></label><label>视线<textarea v-model="shot.composition.eyeLine" rows="2" /></label></div>
               </div></section>
-              <section class="detail-group span-two"><h3>连续性与结尾</h3><div class="detail-subgrid"><div class="detail-subgroup"><label>承接状态<textarea v-model="shot.continuity.incoming" /></label><label>离开状态<textarea v-model="shot.continuity.outgoing" /></label></div><div class="detail-subgroup"><label>共享视觉元素<input v-model="shot.continuity.sharedVisualElement" /></label><label>最终帧<textarea v-model="shot.continuity.finalFrame" data-detail-target="ending" /></label></div></div></section>
-              <section class="detail-group span-two"><h3>光线与声音</h3><div class="detail-subgrid"><div class="detail-subgroup"><h4>光线与色彩</h4><label>光线方向<input v-model="shot.lighting.direction" /></label><label>柔和度<input v-model="shot.lighting.softness" /></label><label>色彩意图<textarea v-model="shot.lighting.colorIntent" /></label></div><div class="detail-subgroup"><h4>声音设计</h4><p><b>环境声</b>{{ shot.sound.ambience.join("、") }}</p><p><b>物件声</b>{{ shot.sound.objectEffects.join("、") }}</p><p><b>动作声</b>{{ shot.sound.movementEffects.join("、") }}</p><label>音乐意图<textarea v-model="shot.sound.musicIntent" /></label><label>对白<input v-model="shot.sound.dialogue" /></label></div></div></section>
+              <section class="detail-group span-two"><h3>连续性与结尾</h3><div class="detail-subgrid"><div class="detail-subgroup"><label>承接状态<textarea v-model="shot.continuity.incoming" /></label><label>离开状态<textarea v-model="shot.continuity.outgoing" /></label></div><div class="detail-subgroup"><label>共享视觉元素<textarea v-model="shot.continuity.sharedVisualElement" rows="2" /></label><label>最终帧<textarea v-model="shot.continuity.finalFrame" data-detail-target="ending" /></label></div></div></section>
+              <section class="detail-group span-two"><h3>光线与声音</h3><div class="detail-subgrid"><div class="detail-subgroup"><h4>光线与色彩</h4><label>光线方向<textarea v-model="shot.lighting.direction" rows="2" /></label><label>柔和度<textarea v-model="shot.lighting.softness" rows="2" /></label><label>色彩意图<textarea v-model="shot.lighting.colorIntent" /></label></div><div class="detail-subgroup"><h4>声音设计</h4><p><b>环境声</b>{{ shot.sound.ambience.join("、") }}</p><p><b>物件声</b>{{ shot.sound.objectEffects.join("、") }}</p><p><b>动作声</b>{{ shot.sound.movementEffects.join("、") }}</p><label>音乐意图<textarea v-model="shot.sound.musicIntent" /></label><label>对白<textarea v-model="shot.sound.dialogue" rows="2" /></label></div></div></section>
               <section class="detail-group span-two"><h3>导演意图与风险</h3><label>导演意图<textarea v-model="shot.directorIntent" /></label><div v-for="(risk, index) in shot.generationRisks" :key="`${risk.code}-${index}`" class="risk"><code>{{ risk.code }}</code><span>{{ risk.message }}</span><button type="button" class="quiet" :aria-label="`移除生成风险 ${risk.code}`" @click="shot.generationRisks?.splice(index, 1)">移除</button></div><p v-if="!shot.generationRisks?.length" class="empty-detail">暂无制作风险</p></section>
             </div>
             </fieldset>
@@ -767,7 +803,7 @@ async function closeComparison() {
           </details>
         </article>
       </div>
-      <footer class="duration-check"><span>镜头总时长</span><strong>{{ totalDuration }} / {{ workspace.activeStory.targetDurationSeconds }} 秒</strong><span class="pill" :class="{ good: totalDuration === workspace.activeStory.targetDurationSeconds }">{{ totalDuration === workspace.activeStory.targetDurationSeconds ? "帧数闭合" : "需要调整" }}</span></footer>
+      <footer v-if="selectedPlan" class="duration-check"><span>镜头总时长</span><strong>{{ totalDuration }} / {{ workspace.activeStory.targetDurationSeconds }} 秒</strong><span class="pill" :class="{ good: totalDuration === workspace.activeStory.targetDurationSeconds }">{{ totalDuration === workspace.activeStory.targetDurationSeconds ? "帧数闭合" : "需要调整" }}</span></footer>
     </div>
 
     <div v-if="compareOpen && activePlan && selectedPlan" class="compare-backdrop" @click.self="closeComparison">
@@ -786,7 +822,15 @@ async function closeComparison() {
 
 <style scoped>
 .missing-story, .director-empty { padding: 70px; }.missing-story > div { font-size: 34px; color: var(--accent); }.missing-story p, .director-empty p { color: var(--muted); line-height: 1.7; }.missing-story .primary { display: inline-flex; align-items: center; }
-.storyboard-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }.story-source { position: sticky; top: 96px; padding: 24px; }.story-body { color: var(--muted); line-height: 1.7; font-size: 12px; }.story-body summary { cursor: pointer; font-weight: 700; }.story-body p { margin-bottom: 0; }.story-rule { display: flex; flex-wrap: wrap; gap: 7px; margin: 16px 0; }.story-rule > * { padding: 6px 9px; border-radius: 8px; background: #f2ece4; color: #776e66; font-size: 11px; }.story-source ol { margin: 20px 0; padding: 0; list-style: none; display: grid; gap: 10px; }.story-source li { display: grid; gap: 3px; color: #766e67; font-size: 12px; line-height: 1.5; }.story-source li:not(:last-child) { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }.story-source li b { display: block; color: #b25e49; font-size: 10px; }.treatment pre { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: 9px; }
+.storyboard-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }.story-source { position: sticky; top: 86px; max-height: calc(100dvh - 160px); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding: 20px; }
+.story-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.story-source h2 { overflow-wrap: anywhere; line-height: 1.45; }
+.story-scroll-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.story-source p, .story-source li { overflow-wrap: anywhere; white-space: pre-wrap; }
+.storyboard-layout > *, .shot-summary > *, .shot-fields > *, .professional-grid > *, .detail-subgrid > * { min-width: 0; }
+.storyboard-layout textarea { field-sizing: content; min-height: 5rem; resize: vertical; overflow-y: auto; line-height: 1.65; overflow-wrap: anywhere; }
+.storyboard-layout :is(p, code, pre, label, span) { overflow-wrap: anywhere; }
+.storyboard-layout :is(textarea, input, details) { scroll-margin-top: 86px; }.story-body { color: var(--muted); line-height: 1.75; font-size: 13px; }.story-body summary { cursor: pointer; font-weight: 700; }.story-body p { margin-bottom: 0; }.story-rule { display: flex; flex-wrap: wrap; gap: 7px; margin: 16px 0; }.story-rule > * { padding: 6px 9px; border-radius: 8px; background: #f2ece4; color: #776e66; font-size: 11px; }.story-source ol { margin: 20px 0; padding: 0; list-style: none; display: grid; gap: 10px; }.story-source li { display: grid; gap: 3px; color: #625a54; font-size: 13px; line-height: 1.75; }.story-source li b { display: block; color: #b25e49; font-size: 12px; }.treatment pre { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: 9px; }
 .director-empty { text-align: center; }.director-empty .paid-note { display: grid; gap: 5px; width: min(560px, 100%); margin: 22px auto; padding: 14px; border-radius: 12px; background: #fff4ea; color: var(--muted); font-size: 11px; }.director-empty .paid-note b { color: var(--ink); }.director-empty button { min-width: 260px; }
 .director-job { display: grid; gap: 6px; }.director-job > span { color: var(--muted); }.director-job details summary, .plan-technical summary { cursor: pointer; font-weight: 700; }.director-job details p { margin: 6px 0 0; overflow-wrap: anywhere; }
 .shot-editor { overflow: hidden; }.editor-head { padding: 22px 24px; display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); }.editor-head h2 { margin: 0; font-size: 20px; }.viewing-version { margin: 5px 0 0; color: var(--muted); font-size: 11px; }.head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }.danger-text { color: #a64e42; }.editor-error { margin: 16px 24px 0; }.timeline-ruler { display: flex; justify-content: space-between; margin: 20px 28px 0 100px; color: #aaa198; font-size: 9px; border-bottom: 1px solid #e4dbd2; padding-bottom: 5px; }
@@ -794,16 +838,33 @@ async function closeComparison() {
 .generation-progress { display: grid; gap: 12px; margin: 16px 24px 0; padding: 15px 17px; border-radius: 13px; background: #f2f6ef; color: #526257; }.generation-progress.failed { background: #fff0ec; color: #914c40; }.progress-copy { display: grid; gap: 4px; }.progress-copy span { font-size: 11px; }.progress-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 0; padding: 0; list-style: none; }.progress-steps li { padding: 7px 8px; border-radius: 8px; background: rgb(255 255 255 / 62%); color: #958d84; font-size: 9px; }.progress-steps li.done { color: #56705c; }.progress-steps li.current { background: white; color: var(--ink); font-weight: 800; }.generation-progress details summary { cursor: pointer; font-size: 10px; font-weight: 800; }.generation-progress details p { margin: 6px 0 0; font-size: 10px; overflow-wrap: anywhere; }
 .generation-progress.advisory { background: #fff7e8; color: #765c35; }.validation-issues { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }.validation-issues li { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgb(255 255 255 / 68%); font-size: 10px; }.validation-issues li.blocking, .validation-issues li.fatal { color: #974c40; }.validation-issues small { color: var(--muted); }.recover-result { justify-self: start; margin-top: 7px; }
 .draft-editor { margin-top: 7px; padding: 10px; border-radius: 9px; background: rgb(255 255 255 / 68%); }.draft-editor summary { cursor: pointer; font-weight: 800; }.draft-editor p { color: var(--muted); font-size: 10px; }.draft-editor textarea { width: 100%; min-height: 260px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: 10px/1.5 Consolas, monospace; }.draft-editor button { margin-top: 8px; }
-.shot-list { display: grid; gap: 14px; padding: 18px 24px; }.shot-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; }.shot-summary { display: grid; grid-template-columns: 65px 1fr; gap: 14px; align-items: center; padding: 16px; }.shot-number { font: 500 22px Georgia, serif; color: #c56d55; }.shot-number label { display: flex; align-items: center; gap: 3px; margin-top: 6px; color: #9c9289; font: 10px Inter, sans-serif; }.shot-number input { width: 35px; padding: 4px; }.shot-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }.shot-fields .wide { grid-column: span 2; }.field { display: grid; gap: 4px; }.field.compact { grid-template-columns: 50px 1fr; align-items: center; }.field label { font-size: 10px; }.field input, .field select { padding: 7px 9px; font-size: 11px; }
-.derived-summary { padding: 9px 11px; border: 1px solid #eadfd5; border-radius: 9px; background: #fcfaf7; }.summary-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.summary-label button { padding: 3px 6px; color: #9d5845; font-size: 9px; }.derived-summary p { margin: 0; color: #615a54; font-size: 11px; line-height: 1.55; }.derived-summary small { color: var(--muted); font-size: 9px; }.production-hints span { color: var(--muted); font-size: 10px; }
-.professional-details { border-top: 1px solid var(--line); background: #f8f3ed; }.professional-details > summary { padding: 12px 16px; cursor: pointer; color: #9d5845; font-size: 11px; font-weight: 800; }.professional-editor { margin: 0; padding: 0; border: 0; }.professional-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 16px 16px; }.professional-grid fieldset { display: grid; gap: 8px; align-content: start; margin: 0; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: white; }.professional-grid legend { color: #a45e4c; font-size: 11px; font-weight: 800; }.professional-grid label { display: grid; gap: 4px; color: var(--muted); font-size: 9px; }.professional-grid input, .professional-grid textarea { padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 10px; }.professional-grid p { display: grid; gap: 3px; margin: 0; color: var(--muted); font-size: 10px; }.professional-grid p b { color: var(--ink); }.professional-grid .span-two { grid-column: 1 / -1; }.micro-motion-editor { display: grid; gap: 5px; }.micro-motion-editor > b, .micro-motion-editor > span { color: var(--muted); font-size: 9px; }.micro-motion-editor > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }.micro-motion-editor button { padding: 5px 7px; font-size: 9px; }.risk { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px; border-radius: 7px; background: #fff2e8; font-size: 10px; }.risk button { padding: 5px 7px; font-size: 9px; }
+.shot-list { display: grid; gap: 14px; padding: 18px 24px; }.shot-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; }.shot-summary { display: grid; grid-template-columns: 65px 1fr; gap: 14px; align-items: center; padding: 16px; }.shot-number { font: 500 22px Georgia, serif; color: #c56d55; }.shot-number label { display: flex; align-items: center; gap: 3px; margin-top: 6px; color: #9c9289; font: 10px Inter, sans-serif; }.shot-number input { width: 35px; padding: 4px; }.shot-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }.shot-fields .wide { grid-column: span 2; }.field { display: grid; gap: 4px; }.field.compact { grid-template-columns: 50px 1fr; align-items: center; }.field label { font-size: 10px; }.field input, .field select, .field textarea { min-width: 0; padding: 8px 10px; font-size: 12px; }
+.derived-summary { padding: 9px 11px; border: 1px solid #eadfd5; border-radius: 9px; background: #fcfaf7; }.summary-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.summary-label button { padding: 3px 6px; color: #9d5845; font-size: 9px; }.derived-summary p { margin: 0; color: #615a54; font-size: 13px; line-height: 1.7; }.derived-summary small { color: var(--muted); font-size: 9px; }.production-hints span { color: var(--muted); font-size: 10px; }
+.professional-details { border-top: 1px solid var(--line); background: #f8f3ed; }.professional-details > summary { padding: 12px 16px; cursor: pointer; color: #9d5845; font-size: 11px; font-weight: 800; }.professional-editor { margin: 0; padding: 0; border: 0; }.professional-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 16px 16px; }.professional-grid fieldset { display: grid; gap: 8px; align-content: start; margin: 0; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: white; }.professional-grid legend { color: #a45e4c; font-size: 11px; font-weight: 800; }.professional-grid label { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; }.professional-grid input, .professional-grid textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }.professional-grid p { display: grid; gap: 3px; margin: 0; color: var(--muted); font-size: 10px; }.professional-grid p b { color: var(--ink); }.professional-grid .span-two { grid-column: 1 / -1; }.micro-motion-editor { display: grid; gap: 5px; }.micro-motion-editor > b, .micro-motion-editor > span { color: var(--muted); font-size: 9px; }.micro-motion-editor > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }.micro-motion-editor button { padding: 5px 7px; font-size: 9px; }.risk { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px; border-radius: 7px; background: #fff2e8; font-size: 10px; }.risk button { padding: 5px 7px; font-size: 9px; }
 .detail-group { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: white; }.detail-group > h3 { margin: 0; color: #a45e4c; font-size: 12px; }.detail-subgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.detail-subgrid.detail-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }.detail-subgroup { display: grid; gap: 8px; align-content: start; padding: 10px; border-radius: 9px; background: #faf7f2; }.detail-subgroup h4 { margin: 0; color: var(--ink); font-size: 10px; }.empty-detail { color: var(--muted); }
 .duration-check { padding: 16px 24px; display: flex; gap: 12px; align-items: center; justify-content: flex-end; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }.duration-check strong { color: var(--ink); }
 .compare-backdrop { position: fixed; inset: 0; z-index: 80; background: rgb(37 31 27 / 32%); }.compare-drawer { position: absolute; inset: 0 0 0 auto; width: min(960px, 92vw); overflow: auto; padding: 24px; background: #fbf7f2; box-shadow: -18px 0 50px rgb(41 32 27 / 18%); }.compare-drawer > header { display: flex; justify-content: space-between; align-items: start; }.compare-drawer h2 { margin: 4px 0 18px; }.compare-summary { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }.compare-summary span { padding: 7px 9px; border-radius: 8px; background: #eee5dc; color: #675f58; font-size: 10px; }.compare-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }.compare-columns > section { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: white; }.compare-columns h3 { margin: 0 0 12px; font-size: 13px; }.compare-columns article { padding: 11px 0; border-top: 1px solid var(--line); }.compare-columns p { margin: 5px 0; color: var(--muted); font-size: 10px; line-height: 1.45; }.professional-compare { margin-top: 14px; }.professional-compare summary { cursor: pointer; font-weight: 800; }
 .compare-columns .changed { padding: 3px 5px; border-radius: 5px; background: #fff0df; color: #9a4f3e; }.professional-diff-list { display: grid; gap: 9px; margin-top: 10px; }.professional-diff-list article { padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: white; }.professional-diff-list header { display: flex; justify-content: space-between; gap: 8px; color: #9a4f3e; font-size: 10px; }.professional-diff-list article > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }.professional-diff-list p { display: grid; gap: 4px; margin: 0; padding: 8px; border-radius: 7px; background: #faf7f2; color: #615a54; font-size: 10px; line-height: 1.5; }.professional-diff-list small { color: var(--muted); font-size: 8px; }.no-differences { color: var(--muted); font-size: 10px; }
 .attempt-list { display: grid; gap: 8px; margin: 9px 0 0; padding: 0; list-style: none; }.attempt-list li { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid rgb(145 76 64 / 16%); border-radius: 9px; background: rgb(255 255 255 / 60%); font-size: 10px; }.attempt-list span, .attempt-list small { color: var(--muted); }.attempt-list code { overflow-wrap: anywhere; white-space: normal; }.attempt-list small { font-size: 8px; }
 .attempt-validation { margin-top: 4px; }.attempt-validation > summary { cursor: pointer; }.attempt-validation ul { display: grid; gap: 5px; margin: 6px 0 0; padding: 0; list-style: none; }.attempt-validation li { padding: 6px 8px; background: #fffaf4; }.attempt-validation code { color: #6b5043; }
-@media (max-width: 1050px) { .storyboard-layout { grid-template-columns: 1fr; }.story-source { position: static; }.professional-grid, .compare-columns, .detail-subgrid, .detail-subgrid.detail-three { grid-template-columns: 1fr; }.professional-grid .span-two { grid-column: auto; }.editor-head { align-items: flex-start; }.progress-steps { grid-template-columns: 1fr; } }
+@media (max-width: 1400px) { .detail-subgrid.detail-three { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1050px) { .storyboard-layout { grid-template-columns: 1fr; }.story-source { position: static; max-height: none; overflow: visible; }.story-scroll-hint { display: none; }.professional-grid, .compare-columns, .detail-subgrid, .detail-subgrid.detail-three { grid-template-columns: 1fr; }.professional-grid .span-two { grid-column: auto; }.editor-head { align-items: flex-start; }.progress-steps { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  .story-source { padding: 18px; }
+  .shot-list { padding: 12px; }
+  .shot-summary { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .shot-number { display: flex; align-items: center; gap: 10px; }.shot-number label { margin: 0; }
+  .shot-fields { grid-template-columns: minmax(0, 1fr); }.shot-fields .wide { grid-column: auto; }
+  .editor-head { flex-direction: column; padding: 16px; gap: 12px; }.head-actions { justify-content: flex-start; }
+  .head-actions button { height: auto; padding: 8px 12px; }
+  .editor-error, .generation-progress { margin-inline: 12px; }
+  .version-bar { padding: 12px; }.timeline-ruler { margin-left: 24px; }
+  .shot-scene-controls label { flex: 1 1 100%; min-width: 0; }
+  .duration-check { padding: 16px; flex-wrap: wrap; }
+  .compare-drawer { width: 100%; padding: 16px; }.professional-diff-list article > div { grid-template-columns: minmax(0, 1fr); }
+  .risk { grid-template-columns: minmax(0, 1fr); }
+  .director-empty { padding: 24px; }.director-empty button { min-width: 0; width: 100%; }
+}
 </style>
 
-<style scoped>.shot-scene-controls { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }.shot-scene-controls label { display: grid; gap: 4px; }.director-references { padding: 10px 0; font-size: 12px; }.director-references div { display: flex; gap: 8px; flex-wrap: wrap; }.director-references figure { margin: 0; }.director-references img { width: 64px; height: 80px; object-fit: contain; }.director-references figcaption { font-size: 10px; }</style>
+<style scoped>.shot-scene-controls { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }.shot-scene-controls label { display: grid; gap: 4px; min-width: 0; }.shot-scene-controls select { max-width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: white; }.director-references { padding: 10px 0; font-size: 12px; }.director-references div { display: flex; gap: 8px; flex-wrap: wrap; }.director-references figure { margin: 0; }.director-references img { width: 64px; height: 80px; object-fit: contain; }.director-references figcaption { font-size: 10px; }</style>

@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import JobStatusCard from "../components/JobStatusCard.vue";
+import { subscribeJobs } from "../jobUpdates";
 import { api } from "../api/client";
 import AssetImageViewer from "../components/workspace/AssetImageViewer.vue";
 import type {
@@ -13,7 +15,6 @@ import type {
   RuntimeBootstrapDto,
   SeriesAssetBindingDto,
   SeriesEpisodeDto,
-  SeriesEpisodeStoryPreviewDto,
   SeriesPlanDraft,
   SeriesPlanPreviewDto,
   SeriesPlanSegmentPreviewDto,
@@ -37,6 +38,24 @@ const runtime = ref<RuntimeBootstrapDto | null>(null);
 const loading = ref(true);
 const actionBusy = ref(false);
 const error = ref("");
+const goalCount = ref(3);
+const goalDuration = ref(15);
+const goalKeep = ref("");
+async function saveProductionGoal() {
+  if (!series.value || actionBusy.value) return;
+  actionBusy.value = true; error.value = "";
+  try {
+    await api.updateSeriesProductionTarget(seriesId, {
+      ...(series.value.lengthMode === "fixed" ? { plannedEpisodeCount: goalCount.value } : {}),
+      defaultEpisodeDurationSeconds: goalDuration.value,
+      mustKeep: goalKeep.value.split("\n").map(item => item.trim()).filter(Boolean),
+    });
+    await load();
+  } catch (reason) { error.value = reason instanceof Error ? reason.message : "生产目标未保存。"; }
+  finally { actionBusy.value = false; }
+}
+const treatmentLabels = { retained: "保留", merged: "合并", simplified: "简化", omitted: "省略" };
+
 const selectedPlanId = ref("");
 const openContinuity = ref<EpisodeContinuityDto | null>(null);
 const continuityFrames = ref<EpisodeContinuityFramesDto | null>(null);
@@ -61,17 +80,26 @@ const frameViewerOpen = ref(false);
 const frameViewerAssets = ref<AssetDto[]>([]);
 const frameViewerActiveId = ref<string | null>(null);
 const assetBindings = ref<SeriesAssetBindingDto[]>([]);
+const assetsLoading = ref(false);
+const assetsError = ref("");
+let assetsController: AbortController | undefined;
+async function loadAssets() {
+  assetsController?.abort();
+  const controller = new AbortController(); assetsController = controller;
+  assetsLoading.value = true; assetsError.value = "";
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try { assetBindings.value = await api.seriesAssets(seriesId, controller.signal); }
+  catch (reason) {
+    if (assetsController === controller) assetsError.value = reason instanceof Error ? "共享参考暂未加载完成，可单独重试。" : "共享参考读取失败。";
+  } finally { clearTimeout(timeout); if (assetsController === controller) assetsLoading.value = false; }
+}
 const sourceBeats = ref<SeriesSourceBeatDto[]>([]);
 const editingPlan = ref(false);
 const editablePlan = ref<SeriesPlanDraft | null>(null);
 const visibleRouteEpisodes = ref(10);
 const visibleProductionEpisodes = ref(12);
-const selectedEpisode = ref<SeriesEpisodeDto | null>(null);
-const storyPreview = ref<SeriesEpisodeStoryPreviewDto | null>(null);
-const storyNotes = ref("");
-const storyPreviewLoading = ref(false);
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-let storyPreviewTimer: ReturnType<typeof setTimeout> | undefined;
+let unsubscribeJobs: (() => void) | undefined;
+let disposed = false;
 
 const selectedPlan = computed(() => plans.value.find((item) => item.id === selectedPlanId.value) ?? plans.value[0] ?? null);
 const activePlan = computed(() => plans.value.find((item) => item.active) ?? null);
@@ -89,15 +117,6 @@ const canPlanAnotherSegment = computed(() => Boolean(
     || series.value.plannedEpisodeCount === null
     || series.value.plannedCount < series.value.plannedEpisodeCount),
 ));
-const selectedEpisodeStoryJob = computed(() => {
-  const projectId = selectedEpisode.value?.projectId;
-  if (!projectId) return null;
-  return jobs.value.find((item) => item.kind === "plan_series_episode" && item.projectId === projectId) ?? null;
-});
-const episodeStoryJobRunning = computed(() => Boolean(
-  selectedEpisodeStoryJob.value
-  && !["succeeded", "failed", "cancelled"].includes(selectedEpisodeStoryJob.value.status),
-));
 const canGenerate = computed(() => Boolean(preview.value && runtime.value?.worker.ready && runtime.value.provider.paidCallsEnabled && runtime.value.provider.apiKeyConfigured && !jobRunning.value && !actionBusy.value));
 const canGenerateSegment = computed(() => Boolean(
   segmentPreview.value
@@ -105,14 +124,6 @@ const canGenerateSegment = computed(() => Boolean(
   && runtime.value.provider.paidCallsEnabled
   && runtime.value.provider.apiKeyConfigured
   && !segmentJobRunning.value
-  && !actionBusy.value,
-));
-const canGenerateEpisodeStory = computed(() => Boolean(
-  storyPreview.value
-  && runtime.value?.worker.ready
-  && runtime.value.provider.paidCallsEnabled
-  && runtime.value.provider.apiKeyConfigured
-  && !episodeStoryJobRunning.value
   && !actionBusy.value,
 ));
 const routeEpisodes = computed(() => selectedPlan.value?.plan.episodes.slice(0, visibleRouteEpisodes.value) ?? []);
@@ -123,6 +134,7 @@ const canSaveEditedPlan = computed(() => {
   if (!draft || !expectedCount || draft.episodes.length !== expectedCount) return false;
   const contentComplete = draft.episodes.every((item, index) => item.order === index + 1 && [item.title, item.premise, item.openingState, item.trigger, item.childIntent, item.childAction, item.catResponse, item.visibleChange, item.endingState].every((value) => value.trim().length > 0));
   if (!contentComplete || sourceBeats.value.length === 0) return contentComplete;
+  if (series.value?.adaptationPolicy === "condense_mainline") return true;
   const knownOrdinals = new Set(sourceBeats.value.map((beat) => beat.bindingOrder));
   const coverages = draft.episodes.flatMap((episode) => episode.sourceCoverage);
   return coverages.every((coverage) => knownOrdinals.has(coverage.sourceUnitOrdinal) && coverage.coverageNote.trim().length > 0)
@@ -167,22 +179,6 @@ function segmentJobLabel(job: JobDto | null): string {
   return labels[job.status];
 }
 
-function episodeStoryJobLabel(job: JobDto): string {
-  const labels: Record<JobDto["status"], string> = {
-    queued: runtime.value?.worker.ready ? "等待后台任务领取" : "任务已保存，后台正在恢复",
-    submitting: "正在生成本集故事",
-    submitted: "模型正在处理本集故事",
-    polling: "模型正在处理本集故事",
-    storing: "正在校验并保存故事候选",
-    succeeded: "本集故事候选已生成",
-    failed: "本集故事没有生成成功",
-    cancel_requested: "正在停止",
-    cancelled: "已停止",
-    submission_unknown: "提交状态需要确认，请勿重复生成",
-  };
-  return labels[job.status];
-}
-
 function planStatus(plan: SeriesPlanVersionDto): string {
   if (plan.active) return "当前方案";
   if (plan.status === "candidate") return plan.disposition === "needs_input" ? "待补充" : "新方案 · 待确认";
@@ -195,23 +191,26 @@ function episodeAction(episode: SeriesEpisodeDto): string {
   if (episode.status === "completed") return "查看成片";
   if (episode.status === "needs_attention") return "处理问题";
   if (!episode.projectId) return "开始制作";
-  return episode.status === "story_review" ? "准备本集剧情" : "继续制作";
+  return episode.status === "story_review" ? "打开本集剧情" : "继续制作";
 }
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [detail, planList, segmentList, episodeList, jobList, run, bindings, beats] = await Promise.all([
-      api.storySeriesDetail(seriesId), api.seriesPlans(seriesId), api.seriesPlanSegments(seriesId), api.seriesEpisodes(seriesId), api.seriesJobs(seriesId), api.runtime(), api.seriesAssets(seriesId), api.seriesSourceBeats(seriesId),
+    void loadAssets();
+    const [detail, planList, segmentList, episodeList, jobList, run, beats] = await Promise.all([
+      api.storySeriesDetail(seriesId), api.seriesPlans(seriesId), api.seriesPlanSegments(seriesId), api.seriesEpisodes(seriesId), api.seriesJobs(seriesId), api.runtime(), api.seriesSourceBeats(seriesId),
     ]);
     series.value = detail;
+    goalCount.value = detail.plannedEpisodeCount ?? 3;
+    goalDuration.value = detail.defaultEpisodeDurationSeconds;
+    goalKeep.value = detail.mustKeep.join("\n");
     plans.value = planList;
     segments.value = segmentList;
     episodes.value = episodeList;
     jobs.value = jobList;
     runtime.value = run;
-    assetBindings.value = bindings;
     sourceBeats.value = beats;
     if (!selectedPlanId.value || !planList.some((item) => item.id === selectedPlanId.value)) selectedPlanId.value = planList[0]?.id ?? "";
     preview.value = await api.previewSeriesPlan(seriesId);
@@ -229,7 +228,7 @@ async function refreshProgress() {
       api.seriesJobs(seriesId), api.seriesPlans(seriesId), api.seriesPlanSegments(seriesId), api.seriesEpisodes(seriesId), api.runtime(),
     ]);
     jobs.value = jobList; plans.value = planList; segments.value = segmentList; episodes.value = episodeList; runtime.value = run;
-    if (planList[0] && latestPlanJob.value?.status === "succeeded") selectedPlanId.value = planList[0].id;
+    if (!selectedPlanId.value && planList[0]) selectedPlanId.value = planList[0].id;
   } catch { /* keep the last durable view while the local service recovers */ }
 }
 
@@ -332,6 +331,22 @@ async function rejectPlan(plan: SeriesPlanVersionDto) {
 
 function startPlanEdit(plan: SeriesPlanVersionDto) {
   editablePlan.value = structuredClone(toRaw(plan.plan));
+  if (series.value?.adaptationPolicy === "condense_mainline") {
+    const draft = editablePlan.value;
+    draft.sourceTreatments ??= [];
+    draft.adaptationRisks ??= [];
+    draft.preservedRequirements ??= [];
+    for (const beat of sourceBeats.value) {
+      if (!draft.sourceTreatments.some(item => item.sourceUnitOrdinal === beat.bindingOrder)) {
+        draft.sourceTreatments.push({ sourceUnitOrdinal: beat.bindingOrder, treatment: "retained", episodeOrders: [], reason: "" });
+      }
+    }
+    for (const requirement of series.value.mustKeep) {
+      if (!draft.preservedRequirements.some(item => item.requirement === requirement)) {
+        draft.preservedRequirements.push({ requirement, handling: "", episodeOrders: [] });
+      }
+    }
+  }
   editingPlan.value = true;
 }
 
@@ -408,40 +423,12 @@ async function saveEditedPlan() {
 }
 
 async function openEpisode(episode: SeriesEpisodeDto) {
-  if (episode.projectId && episode.status !== "story_review") { await router.push(`/projects/${episode.projectId}/planner`); return; }
-  actionBusy.value = true;
-  try {
-    if (!episode.projectId) await api.materializeSeriesEpisode(seriesId, episode.id, crypto.randomUUID());
-    episodes.value = await api.seriesEpisodes(seriesId);
-    selectedEpisode.value = episodes.value.find((item) => item.id === episode.id) ?? null;
-    await refreshStoryPreview();
-  } catch (reason) { error.value = reason instanceof Error ? reason.message : "本集工作区没有创建。"; }
-  finally { actionBusy.value = false; }
-}
-
-async function refreshStoryPreview() {
-  if (!selectedEpisode.value?.projectId) return;
-  storyPreviewLoading.value = true;
-  try {
-    storyPreview.value = await api.previewSeriesEpisodeStory(seriesId, selectedEpisode.value.id, storyNotes.value || null);
-  } catch (reason) {
-    storyPreview.value = null;
-    error.value = reason instanceof Error ? reason.message : "本集故事内容暂时无法预览。";
-  } finally { storyPreviewLoading.value = false; }
-}
-
-async function generateEpisodeStory() {
-  if (!selectedEpisode.value?.projectId || !storyPreview.value || !canGenerateEpisodeStory.value) return;
+  if (actionBusy.value) return;
   actionBusy.value = true; error.value = "";
   try {
-    const job = await api.generateSeriesEpisodeStory(seriesId, selectedEpisode.value.id, {
-      expectedInputHash: storyPreview.value.inputHash,
-      additionalNotes: storyNotes.value || null,
-      idempotencyKey: crypto.randomUUID(),
-    });
-    jobs.value = [job, ...jobs.value.filter((item) => item.id !== job.id)];
-    await router.push(`/projects/${selectedEpisode.value.projectId}/planner`);
-  } catch (reason) { error.value = reason instanceof Error ? reason.message : "本集故事没有开始生成。"; }
+    const projectId = episode.projectId ?? (await api.materializeSeriesEpisode(seriesId, episode.id, "episode-project:" + episode.id)).id;
+    await router.push("/projects/" + projectId + (episode.status === "completed" ? "/delivery" : "/planner"));
+  } catch (reason) { error.value = reason instanceof Error ? reason.message : "本集工作区没有打开。"; }
   finally { actionBusy.value = false; }
 }
 
@@ -524,10 +511,9 @@ async function confirmContinuity() {
   }
 }
 
-onMounted(async () => { await load(); pollTimer = setInterval(refreshProgress, 3000); });
-onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer); if (storyPreviewTimer) clearTimeout(storyPreviewTimer); });
+onMounted(async () => { unsubscribeJobs = subscribeJobs(() => ({ seriesId }), refreshProgress, () => jobs.value.some(job => job.execution?.waitingForProvider)); await load(); });
+onBeforeUnmount(() => { disposed = true; assetsController?.abort(); assetsController = undefined; unsubscribeJobs?.(); });
 watch(selectedPlanId, () => { editingPlan.value = false; editablePlan.value = null; visibleRouteEpisodes.value = 10; });
-watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer); storyPreviewTimer = setTimeout(refreshStoryPreview, 400); });
 </script>
 
 <template>
@@ -543,12 +529,20 @@ watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer)
       <nav class="series-tabs" aria-label="系列创作台"><a href="#setting">系列设定</a><a href="#route">整季路线</a><a href="#episodes">剧集列表</a><a href="#assets">共享资产</a><a href="#continuity">连续性</a></nav>
 
       <section id="setting" class="card studio-section">
-        <header><div><h2>系列设定</h2><p>{{ series.narrativeMode === "continuous" ? "连续剧情" : series.narrativeMode === "lightly_serialized" ? "轻连续" : "单元故事" }} · 每集约 {{ series.defaultEpisodeDurationSeconds }} 秒</p></div></header>
+        <header><div><h2>系列设定</h2><p>{{ series.narrativeMode === "continuous" ? "连续剧情" : series.narrativeMode === "lightly_serialized" ? "轻连续" : "单元故事" }} · 每集 {{ series.defaultEpisodeDurationSeconds }} 秒</p></div></header>
+        <details v-if="series.adaptationPolicy === 'condense_mainline' && !activePlan" class="goal-editor">
+          <summary>调整生产目标（不重新分析原文）</summary>
+          <label v-if="series.lengthMode === 'fixed'">计划集数<input v-model.number="goalCount" type="number" min="2" /></label>
+          <label>每集时长（秒）<input v-model.number="goalDuration" type="number" min="8" max="15" /></label>
+          <label>必须保留（每行一项）<textarea v-model="goalKeep" /></label>
+          <p v-if="series.lengthMode === 'fixed'">{{ goalCount }} × {{ goalDuration }} 秒 = {{ goalCount * goalDuration }} 秒</p>
+          <button class="secondary" :disabled="actionBusy || jobRunning || segmentJobRunning || goalCount < 2 || goalDuration < 8 || goalDuration > 15" @click="saveProductionGoal">保存生产目标</button>
+        </details>
         <div class="setting-grid"><dl><dt>世界与环境</dt><dd>{{ series.worldSetting }}</dd></dl><dl><dt>情绪方向</dt><dd>{{ series.emotionalDirection }}</dd></dl><dl><dt>必须保留</dt><dd>{{ series.mustKeep.join("、") || "固定儿童、猫咪和画风" }}</dd></dl><dl><dt>必须避免</dt><dd>{{ series.mustAvoid.join("、") || "危险动作与身份变化" }}</dd></dl></div>
       </section>
 
       <section v-if="sourceBeats.length" class="card studio-section source-coverage">
-        <header><div><h2>来源剧情节拍</h2><p>{{ sourceBeats.length }} 个剧情节拍会在方案中组合或拆分；不会被静默裁剪。</p></div></header>
+        <header><div><h2>来源剧情节拍</h2><p>{{ sourceBeats.length }} 个来源事件{{ series.adaptationPolicy === "condense_mainline" ? "；保留、合并、简化和省略必须明确说明。" : "；保留原有覆盖规则与分集路线。" }}</p></div></header>
         <div class="beat-grid"><article v-for="beat in sourceBeats" :key="beat.id"><b>{{ beat.bindingOrder }}</b><span>{{ beat.title }}</span><small>被方案引用 {{ selectedPlan?.plan.episodes.filter((episode) => episode.sourceCoverage.some((coverage) => coverage.sourceUnitOrdinal === beat.bindingOrder)).length ?? 0 }} 次</small></article></div>
       </section>
 
@@ -556,6 +550,7 @@ watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer)
         <header><div><h2>本次系列规划</h2><p v-if="preview">将生成 {{ preview.plannedEpisodeCount }} 集简纲；不会同时生成剧本、图片、分镜或视频。</p></div><button class="primary" :disabled="!canGenerate" @click="generatePlan">{{ jobRunning ? "规划进行中" : activePlan ? "重新规划整季" : "生成系列规划（付费）" }}</button></header>
         <p v-if="!runtime?.worker.ready" class="notice">后台任务暂时不可用，系统正在自动恢复。</p>
         <p v-else-if="!runtime?.provider.apiKeyConfigured || !runtime?.provider.paidCallsEnabled" class="notice">模型服务尚未开放新的付费调用，请先检查运行设置。</p>
+        <JobStatusCard v-if="latestPlanJob" :job-id="latestPlanJob.id" title="系列规划任务" @replacement="refreshProgress" />
         <div class="progress-line" aria-live="polite"><b>{{ jobLabel(latestPlanJob) }}</b><span v-if="jobRunning">可以离开页面，任务会继续并保存。</span></div>
         <details v-if="preview"><summary>查看完整规划指令</summary><pre>{{ preview.prompt }}</pre></details>
       </section>
@@ -569,6 +564,7 @@ watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer)
           </div>
           <button v-if="segmentPreview" class="primary" :disabled="!canGenerateSegment" @click="generateSegment">{{ segmentJobRunning ? "规划段生成中" : "规划下一段（付费）" }}</button>
         </header>
+        <JobStatusCard v-if="latestSegmentJob" :job-id="latestSegmentJob.id" title="分段规划任务" @replacement="refreshProgress" />
         <div v-if="segmentPreview" class="progress-line" aria-live="polite"><b>{{ segmentJobLabel(latestSegmentJob) }}</b><span>本段 {{ segmentPreview.requestedEpisodeCount }} 集 · 单次最多 30 集</span></div>
         <details v-if="segmentPreview"><summary>查看本段完整规划指令</summary><pre>{{ segmentPreview.prompt }}</pre></details>
         <div v-if="segments.length" class="segment-list">
@@ -587,16 +583,47 @@ watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer)
       <section v-if="selectedPlan" id="route" class="card studio-section">
         <header><div><h2>整季路线</h2><p>{{ selectedPlan.plan.seriesBible.logline }}</p></div><div v-if="selectedPlan.status === 'candidate'" class="candidate-actions"><button class="ghost" @click="startPlanEdit(selectedPlan)">{{ selectedPlan.disposition === "needs_input" ? "补充方案" : "编辑方案" }}</button><button class="ghost" @click="rejectPlan(selectedPlan)">不采用</button><button class="primary" :disabled="selectedPlan.disposition !== 'candidate_ready' || actionBusy" @click="adoptPlan(selectedPlan)">采用整季方案</button></div></header>
         <p v-if="selectedPlan.issues.length" class="notice">方案还包含 {{ selectedPlan.issues.length }} 项需要查看的内容。{{ selectedPlan.disposition === "needs_input" ? "补充后才能采用，但不需要重新调用模型。" : "不影响查看。" }}</p>
+        <ul v-if="selectedPlan.issues.length" class="notice"><li v-for="(issue, index) in selectedPlan.issues" :key="index">{{ issue.message }} {{ issue.suggestedAction }}</li></ul>
+        <section v-if="!editingPlan && series.adaptationPolicy === 'condense_mainline'" class="adaptation-review">
+          <h3>原文如何缩编</h3>
+          <article v-for="item in selectedPlan.plan.sourceTreatments" :key="item.sourceUnitOrdinal"><b>来源 {{ item.sourceUnitOrdinal }} · {{ treatmentLabels[item.treatment] }}</b><p>{{ item.reason }}</p><small>{{ item.treatment === 'omitted' ? '已省略，不计入覆盖' : '用于第 ' + item.episodeOrders.join('、') + ' 集' }}</small></article>
+          <h3>必须保留内容</h3><p v-for="item in selectedPlan.plan.preservedRequirements" :key="item.requirement">{{ item.requirement }}：{{ item.handling }}（第 {{ item.episodeOrders.join('、') }} 集）</p>
+          <p v-for="(risk, index) in selectedPlan.plan.adaptationRisks" :key="index" :class="['notice', { error: risk.blocking }]">{{ risk.blocking ? '待调整' : '规划提醒' }}：{{ risk.message }}</p>
+        </section>
         <div v-if="editingPlan && editablePlan" class="plan-editor">
           <label>整季一句话<input v-model="editablePlan.seriesBible.logline" /></label>
+          <details>
+            <summary>共享道具与连续性</summary>
+            <p>修改名称与规则会随新方案保存；原道具引用标识保持不变。</p>
+            <fieldset v-for="prop in editablePlan.seriesBible.recurringProps" :key="prop.key">
+              <legend>{{ prop.name }}</legend>
+              <label>道具名称<input v-model="prop.name" :aria-label="`共享道具 ${prop.key} 名称`" /></label>
+              <label>道具连续性规则<textarea v-model="prop.continuityRule" :aria-label="`共享道具 ${prop.key} 连续性规则`" /></label>
+            </fieldset>
+            <label>整季连续性规则（每行一项）<textarea :value="editablePlan.seriesBible.continuityRules.join('\n')" rows="6" @change="editablePlan.seriesBible.continuityRules = ($event.target as HTMLTextAreaElement).value.split('\n').map(value => value.trim()).filter(Boolean)" /></label>
+          </details>
+          <section v-if="series.adaptationPolicy === 'condense_mainline'" class="adaptation-editor">
+            <h3>来源处理说明</h3>
+            <article v-for="item in editablePlan.sourceTreatments" :key="item.sourceUnitOrdinal"><b>来源 {{ item.sourceUnitOrdinal }}</b>
+              <select v-model="item.treatment"><option v-for="(label, value) in treatmentLabels" :key="value" :value="value">{{ label }}</option></select>
+              <label v-for="episode in editablePlan.episodes" :key="episode.order"><input v-model="item.episodeOrders" type="checkbox" :value="episode.order" />第 {{ episode.order }} 集</label>
+              <label>保留内容与删改原因<textarea v-model="item.reason" /></label>
+            </article>
+            <h3>必须保留的内容如何实现</h3>
+            <article v-for="item in editablePlan.preservedRequirements" :key="item.requirement"><b>{{ item.requirement }}</b><textarea v-model="item.handling" />
+              <label v-for="episode in editablePlan.episodes" :key="episode.order"><input v-model="item.episodeOrders" type="checkbox" :value="episode.order" />第 {{ episode.order }} 集</label>
+            </article>
+            <article v-for="(risk, index) in editablePlan.adaptationRisks" :key="index"><label>风险与调整说明<textarea v-model="risk.message" /></label><label><input v-model="risk.blocking" type="checkbox" />尚未解决，阻止采用</label></article>
+            <p>修改来源处理后，请同步下方每集的实际引用。省略事件应取消引用；精简事件使用“部分覆盖”。</p>
+          </section>
           <div v-if="episodeOrdersNeedRepair" class="order-repair"><p>集数没有从 1 连续编号。可以按当前显示顺序修正，不会调用模型。</p><button class="secondary renumber-episodes" @click="renumberEpisodes">按当前顺序编号为 1–{{ editablePlan.episodes.length }}</button></div>
-          <article v-for="(episode, episodeIndex) in editablePlan.episodes" :key="episodeIndex" class="episode-editor"><b>第 {{ episode.order }} 集</b><label>标题<input v-model="episode.title" /></label><label>本集事件<textarea v-model="episode.premise" /></label><label>开场状态<textarea v-model="episode.openingState" /></label><label>触发<textarea v-model="episode.trigger" /></label><label>儿童目标<textarea v-model="episode.childIntent" /></label><label>儿童动作<textarea v-model="episode.childAction" /></label><label>猫咪回应<textarea v-model="episode.catResponse" /></label><label>可见变化<textarea v-model="episode.visibleChange" /></label><label>结尾状态<textarea v-model="episode.endingState" /></label><fieldset v-if="sourceBeats.length" class="episode-source-coverage"><legend>来源剧情节拍</legend><div class="beat-options"><label v-for="beat in sourceBeats" :key="beat.id"><input type="checkbox" :checked="episode.sourceCoverage.some((coverage) => coverage.sourceUnitOrdinal === beat.bindingOrder)" :aria-label="`第 ${episode.order} 集使用剧情节拍 ${beat.bindingOrder}`" @change="toggleSourceBeat(episode, beat, $event)" />{{ beat.bindingOrder }} · {{ beat.title }}</label></div><div v-for="coverage in episode.sourceCoverage" :key="coverage.sourceUnitOrdinal" class="coverage-detail"><b>节拍 {{ coverage.sourceUnitOrdinal }}</b><select v-model="coverage.coverage" :aria-label="`第 ${episode.order} 集剧情节拍 ${coverage.sourceUnitOrdinal}覆盖方式`"><option value="whole">完整覆盖</option><option value="partial">部分覆盖</option><option value="continuation">延续覆盖</option></select><label>覆盖说明<input v-model="coverage.coverageNote" :aria-label="`第 ${episode.order} 集剧情节拍 ${coverage.sourceUnitOrdinal}覆盖说明`" /></label></div></fieldset></article>
+          <article v-for="(episode, episodeIndex) in editablePlan.episodes" :key="episodeIndex" class="episode-editor"><b>第 {{ episode.order }} 集</b><button class="ghost" @click="editablePlan.episodes.splice(episodeIndex, 1)">移除此集</button><label>目标时长（秒）<input v-model.number="episode.targetDurationSeconds" type="number" min="8" max="15" /></label><label>标题<input v-model="episode.title" /></label><label>本集事件<textarea v-model="episode.premise" /></label><label>开场状态<textarea v-model="episode.openingState" /></label><label>触发<textarea v-model="episode.trigger" /></label><label>儿童目标<textarea v-model="episode.childIntent" /></label><label>儿童动作<textarea v-model="episode.childAction" /></label><label>猫咪回应<textarea v-model="episode.catResponse" /></label><label>可见变化<textarea v-model="episode.visibleChange" /></label><label>结尾状态<textarea v-model="episode.endingState" /></label><label>跨集承接（每行一项）<textarea :value="episode.continuityCarryover.join('\n')" :aria-label="`第 ${episode.order} 集跨集承接`" @change="episode.continuityCarryover = ($event.target as HTMLTextAreaElement).value.split('\n').map(value => value.trim()).filter(Boolean)" /></label><label>制作提示（每行一项）<textarea :value="episode.productionWarnings.join('\n')" :aria-label="`第 ${episode.order} 集制作提示`" @change="episode.productionWarnings = ($event.target as HTMLTextAreaElement).value.split('\n').map(value => value.trim()).filter(Boolean)" /></label><fieldset v-if="sourceBeats.length" class="episode-source-coverage"><legend>来源剧情节拍</legend><div class="beat-options"><label v-for="beat in sourceBeats" :key="beat.id"><input type="checkbox" :checked="episode.sourceCoverage.some((coverage) => coverage.sourceUnitOrdinal === beat.bindingOrder)" :aria-label="`第 ${episode.order} 集使用剧情节拍 ${beat.bindingOrder}`" @change="toggleSourceBeat(episode, beat, $event)" />{{ beat.bindingOrder }} · {{ beat.title }}</label></div><div v-for="coverage in episode.sourceCoverage" :key="coverage.sourceUnitOrdinal" class="coverage-detail"><b>节拍 {{ coverage.sourceUnitOrdinal }}</b><select v-model="coverage.coverage" :aria-label="`第 ${episode.order} 集剧情节拍 ${coverage.sourceUnitOrdinal}覆盖方式`"><option value="whole">完整覆盖</option><option value="partial">部分覆盖</option><option value="continuation">延续覆盖</option></select><label>覆盖说明<input v-model="coverage.coverageNote" :aria-label="`第 ${episode.order} 集剧情节拍 ${coverage.sourceUnitOrdinal}覆盖说明`" /></label></div></fieldset></article>
           <button v-if="preview && editablePlan.episodes.length < preview.plannedEpisodeCount" class="secondary" @click="addEpisode">补充第 {{ editablePlan.episodes.length + 1 }} 集</button>
           <div class="editor-actions"><button class="ghost" @click="editingPlan = false">取消</button><button class="primary" :disabled="!canSaveEditedPlan || actionBusy" @click="saveEditedPlan">保存为新候选</button></div>
-          <p v-if="!canSaveEditedPlan" class="field-hint">需要补齐本次规划的 {{ preview?.plannedEpisodeCount }} 集、重要内容和全部来源剧情节拍覆盖；不会重新调用模型。</p>
+          <p v-if="!canSaveEditedPlan" class="field-hint">需要补齐本次规划的 {{ preview?.plannedEpisodeCount }} 集、重要内容；来源处理与时长由保存后的校验明确指出；不会重新调用模型。</p>
         </div>
         <div v-else class="episode-rail">
-          <article v-for="episode in routeEpisodes" :key="episode.order"><b>第 {{ episode.order }} 集</b><h3>{{ episode.title }}</h3><p>{{ episode.premise }}</p><small>{{ episode.openingState }} → {{ episode.endingState }}</small></article>
+          <article v-for="episode in routeEpisodes" :key="episode.order"><b>第 {{ episode.order }} 集</b><h3>{{ episode.title }}</h3><p>{{ episode.premise }}</p><small>目标 {{ episode.targetDurationSeconds }} 秒</small><dl><dt>开场</dt><dd>{{ episode.openingState }}</dd><dt>主要动作</dt><dd>{{ episode.childAction }} {{ episode.catResponse }}</dd><dt>可见变化</dt><dd>{{ episode.visibleChange }}</dd><dt>结尾承接</dt><dd>{{ episode.endingState }}</dd></dl></article>
         </div>
         <button v-if="!editingPlan && selectedPlan.plan.episodes.length > routeEpisodes.length" class="ghost load-more" @click="visibleRouteEpisodes += 10">继续查看</button>
       </section>
@@ -605,10 +632,9 @@ watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer)
         <header><div><h2>剧集列表</h2><p>点击“开始制作”时才创建这一集的短片项目。</p></div></header>
         <div v-if="episodes.length" class="episode-list"><article v-for="episode in productionEpisodes" :key="episode.id"><span class="episode-order">{{ episode.order }}</span><div><h3>{{ episode.title }}</h3><p>{{ episode.outline.visibleChange }}</p><small>{{ episode.outline.openingState }} → {{ episode.outline.endingState }}</small></div><button v-if="episode.order > 1" class="ghost" @click="showContinuity(episode)">连续性</button><button class="secondary" :disabled="actionBusy" @click="openEpisode(episode)">{{ episodeAction(episode) }}</button></article><button v-if="episodes.length > productionEpisodes.length" class="ghost load-more" @click="visibleProductionEpisodes += 12">加载更多剧集</button></div>
         <p v-else class="empty">采用整季方案后，这里会出现稳定的剧集条目。</p>
-        <div v-if="selectedEpisode" class="episode-story-panel"><div><b>第 {{ selectedEpisode.order }} 集 · 准备剧情</b><p>只扩写这一集的故事候选，不会生成其他集、分镜、图片或视频。</p></div><div v-if="selectedEpisodeStoryJob" class="progress-line episode-story-progress" aria-live="polite"><b>{{ episodeStoryJobLabel(selectedEpisodeStoryJob) }}</b><span v-if="episodeStoryJobRunning">当前任务完成前不会创建第二条任务。</span></div><label>本集补充说明<textarea v-model="storyNotes" placeholder="可选：补充这一集需要强调的动作、道具或情绪变化" /></label><p v-if="storyPreviewLoading" class="field-hint">正在更新本集内容…</p><template v-else-if="storyPreview"><p class="story-summary">{{ selectedEpisode.outline.premise }} · {{ selectedEpisode.targetDurationSeconds }} 秒</p><details><summary>查看完整生成指令</summary><pre>{{ storyPreview.prompt }}</pre></details><button class="primary" :disabled="!canGenerateEpisodeStory" @click="generateEpisodeStory">{{ episodeStoryJobRunning ? "本集故事正在生成" : "生成本集故事候选（付费）" }}</button></template></div>
       </section>
 
-      <section id="assets" class="card studio-section"><header><div><h2>共享资产</h2><p>先确定复用关系；每张新图片仍需由你明确生成。</p></div></header><div v-if="assetBindings.length" class="bound-assets"><span v-for="binding in assetBindings" :key="binding.id"><b>{{ binding.bindingKey }}</b> · {{ binding.role }}</span></div><div class="asset-needs"><span v-for="location in activePlan?.plan.seriesBible.recurringLocations ?? []" :key="location.key">环境 · {{ location.name }}</span><span v-for="prop in activePlan?.plan.seriesBible.recurringProps ?? []" :key="prop.key">道具 · {{ prop.name }}</span><span v-for="rule in activePlan?.plan.seriesBible.wardrobeRules ?? []" :key="rule">服装 · {{ rule }}</span></div></section>
+      <section id="assets" class="card studio-section"><header><div><h2>共享资产</h2><p>先确定复用关系；每张新图片仍需由你明确生成。</p></div></header><p v-if="assetsLoading" role="status">共享参考正在加载，剧情与剧集列表可继续查看。</p><div v-if="assetsError" class="notice"><p>{{ assetsError }}</p><button class="secondary" @click="loadAssets">重新读取共享参考</button></div><div v-if="assetBindings.length" class="bound-assets"><span v-for="binding in assetBindings" :key="binding.id"><b>{{ binding.bindingKey }}</b> · {{ binding.role }}</span></div><div class="asset-needs"><span v-for="location in activePlan?.plan.seriesBible.recurringLocations ?? []" :key="location.key">环境 · {{ location.name }}</span><span v-for="prop in activePlan?.plan.seriesBible.recurringProps ?? []" :key="prop.key">道具 · {{ prop.name }}</span><span v-for="rule in activePlan?.plan.seriesBible.wardrobeRules ?? []" :key="rule">服装 · {{ rule }}</span></div></section>
 
       <section id="continuity" class="card studio-section">
         <header><div><h2>连续性</h2><p>第 2 集起，生成视频前需要确认从上一集继承、调整或重置的状态。</p></div></header>
@@ -645,7 +671,8 @@ watch(storyNotes, () => { if (storyPreviewTimer) clearTimeout(storyPreviewTimer)
 .episode-source-coverage { grid-column: 1 / -1; margin: 4px 0 0; padding: 12px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fffaf4; }.episode-source-coverage legend { padding: 0 6px; color: var(--accent-dark); font-size: 12px; font-weight: 700; }.beat-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }.beat-options label { display: flex; flex-direction: row; align-items: center; gap: 6px; color: #655c54; }.beat-options input { width: auto; }.coverage-detail { padding-top: 9px; display: grid; grid-template-columns: 72px 110px minmax(0, 1fr); gap: 9px; align-items: end; border-top: 1px dashed var(--line); }.coverage-detail select { min-height: 36px; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: white; }
 .order-repair { padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 14px; border-radius: 11px; background: #fff3dc; }.order-repair p { margin: 0; color: #725f42; }
 .bound-assets { margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 8px; }.bound-assets span { padding: 9px 11px; border: 1px solid #cadae0; border-radius: 9px; background: #f4f9fa; color: #506a72; font-size: 12px; }
-.episode-story-panel { margin-top: 15px; padding: 17px; display: grid; gap: 12px; border-radius: 13px; background: #f7f1e9; }.episode-story-panel p { margin: 4px 0 0; color: var(--muted); }.episode-story-panel label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }.episode-story-panel textarea { min-height: 76px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; resize: vertical; }.episode-story-panel pre { max-height: 260px; overflow: auto; white-space: pre-wrap; }.episode-story-panel .primary { justify-self: end; }
+
 .continuity-images { margin-top: 15px; display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 16px; }.continuity-images > div { display: grid; align-content: start; gap: 9px; }.keyframe-grid { display: flex; flex-wrap: wrap; gap: 10px; }.keyframe-grid article { display: grid; gap: 6px; }.keyframe-grid label { font-size: 12px; color: var(--muted); }.frame-card { width: 132px; padding: 7px; display: grid; gap: 5px; border: 1px solid var(--line); border-radius: 10px; background: #f6f2eb; color: var(--ink); cursor: pointer; }.frame-card img { width: 100%; aspect-ratio: 9 / 16; object-fit: contain; background: #e9e4dc; border-radius: 7px; }.frame-card span { font-size: 11px; }
 .segment-planning details { margin-top: 13px; }.segment-planning pre { max-height: 260px; overflow: auto; white-space: pre-wrap; padding: 14px; border-radius: 10px; background: #f7f2eb; }.segment-list { margin-top: 14px; display: grid; gap: 8px; }.segment-list article { padding: 13px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 11px; }.segment-list article > div:first-child { display: grid; gap: 4px; }.segment-list span, .segment-list p { color: var(--muted); font-size: 12px; }
+.goal-editor,.adaptation-review,.adaptation-editor { padding:16px; border:1px solid var(--line); border-radius:10px; margin:12px 0; }.goal-editor label,.adaptation-editor article { display:grid; gap:8px; margin:10px 0; }.adaptation-review article { padding:12px; border-bottom:1px solid var(--line); }.adaptation-editor textarea,.goal-editor textarea { min-height:64px; }.episode-rail dd { margin:4px 0 10px; }
 </style>

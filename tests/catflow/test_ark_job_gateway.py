@@ -32,7 +32,8 @@ class TypedGatewayStub:
         )
 
     def plan_shots(
-        self, *, prompt: str, output_schema: dict[str, object]
+        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = (),
+        input_instruction: str = "",
     ) -> StructuredProviderResult:
         return StructuredProviderResult(
             payload={"targetDurationSeconds": 12, "directorTreatment": {}, "shots": []},
@@ -131,9 +132,6 @@ class TypedGatewayStub:
             usage={"completionTokens": 9600, "totalTokens": 9600},
         )
 
-    def cancel_video(self, task_id: str) -> bool:
-        return True
-
 
 def test_ark_job_gateway_persists_structured_planning_result_as_immediate_payload(
     tmp_path: Path,
@@ -183,8 +181,7 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
             "prompt": "12秒生活短片",
             "negativePrompt": "不得停帧或遗漏最终状态",
             "compiledProviderPrompt": (
-                "【生成目标】\n12秒生活短片\n\n"
-                "【必须避免】\n不得停帧或遗漏最终状态"
+                "【生成目标】\n12秒生活短片\n\n【必须避免】\n不得停帧或遗漏最终状态"
             ),
             "referenceAssetIds": [str(item) for item in asset_ids],
             "referenceRoles": [
@@ -202,10 +199,7 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
     assert submission.task_id == "video-task-1"
     assert typed.video_calls == [
         {
-            "prompt": (
-                "【生成目标】\n12秒生活短片\n\n"
-                "【必须避免】\n不得停帧或遗漏最终状态"
-            ),
+            "prompt": ("【生成目标】\n12秒生活短片\n\n【必须避免】\n不得停帧或遗漏最终状态"),
             "reference_paths": paths,
             "reference_roles": (
                 "episode_child",
@@ -215,6 +209,7 @@ def test_ark_job_gateway_submits_video_with_frozen_five_reference_order(
                 "style_board",
             ),
             "reference_video_url": None,
+            "generation_mode": "references",
             "duration_seconds": 12,
             "resolution": "480p",
         }
@@ -259,8 +254,7 @@ def test_ark_job_gateway_publishes_an_explicit_previous_episode_video_once(
         "prompt": "承接上一集结尾开始野餐",
         "negativePrompt": "不得复制上一集的动作节奏",
         "compiledProviderPrompt": (
-            "【生成目标】\n承接上一集结尾开始野餐\n\n"
-            "【必须避免】\n不得复制上一集的动作节奏"
+            "【生成目标】\n承接上一集结尾开始野餐\n\n【必须避免】\n不得复制上一集的动作节奏"
         ),
         "referenceAssetIds": [str(item) for item in image_ids],
         "referenceRoles": [
@@ -276,15 +270,11 @@ def test_ark_job_gateway_publishes_an_explicit_previous_episode_video_once(
     }
 
     gateway.prepare_submission(job_id=job_id, kind="generate_video", frozen_input=frozen_input)
-    submission = gateway.submit(
-        job_id=job_id, kind="generate_video", frozen_input=frozen_input
-    )
+    submission = gateway.submit(job_id=job_id, kind="generate_video", frozen_input=frozen_input)
 
     assert publications == [(job_id, video_id, video_path)]
     assert typed.video_calls[0]["reference_video_url"].startswith("https://")
-    assert submission.metadata == {
-        "publicationId": "22222222-2222-4222-8222-222222222222"
-    }
+    assert submission.metadata == {"publicationId": "22222222-2222-4222-8222-222222222222"}
 
 
 def test_ark_job_gateway_uses_the_professional_director_planning_boundary() -> None:

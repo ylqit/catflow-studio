@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from catflow.application.continuity import (
@@ -18,6 +18,7 @@ from catflow.application.continuity import (
     SeriesAssetBindingsPatchCommand,
     planned_continuity_state,
 )
+from catflow.application.job_execution import JobRecoveryCommand
 from catflow.application.project_library import suggested_theme_tags
 from catflow.application.series import (
     MAX_SERIES_PLANNING_BATCH,
@@ -67,6 +68,7 @@ from catflow.application.service import (
     StudioConflictError,
     StudioIdempotencyInputConflictError,
     StudioNotFoundError,
+    StudioValidationError,
     ValidationRunDto,
     VideoEditDraftDto,
     VideoRepairDto,
@@ -79,6 +81,7 @@ from catflow.application.story_imports import (
     StoryImportCreateCommand,
     StoryImportMaterializationDto,
     StoryImportProjectDto,
+    StoryProductionTargetsCommand,
     StorySourceDocumentDto,
     StorySourceRelationSuggestionDto,
     StorySourceUnitDto,
@@ -89,6 +92,7 @@ from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDr
 from catflow.domain.video_repairs import FrameRange, RationalFrameRate
 
 from .database import canon_v4_document, ensure_canon_v4
+from .job_lifecycle import record_job_event, schedule_recovery
 from .models import (
     AssetRecord,
     CanonProfileRecord,
@@ -359,6 +363,7 @@ class PostgresStudioRepository:
             record = StorySeriesRecord(
                 title=command.title,
                 premise=command.premise,
+                adaptation_policy=command.adaptation_policy,
                 narrative_mode=command.narrative_mode,
                 length_mode=command.length_mode,
                 planned_episode_count=command.planned_episode_count,
@@ -425,8 +430,51 @@ class PostgresStudioRepository:
             )
             if record is None:
                 raise StudioNotFoundError("story series not found")
+            target_fields = {
+                "planned_episode_count",
+                "default_episode_duration_seconds",
+                "must_keep",
+            }
+            if command.model_fields_set & target_fields:
+                if (
+                    record.adaptation_policy != "condense_mainline"
+                    or session.scalar(
+                        select(SeriesPlanVersionRecord.id)
+                        .where(
+                            SeriesPlanVersionRecord.series_id == series_id,
+                            SeriesPlanVersionRecord.active.is_(True),
+                        )
+                        .limit(1)
+                    )
+                    is not None
+                ):
+                    raise StudioConflictError("只能调整尚未采用方案的新缩编系列的生产目标。")
+                if (
+                    record.length_mode == "ongoing"
+                    and "planned_episode_count" in command.model_fields_set
+                ):
+                    raise StudioValidationError("持续连载不设置总集数。")
+                if any(
+                    getattr(command, field) is None
+                    for field in command.model_fields_set & target_fields
+                ):
+                    raise StudioValidationError("生产目标不能为空。")
+                if session.scalar(
+                    select(JobRecord.id)
+                    .where(
+                        JobRecord.series_id == series_id,
+                        JobRecord.kind.in_(["plan_series", "plan_series_segment"]),
+                        JobRecord.status.not_in(["succeeded", "failed", "cancelled"]),
+                    )
+                    .limit(1)
+                ):
+                    raise StudioConflictError("规划任务尚未终结，请等待结果后调整目标。")
             for field_name in command.model_fields_set:
-                setattr(record, field_name, getattr(command, field_name))
+                setattr(
+                    record,
+                    "must_keep_json" if field_name == "must_keep" else field_name,
+                    getattr(command, field_name),
+                )
             record.updated_at = datetime.now(UTC)
             session.flush()
             return _story_series_dto(session, record)
@@ -483,6 +531,9 @@ class PostgresStudioRepository:
                     plan,
                     expected_episode_count=expected_episode_count,
                     narrative_mode=series.narrative_mode,
+                    adaptation_policy=series.adaptation_policy,
+                    expected_duration_seconds=series.default_episode_duration_seconds,
+                    must_keep=series.must_keep_json,
                     source_unit_ordinals=set(
                         session.scalars(
                             select(SeriesSourceBindingRecord.binding_order).where(
@@ -588,6 +639,9 @@ class PostgresStudioRepository:
                     MAX_SERIES_PLANNING_BATCH,
                 ),
                 narrative_mode=series.narrative_mode,
+                adaptation_policy=series.adaptation_policy,
+                expected_duration_seconds=series.default_episode_duration_seconds,
+                must_keep=series.must_keep_json,
                 source_unit_ordinals=set(
                     session.scalars(
                         select(SeriesSourceBindingRecord.binding_order).where(
@@ -668,6 +722,28 @@ class PostgresStudioRepository:
                 raise StudioConflictError("active series plan changed")
             if selected.status != "candidate" or selected.disposition != "candidate_ready":
                 raise StudioConflictError("series plan requires completion before adoption")
+            if series.adaptation_policy == "condense_mainline":
+                disposition, _ = validate_series_plan(
+                    SeriesPlanDraft.model_validate(selected.plan_json),
+                    expected_episode_count=min(
+                        series.planned_episode_count or 12, MAX_SERIES_PLANNING_BATCH
+                    ),
+                    narrative_mode=series.narrative_mode,
+                    source_unit_ordinals=set(
+                        session.scalars(
+                            select(SeriesSourceBindingRecord.binding_order).where(
+                                SeriesSourceBindingRecord.series_id == series_id
+                            )
+                        ).all()
+                    ),
+                    adaptation_policy=series.adaptation_policy,
+                    expected_duration_seconds=series.default_episode_duration_seconds,
+                    must_keep=series.must_keep_json,
+                )
+                if disposition != "candidate_ready":
+                    raise StudioConflictError(
+                        "方案不再符合当前生产目标，请编辑并保存新版本后再采用。"
+                    )
             now = datetime.now(UTC)
             session.execute(
                 update(SeriesPlanVersionRecord)
@@ -1435,6 +1511,14 @@ class PostgresStudioRepository:
                 content_hash=content_hash,
                 source_format=command.source_format,
                 file_name=command.file_name,
+                production_targets_json=(
+                    {
+                        key: value.model_dump(mode="json", by_alias=True)
+                        for key, value in command.production_targets.items()
+                    }
+                    if command.production_targets is not None
+                    else None
+                ),
                 raw_text=command.raw_text.replace("\r\n", "\n").replace("\r", "\n").strip(),
                 status="analyzing",
             )
@@ -1444,9 +1528,40 @@ class PostgresStudioRepository:
             session.add(job_record)
             session.flush()
             document.analysis_job_id = job.id
-            _add_job_event(session, job_record, "job.queued")
+            record_job_event(session, job_record, "job.queued")
             session.flush()
             return _story_source_document_dto(session, document)
+
+    def update_story_production_targets(
+        self, document_id: uuid.UUID, command: StoryProductionTargetsCommand
+    ) -> StorySourceDocumentDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(StorySourceDocumentRecord)
+                .where(StorySourceDocumentRecord.id == document_id)
+                .with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("story source document not found")
+            if record.updated_at != command.expected_updated_at:
+                raise StudioConflictError("来源设置已在其他页面变化，请刷新后保存。")
+            suggestions = session.scalars(
+                select(StorySourceRelationSuggestionRecord).where(
+                    StorySourceRelationSuggestionRecord.document_id == document_id
+                )
+            ).all()
+            if not set(command.production_targets) <= {
+                "default",
+                *(str(item.id) for item in suggestions),
+            }:
+                raise StudioValidationError("生产目标引用了不存在的故事组。")
+            record.production_targets_json = {
+                key: value.model_dump(mode="json", by_alias=True)
+                for key, value in command.production_targets.items()
+            }
+            record.updated_at = datetime.now(UTC)
+            session.flush()
+            return _story_source_document_dto(session, record)
 
     def restart_story_source_analysis(self, document_id: uuid.UUID, job: JobDto) -> JobDto:
         with self._sessions.begin() as session:
@@ -1482,13 +1597,22 @@ class PostgresStudioRepository:
                 if document.analysis_job_id is not None
                 else None
             )
-            if previous is not None and previous.status == "submission_unknown":
+            if (
+                previous is not None
+                and previous.status == "submission_unknown"
+                and job.supersedes_job_id != previous.id
+            ):
                 raise StudioConflictError("story source analysis submission is unresolved")
-            if previous is not None and previous.status not in {
-                "failed",
-                "cancelled",
-                "succeeded",
-            }:
+            if (
+                previous is not None
+                and job.supersedes_job_id != previous.id
+                and previous.status
+                not in {
+                    "failed",
+                    "cancelled",
+                    "succeeded",
+                }
+            ):
                 raise StudioConflictError("story source analysis is still running")
             record = _new_job_record(job)
             session.add(record)
@@ -1496,7 +1620,7 @@ class PostgresStudioRepository:
             document.analysis_job_id = record.id
             document.status = "analyzing"
             document.updated_at = datetime.now(UTC)
-            _add_job_event(session, record, "job.queued")
+            record_job_event(session, record, "job.queued")
             session.flush()
             return _job_dto(session, record)
 
@@ -1616,6 +1740,15 @@ class PostgresStudioRepository:
                             prior_series is None
                             or prior_series.length_mode != command.series_length_mode
                             or prior_series.planned_episode_count != command.planned_episode_count
+                            or prior_series.default_episode_duration_seconds
+                            != command.default_episode_duration_seconds
+                            or prior_series.adaptation_policy != command.adaptation_policy
+                            or (
+                                command.narrative_mode is not None
+                                and prior_series.narrative_mode != command.narrative_mode
+                            )
+                            or prior_series.must_keep_json
+                            != (command.must_keep or ["保留来源文本中的核心事件"])
                         )
                     )
                 ):
@@ -1650,14 +1783,17 @@ class PostgresStudioRepository:
                 series_record = StorySeriesRecord(
                     title=suggestion.title,
                     premise="\n".join(item.raw_text for item in units),
-                    narrative_mode=suggestion.narrative_mode or "continuous",
+                    adaptation_policy=command.adaptation_policy,
+                    narrative_mode=command.narrative_mode
+                    or suggestion.narrative_mode
+                    or "continuous",
                     length_mode=command.series_length_mode,
                     planned_episode_count=command.planned_episode_count,
-                    default_episode_duration_seconds=12,
+                    default_episode_duration_seconds=command.default_episode_duration_seconds,
                     world_setting="由已导入原文中的地点、时间和环境归纳",
                     emotional_direction="保持原文的情绪变化",
                     recurring_elements_json=[],
-                    must_keep_json=["保留来源文本中的核心事件"],
+                    must_keep_json=command.must_keep or ["保留来源文本中的核心事件"],
                     must_avoid_json=["不得无依据改写来源事实"],
                     additional_notes=f"来源文档 {document.id}",
                     canon_profile_id=ensure_canon_v4(session).id,
@@ -1672,11 +1808,16 @@ class PostgresStudioRepository:
                     raise StudioNotFoundError("target story series not found")
             elif command.target == "independent":
                 canon_profile_id = ensure_canon_v4(session).id
-                for unit in units:
+                stories = (
+                    [(suggestion.title, "\n".join(unit.raw_text for unit in units))]
+                    if command.adaptation_policy == "condense_mainline"
+                    else [(unit.title, unit.raw_text) for unit in units]
+                )
+                for title, text in stories:
                     project = ProjectRecord(
-                        title=unit.title,
-                        theme=unit.raw_text,
-                        target_duration_seconds=12,
+                        title=title,
+                        theme=text,
+                        target_duration_seconds=command.default_episode_duration_seconds,
                         aspect_ratio="9:16",
                         canon_profile_id=canon_profile_id,
                     )
@@ -1844,6 +1985,8 @@ class PostgresStudioRepository:
                 proposals=[_proposal_dto(record) for record in proposals],
                 latestJob=(
                     PlannerJobDto(
+                        execution=_job_dto(session, latest_job).execution,
+                        revision=latest_job.revision,
                         id=latest_job.id,
                         status=latest_job.status,
                         provider=latest_job.provider,
@@ -1894,24 +2037,10 @@ class PostgresStudioRepository:
                     content=command.text,
                 )
             )
-            record = JobRecord(
-                id=job.id,
-                project_id=project_id,
-                kind=job.kind,
-                status=job.status,
-                input_hash=job.input_hash,
-                idempotency_key=job.idempotency_key,
-                provider=job.provider,
-                model=job.model,
-                validation_run_id=job.validation_run_id,
-                expected_cost_micros=job.expected_cost_micros,
-                frozen_input_json=job.frozen_input,
-                created_at=job.created_at,
-                updated_at=job.updated_at,
-            )
+            record = _new_job_record(job)
             session.add(record)
             session.flush()
-            _add_job_event(session, record, "job.queued")
+            record_job_event(session, record, "job.queued")
             return _job_dto(session, record)
 
     def complete_planner_job(
@@ -1975,7 +2104,7 @@ class PostgresStudioRepository:
             job.status = "succeeded"
             job.updated_at = datetime.now(UTC)
             session.flush()
-            _add_job_event(
+            record_job_event(
                 session,
                 job,
                 "planner.proposal.created",
@@ -2491,7 +2620,7 @@ class PostgresStudioRepository:
                 job.frozen_input.get("purpose") in {"shot_frame", "shot_video"}
                 and job.provider != "local_ffmpeg"
             )
-            if job.kind == "plan_shots" or shot_media:
+            if job.kind == "plan_shots" or shot_media or job.provider == "local_ffmpeg":
                 session.scalar(
                     select(ProjectRecord)
                     .where(ProjectRecord.id == job.project_id)
@@ -2506,6 +2635,9 @@ class PostgresStudioRepository:
                     select(JobRecord.id).where(
                         JobRecord.project_id == job.project_id,
                         JobRecord.kind == "plan_shots",
+                        True
+                        if job.supersedes_job_id is None
+                        else JobRecord.id != job.supersedes_job_id,
                         JobRecord.status.in_(
                             {
                                 "queued",
@@ -2530,6 +2662,9 @@ class PostgresStudioRepository:
                         JobRecord.frozen_input_json["targetShotId"].astext
                         == job.frozen_input["targetShotId"],
                         JobRecord.provider != "local_ffmpeg",
+                        True
+                        if job.supersedes_job_id is None
+                        else JobRecord.id != job.supersedes_job_id,
                         JobRecord.status.not_in({"succeeded", "failed", "cancelled"}),
                     )
                 )
@@ -2538,7 +2673,7 @@ class PostgresStudioRepository:
             record = _new_job_record(job)
             session.add(record)
             session.flush()
-            _add_job_event(session, record, "job.queued")
+            record_job_event(session, record, "job.queued")
             return _job_dto(session, record)
 
     def get_job(self, job_id: uuid.UUID) -> JobDto | None:
@@ -2556,8 +2691,22 @@ class PostgresStudioRepository:
             if record is None:
                 raise StudioNotFoundError("job not found")
             provider_result = dict(record.provider_result_json or {})
+            previous = provider_result.get("validation")
+            if previous == validation:
+                return _job_dto(session, record)
+            if previous is not None:
+                provider_result["validationHistory"] = [
+                    *provider_result.get("validationHistory", []), previous,
+                ]
             provider_result["validation"] = validation
             record.provider_result_json = provider_result
+            record_job_event(session, record, "job.director_validation", {
+                "normalizationRevision": validation.get("normalizationRevision"),
+                "disposition": validation.get("disposition"),
+                "rawPayloadHash": validation.get("rawPayloadHash"),
+                "adjustments": validation.get("adjustments", []),
+                "manualResolution": validation.get("manualResolution"),
+            })
             session.flush()
             return _job_dto(session, record)
 
@@ -2595,31 +2744,64 @@ class PostgresStudioRepository:
             )
             return _job_dto(session, record) if record is not None else None
 
-    def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
+    def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
         with self._sessions.begin() as session:
             record = session.scalar(
                 select(JobRecord).where(JobRecord.id == job_id).with_for_update()
             )
             if record is None:
                 raise StudioNotFoundError("job not found")
-            provider_result = record.provider_result_json
-            error = record.error_json
-            if (
-                record.status != "failed"
-                or not isinstance(error, dict)
-                or error.get("code") != "result_storage_failed"
-                or record.kind not in {"generate_image", "generate_video"}
-                or not isinstance(provider_result, dict)
-                or not (provider_result.get("url") or provider_result.get("videoUrl"))
-                or (record.kind == "generate_video" and not record.provider_task_id)
-            ):
-                raise StudioConflictError("job is not eligible for result storage recovery")
-            record.status = "storing"
-            record.error_json = None
-            record.updated_at = datetime.now(UTC)
-            _add_job_event(session, record, "job.storing")
+            previous = session.scalar(
+                select(JobEventRecord)
+                .where(
+                    JobEventRecord.job_id == job_id,
+                    JobEventRecord.payload_json["recoveryKey"].astext == command.idempotency_key,
+                )
+                .limit(1)
+            )
+            if previous is not None:
+                if previous.payload_json.get("action") != command.action:
+                    raise StudioIdempotencyInputConflictError("恢复幂等键已用于不同操作。")
+                return _job_dto(session, record)
+            summary = _job_dto(session, record)
+            if record.revision != command.expected_revision:
+                raise StudioConflictError("任务状态已变化，请查看最新状态后操作。")
+            if command.action not in summary.execution.available_actions:
+                raise StudioConflictError("当前任务不支持此恢复操作。")
+            # While a worker owns this task, merge the request into its current operation.
+            busy = record.leased_until is not None and record.leased_until > datetime.now(UTC)
+            scheduled = (record.execution_json or {}).get(
+                "recoveryState"
+            ) == "automatic" and record.status == (
+                "polling" if command.action == "query_provider" else "storing"
+            )
+            if not busy and not scheduled:
+                schedule_recovery(record, command.action)
+            record_job_event(
+                session,
+                record,
+                "job.recovery_requested",
+                {
+                    "recoveryKey": command.idempotency_key,
+                    "action": command.action,
+                    "coalesced": busy or scheduled,
+                },
+            )
             session.flush()
             return _job_dto(session, record)
+
+    def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
+        job = self.get_job(job_id)
+        if job is None:
+            raise StudioNotFoundError("job not found")
+        return self.recover_job(
+            job_id,
+            JobRecoveryCommand(
+                action="process_result",
+                expectedRevision=job.revision,
+                idempotencyKey=f"resume-storage:{job.id}:{job.revision}",
+            ),
+        )
 
     def cancel_job(self, job_id: uuid.UUID) -> JobDto:
         with self._sessions.begin() as session:
@@ -2630,17 +2812,26 @@ class PostgresStudioRepository:
                 raise StudioNotFoundError("job not found")
             if record.status in {"succeeded", "failed", "cancelled"}:
                 return _job_dto(session, record)
-            record.status = "cancelled" if record.status == "queued" else "cancel_requested"
+            if "cancel" not in _job_dto(session, record).execution.available_actions:
+                raise StudioConflictError(
+                    "已提交任务尚无远端取消确认；不能将删除或停止等待当作取消。"
+                )
+            record.status = "cancelled"
             record.updated_at = datetime.now(UTC)
-            _add_job_event(session, record, f"job.{record.status}")
+            record_job_event(session, record, f"job.{record.status}")
             session.flush()
             return _job_dto(session, record)
 
-    def list_job_events(self, *, after_event_id: int, limit: int = 100) -> list[JobEventDto]:
+    def list_job_events(
+        self, *, after_event_id: int, limit: int = 100, job_id: uuid.UUID | None = None
+    ) -> list[JobEventDto]:
         with self._sessions() as session:
             records = session.scalars(
                 select(JobEventRecord)
-                .where(JobEventRecord.id > after_event_id)
+                .where(
+                    JobEventRecord.id > after_event_id,
+                    True if job_id is None else JobEventRecord.job_id == job_id,
+                )
                 .order_by(JobEventRecord.id)
                 .limit(limit)
             ).all()
@@ -2684,6 +2875,8 @@ class PostgresStudioRepository:
                 id=draft.id,
                 project_id=draft.project_id,
                 source_video_asset_id=draft.source_video_asset_id,
+                source_result_job_id=draft.source_result_job_id,
+                source_timeline_hash=draft.expected_source_timeline_hash,
                 references_json=draft.references,
                 references_confirmed=draft.references_confirmed,
                 input_hash=draft.input_hash,
@@ -2959,7 +3152,7 @@ class PostgresStudioRepository:
             session.flush()
             session.add(job_record)
             session.flush()
-            _add_job_event(session, job_record, "job.queued")
+            record_job_event(session, job_record, "job.queued")
             return _job_dto(session, job_record)
 
     def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None:
@@ -3170,6 +3363,7 @@ def _story_series_dto(session: Session, record: StorySeriesRecord) -> StorySerie
         emotionalDirection=record.emotional_direction,
         endingGoal=record.ending_goal,
         recurringElements=record.recurring_elements_json,
+        adaptationPolicy=record.adaptation_policy,
         mustKeep=record.must_keep_json,
         mustAvoid=record.must_avoid_json,
         additionalNotes=record.additional_notes,
@@ -3311,6 +3505,7 @@ def _story_source_document_dto(
     ).all()
     return StorySourceDocumentDto(
         id=record.id,
+        productionTargets=record.production_targets_json,
         contentHash=record.content_hash,
         sourceFormat=record.source_format,
         fileName=record.file_name,
@@ -3574,6 +3769,11 @@ def _new_job_record(job: JobDto) -> JobRecord:
         provider=job.provider,
         model=job.model,
         provider_task_id=job.provider_task_id,
+        provider_response_id=job.provider_response_id,
+        provider_client_request_id=job.provider_client_request_id,
+        execution_json=job.execution_facts,
+        revision=job.revision,
+        next_action_at=job.next_action_at,
         validation_run_id=job.validation_run_id,
         parent_job_id=job.parent_job_id,
         video_repair_id=job.video_repair_id,
@@ -3624,6 +3824,10 @@ def _new_video_repair_record(repair: VideoRepairDto) -> VideoRepairRecord:
 
 
 def _job_by_idempotency(session: Session, key: str) -> JobRecord | None:
+    # Serialize lookup through insertion so simultaneous HTTP retries return the
+    # existing job instead of creating twice or raising a uniqueness failure.
+    lock = int.from_bytes(hashlib.sha256(f"job-key:{key}".encode()).digest()[:8], signed=True)
+    session.execute(text("select pg_advisory_xact_lock(:key)"), {"key": lock})
     return session.scalar(select(JobRecord).where(JobRecord.idempotency_key == key))
 
 
@@ -3658,6 +3862,8 @@ def _edit_draft_dto(record: VideoEditDraftRecord) -> VideoEditDraftDto:
         id=record.id,
         projectId=record.project_id,
         sourceVideoAssetId=record.source_video_asset_id,
+        sourceResultJobId=record.source_result_job_id,
+        expectedSourceTimelineHash=record.source_timeline_hash,
         headEditVersionId=record.head_edit_version_id,
         references=record.references_json,
         referencesConfirmed=record.references_confirmed,
@@ -3793,6 +3999,11 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         provider=record.provider,
         model=record.model,
         providerTaskId=record.provider_task_id,
+        providerResponseId=record.provider_response_id,
+        providerClientRequestId=record.provider_client_request_id,
+        executionFacts=record.execution_json,
+        revision=record.revision,
+        nextActionAt=record.next_action_at,
         validationRunId=record.validation_run_id,
         parentJobId=record.parent_job_id,
         videoRepairId=record.video_repair_id,
@@ -3812,6 +4023,13 @@ def _job_dto(session: Session, record: JobRecord) -> JobDto:
         frozenInput=record.frozen_input_json,
         resultAssetIds=asset_ids,
         supersedesJobId=record.supersedes_job_id,
+        successorJobIds=list(
+            session.scalars(
+                select(JobRecord.id)
+                .where(JobRecord.supersedes_job_id == record.id)
+                .order_by(JobRecord.created_at)
+            )
+        ),
         error=record.error_json,
         createdAt=record.created_at,
         updatedAt=record.updated_at,
@@ -3920,24 +4138,6 @@ def _legacy_generation_input_snapshot(
         return GenerationInputSnapshotDto.model_validate(document)
     except ValidationError:
         return None
-
-
-def _add_job_event(
-    session: Session,
-    job: JobRecord,
-    event_type: str,
-    payload: dict[str, object] | None = None,
-) -> None:
-    session.add(
-        JobEventRecord(
-            job_id=job.id,
-            project_id=job.project_id,
-            series_id=job.series_id,
-            story_source_document_id=job.story_source_document_id,
-            event_type=event_type,
-            payload_json=payload or {"jobId": str(job.id), "status": job.status},
-        )
-    )
 
 
 def _selection_source_hash(project_id: uuid.UUID, slot: str, sha256: str) -> str:

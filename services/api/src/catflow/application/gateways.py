@@ -31,7 +31,8 @@ class VideoSubmissionResult:
 
 @dataclass(frozen=True, slots=True)
 class VideoPollResult:
-    status: Literal["running", "succeeded", "failed"]
+    status: Literal["running", "succeeded", "failed", "unknown"]
+    provider_status: str | None = None
     video_url: str | None = None
     last_frame_url: str | None = None
     error: dict[str, object] | None = None
@@ -99,7 +100,8 @@ class PlanningGateway(Protocol):
     ) -> StructuredProviderResult: ...
 
     def plan_shots(
-        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = ()
+        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = (),
+        input_instruction: str = "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
     ) -> StructuredProviderResult: ...
 
     def plan_series(
@@ -156,8 +158,6 @@ class VideoGenerationGateway(Protocol):
 
     def poll_video(self, task_id: str) -> VideoPollResult: ...
 
-    def cancel_video(self, task_id: str) -> bool: ...
-
 
 class ProviderGatewayError(RuntimeError):
     def __init__(
@@ -166,13 +166,17 @@ class ProviderGatewayError(RuntimeError):
         code: str,
         message: str,
         retryable: bool,
-        submission_unknown: bool,
+        submission_unknown: bool = False,
         request_id: str | None = None,
         timed_out: bool = False,
         provider_status: str | None = None,
         incomplete_reason: str | None = None,
         max_output_tokens: int | None = None,
         usage: dict[str, int] | None = None,
+        http_status: int | None = None,
+        retry_after_seconds: float | None = None,
+        response_id: str | None = None,
+        client_request_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -185,6 +189,10 @@ class ProviderGatewayError(RuntimeError):
         self.incomplete_reason = incomplete_reason
         self.max_output_tokens = max_output_tokens
         self.usage = usage
+        self.http_status = http_status
+        self.retry_after_seconds = retry_after_seconds
+        self.response_id = response_id
+        self.client_request_id = client_request_id
 
     def as_error_document(self) -> dict[str, object]:
         document: dict[str, object] = {
@@ -195,6 +203,14 @@ class ProviderGatewayError(RuntimeError):
             "requestId": self.request_id,
             "timedOut": self.timed_out,
         }
+        for key, value in (
+            ("httpStatus", self.http_status),
+            ("retryAfterSeconds", self.retry_after_seconds),
+            ("responseId", self.response_id),
+            ("clientRequestId", self.client_request_id),
+        ):
+            if value is not None:
+                document[key] = value
         if self.provider_status is not None:
             document["providerStatus"] = self.provider_status
         if self.incomplete_reason is not None:

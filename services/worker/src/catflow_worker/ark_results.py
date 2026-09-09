@@ -88,7 +88,10 @@ class ArkResultLandingService:
     def _store_shot_plan(self, job_id: uuid.UUID) -> None:
         result = self._provider_result(job_id)
         payload = result.get("payload")
-        normalized = normalize_director_result(payload)
+        job = self._studio_service.get_job(job_id)
+        normalized = normalize_director_result(
+            payload, legacy=not job.frozen_input.get("normalizationRevision")
+        )
         self._studio_service.record_shot_plan_generation_validation(job_id, normalized)
 
         if normalized.disposition == "invalid":
@@ -124,11 +127,18 @@ class ArkResultLandingService:
         normalized = normalize_series_plan_result(
             payload,
             expected_episode_count=frozen_episode_count,
-            narrative_mode=series.narrative_mode,
-            source_unit_ordinals={
-                beat.binding_order
-                for beat in self._studio_service.list_series_source_beats(job.series_id)
-            },
+            narrative_mode=job.frozen_input.get("narrativeMode", series.narrative_mode),
+            adaptation_policy=job.frozen_input.get("adaptationPolicy", "preserve_all"),
+            expected_duration_seconds=job.frozen_input.get("defaultEpisodeDurationSeconds"),
+            must_keep=job.frozen_input.get("mustKeep", []),
+            source_unit_ordinals=(
+                {int(beat["bindingOrder"]) for beat in job.frozen_input["sourceBeats"]}
+                if "sourceBeats" in job.frozen_input
+                else {
+                    beat.binding_order
+                    for beat in self._studio_service.list_series_source_beats(job.series_id)
+                }
+            ),
             start_episode_order=(int(job.frozen_input["startEpisodeOrder"]) if is_segment else 1),
             require_complete_source_coverage=not is_segment,
         )
@@ -213,6 +223,7 @@ class ArkResultLandingService:
                 if repair_candidate
                 else str(job.frozen_input_json.get("role", "video"))
             )
+            historical = bool((job.execution_json or {}).get("historicalResult"))
             shot_metadata = {
                 key: job.frozen_input_json[key]
                 for key in ("purpose", "targetShotId", "shotPlanVersionId", "shotDesignHash")
@@ -229,7 +240,7 @@ class ArkResultLandingService:
                     self._studio_service.mark_video_repair_candidate_ready(
                         job.video_repair_id, existing.id
                     )
-                elif self._poster_generator is not None:
+                elif self._poster_generator is not None and not historical:
                     self._poster_generator.ensure_for_asset(existing.id)
                 return
             project_id = job.project_id
@@ -290,7 +301,7 @@ class ArkResultLandingService:
             if video_repair_id is None:
                 raise ValueError("repair candidate job has no video repair")
             self._studio_service.mark_video_repair_candidate_ready(video_repair_id, asset_id)
-        elif self._poster_generator is not None:
+        elif self._poster_generator is not None and not historical:
             self._poster_generator.ensure_for_asset(asset_id)
 
     def _store_diagnosis(self, job_id: uuid.UUID, *, metadata_key: str) -> None:

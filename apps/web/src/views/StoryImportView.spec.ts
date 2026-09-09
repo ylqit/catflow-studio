@@ -16,6 +16,7 @@ const client = vi.hoisted(() => ({
   storySeries: vi.fn(),
   projects: vi.fn(),
   confirmStoryImport: vi.fn(),
+  updateStoryProductionTargets: vi.fn(), job: vi.fn(),
 }));
 
 vi.mock("vue-router", async () => {
@@ -68,6 +69,8 @@ describe("StoryImportView", () => {
     client.storyImports.mockResolvedValue([]);
     client.previewStoryImport.mockResolvedValue(preview);
     client.createStoryImport.mockResolvedValue({ document: analyzedDocument, analysisJob: null, idempotencyReplayed: false });
+    client.updateStoryProductionTargets.mockImplementation(async (_id, command) => ({ ...analyzedDocument, productionTargets: command.productionTargets }));
+    client.job.mockResolvedValue({ id: "job-1", status: "succeeded", revision: 0, execution: { availableActions: [], resultState: "complete" } });
   });
 
   it("lists prior source records so an analyzed result can be resumed without reanalysis", async () => {
@@ -125,7 +128,8 @@ describe("StoryImportView", () => {
         suggestionId: "suggestion-1",
         target: "new_series",
         seriesLengthMode: "fixed",
-        plannedEpisodeCount: 2,
+        plannedEpisodeCount: 3,
+        defaultEpisodeDurationSeconds: 15,
       }),
     );
     expect(router.push).toHaveBeenCalledWith("/series/series-new");
@@ -153,8 +157,9 @@ describe("StoryImportView", () => {
     await flushPromises();
 
     expect(router.replace).toHaveBeenCalledWith("/story-imports/document-1");
-    expect(wrapper.get("button.analyze-button").attributes("disabled")).toBeDefined();
-    expect(wrapper.get("button.analyze-button").text()).toBe("分析任务进行中");
+    expect(wrapper.find("button.analyze-button").exists()).toBe(false);
+    expect(wrapper.text()).toContain("正在理解故事结构");
+    expect(client.createStoryImport).toHaveBeenCalledTimes(1);
   });
 
   it("restores the persisted import from a document URL after a reload", async () => {
@@ -175,7 +180,8 @@ describe("StoryImportView", () => {
       (wrapper.get("textarea[aria-label='故事来源文本']").element as HTMLTextAreaElement).value,
     ).toBe(analyzingDocument.rawText);
     expect(wrapper.text()).toContain("正在理解故事结构");
-    expect(wrapper.get("button.analyze-button").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("button.analyze-button").exists()).toBe(false);
+    expect(client.createStoryImport).not.toHaveBeenCalled();
   });
 
   it("accepts mixed source text and leaves every suggested relationship for confirmation", async () => {
@@ -271,7 +277,7 @@ describe("StoryImportView", () => {
     expect(wrapper.text()).not.toContain("已有相同内容");
   });
 
-  it("presents source units as beats and lets the user confirm a recommended series length", async () => {
+  it("keeps eleven source beats while confirming a separate three by fifteen production target", async () => {
     const elevenBeatDocument = {
       ...analyzedDocument,
       units: Array.from({ length: 11 }, (_, index) => ({
@@ -306,9 +312,8 @@ describe("StoryImportView", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("识别到 11 个剧情节拍");
-    expect(wrapper.text()).toContain("建议范围：6–11 集");
-    expect(wrapper.text()).toContain("推荐：8 集");
-    expect((wrapper.get("input[aria-label='森林野餐计划集数']").element as HTMLInputElement).value).toBe("8");
+    expect(wrapper.text()).toContain("故事分析中的集数建议未考虑当前时长");
+    expect((wrapper.get("input[aria-label='森林野餐生产目标计划集数']").element as HTMLInputElement).value).toBe("3");
 
     await wrapper.get("button.confirm-relation").trigger("click");
     await flushPromises();
@@ -318,7 +323,8 @@ describe("StoryImportView", () => {
       expect.objectContaining({
         target: "new_series",
         seriesLengthMode: "fixed",
-        plannedEpisodeCount: 8,
+        plannedEpisodeCount: 3,
+        defaultEpisodeDurationSeconds: 15,
       }),
     );
   });
@@ -333,7 +339,12 @@ describe("StoryImportView", () => {
     await wrapper.get("button.analyze-button").trigger("click");
     await flushPromises();
     const firstKey = client.createStoryImport.mock.calls[0][0].idempotencyKey;
-    await wrapper.get("button.analyze-button").trigger("click");
+    wrapper.unmount();
+    route.params = {};
+    const next = mountView(); await flushPromises();
+    await next.get("textarea[aria-label='故事来源文本']").setValue(analyzedDocument.rawText);
+    await new Promise(resolve => setTimeout(resolve, 450)); await flushPromises();
+    await next.get("button.analyze-button").trigger("click");
     await flushPromises();
     const secondKey = client.createStoryImport.mock.calls[1][0].idempotencyKey;
 

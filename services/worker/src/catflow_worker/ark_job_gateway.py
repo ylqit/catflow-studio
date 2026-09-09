@@ -60,6 +60,9 @@ class ArkProviderJobGateway:
     def prepare_submission(
         self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
     ) -> None:
+        contract = frozen_input.get("executionContract", {})
+        if contract.get("apiBaseUrl"):
+            self._gateway.validate_execution_contract(contract, kind)
         if kind == "generate_video":
             asset_value = frozen_input.get("previousEpisodeVideoAssetId")
             if asset_value is None:
@@ -99,30 +102,53 @@ class ArkProviderJobGateway:
                 retryable=False,
                 submission_unknown=False,
             )
-        base_asset_id = uuid.UUID(_required_string(frozen_input, "baseVideoAssetId"))
-        generation_range = _required_frame_range(frozen_input, "generationRange")
-        issue_range = _required_frame_range(frozen_input, "issueRange")
-        duration_seconds = int(frozen_input.get("providerDurationSeconds", 0))
-        context, anchor_in, anchor_out = self._prepare_segment_media(
-            job_id,
-            base_asset_id,
-            generation_range[0],
-            generation_range[1],
-            issue_range[0],
-            issue_range[1],
-            duration_seconds,
-        )
-        try:
-            published = (
-                None if from_frame else self._video_reference_publisher.publish(job_id, context)
+        if frozen_input.get("referencePreparationJobId"):
+            images = frozen_input["imageReferences"]
+            derived = [item for item in images if item.get("derived")]
+            paths = self._resolve_asset_paths(tuple(uuid.UUID(item["assetId"]) for item in derived))
+            anchor_in, anchor_out = paths[0], paths[-1]
+            published = None
+            context = anchor_in  # Strict frame mode never sends a video.
+            if not from_frame:
+                video = frozen_input["videoReference"]
+                context_id = uuid.UUID(video["assetId"])
+                context = self._resolve_asset_paths((context_id,))[0]
+                try:
+                    published = self._video_reference_publisher.publish_asset(
+                        job_id, context_id, context
+                    )
+                except ObjectPublisherError as exc:
+                    raise ProviderGatewayError(
+                        code=exc.code,
+                        message=exc.message,
+                        retryable=False,
+                        submission_unknown=False,
+                    ) from exc
+        else:
+            base_asset_id = uuid.UUID(_required_string(frozen_input, "baseVideoAssetId"))
+            generation_range = _required_frame_range(frozen_input, "generationRange")
+            issue_range = _required_frame_range(frozen_input, "issueRange")
+            duration_seconds = int(frozen_input.get("providerDurationSeconds", 0))
+            context, anchor_in, anchor_out = self._prepare_segment_media(
+                job_id,
+                base_asset_id,
+                generation_range[0],
+                generation_range[1],
+                issue_range[0],
+                issue_range[1],
+                duration_seconds,
             )
-        except ObjectPublisherError as exc:
-            raise ProviderGatewayError(
-                code=exc.code,
-                message=exc.message,
-                retryable=False,
-                submission_unknown=False,
-            ) from exc
+            try:
+                published = (
+                    None if from_frame else self._video_reference_publisher.publish(job_id, context)
+                )
+            except ObjectPublisherError as exc:
+                raise ProviderGatewayError(
+                    code=exc.code,
+                    message=exc.message,
+                    retryable=False,
+                    submission_unknown=False,
+                ) from exc
         self._prepared_segment_media[job_id] = (
             context,
             anchor_in,
@@ -147,6 +173,11 @@ class ArkProviderJobGateway:
             result = self._gateway.plan_shots(
                 prompt=_required_string(frozen_input, "prompt"),
                 output_schema=_required_dict(frozen_input, "outputSchema"),
+                input_instruction=str(frozen_input.get(
+                    "inputInstruction", "按顺序比较所有图片并返回诊断。"
+                    if frozen_input.get("referenceInputMode") == "vision"
+                    else "只返回符合 Schema 的 JSON 对象。"
+                )),
                 image_paths=(
                     self._resolve_asset_paths(
                         _uuid_tuple(frozen_input.get("referenceAssetIds", []))
@@ -291,7 +322,7 @@ class ArkProviderJobGateway:
             compiler_revision = str(frozen_input.get("promptCompilerRevision", "segment-edit-v2"))
             time_origin = (
                 _required_frame_range(frozen_input, "generationRange")[0]
-                if compiler_revision in {"segment-edit-v3", "segment-edit-v4"}
+                if compiler_revision in {"segment-edit-v3", "segment-edit-v4", "segment-edit-v5"}
                 else 0
             )
             result = self._gateway.submit_segment_video(
@@ -330,12 +361,17 @@ class ArkProviderJobGateway:
 
     def poll(self, provider_task_id: str) -> ProviderPoll:
         result = self._gateway.poll_video(provider_task_id)
-        if result.status == "running":
-            return ProviderPoll(status="running")
+        if result.status in {"running", "unknown"}:
+            return ProviderPoll(
+                status=result.status, provider_status=result.provider_status, error=result.error
+            )
         if result.status == "failed":
-            return ProviderPoll(status="failed", error=result.error)
+            return ProviderPoll(
+                status="failed", error=result.error, provider_status=result.provider_status
+            )
         return ProviderPoll(
             status="succeeded",
+            provider_status=result.provider_status,
             result={
                 "videoUrl": result.video_url,
                 "lastFrameUrl": result.last_frame_url,
@@ -347,8 +383,59 @@ class ArkProviderJobGateway:
             usage=result.usage,
         )
 
-    def cancel(self, provider_task_id: str) -> bool:
-        return self._gateway.cancel_video(provider_task_id)
+    def poll_response(self, response_id: str) -> ProviderPoll:
+        from .ark_responses import response_usage
+
+        document = self._gateway.retrieve_response(response_id)
+        status = document.get("status")
+        if status in {"queued", "in_progress"}:
+            return ProviderPoll(status="running", provider_status=status)
+        if status == "completed":
+            # Parsing is local work. Query success must survive malformed JSON.
+            return ProviderPoll(
+                status="succeeded",
+                provider_status=status,
+                result={"rawResponse": document},
+                usage=response_usage(document),
+            )
+        if status in {"failed", "incomplete", "cancelled", "expired"}:
+            return ProviderPoll(
+                status="failed",
+                provider_status=status,
+                error=document.get("error")
+                or {"code": status, "message": str(document.get("incomplete_details") or status)},
+                result={"rawResponse": document},
+                usage=response_usage(document),
+            )
+        return ProviderPoll(
+            status="unknown",
+            provider_status=status,
+            error={"code": "provider_state_unrecognized", "message": f"外部状态：{status}"},
+        )
+
+    def restore_result(self, kind: str, document: dict[str, object]) -> dict[str, object]:
+        from catflow.application.job_execution import TEXT_JOB_KINDS, VIDEO_JOB_KINDS
+
+        from .ark_responses import parse_response
+
+        if kind in TEXT_JOB_KINDS:
+            return parse_response(document)
+        if kind in VIDEO_JOB_KINDS:
+            content = document.get("content") or {}
+            if not content.get("video_url"):
+                raise ValueError("外部已生成，但回执没有视频下载地址。")
+            return {
+                "videoUrl": content["video_url"],
+                "lastFrameUrl": content.get("last_frame_url"),
+                "model": document.get("model"),
+                "durationSeconds": document.get("duration"),
+                "ratio": document.get("ratio"),
+                "resolution": document.get("resolution"),
+            }
+        data = document.get("data") or []
+        if len(data) != 1 or not data[0].get("url"):
+            raise ValueError("生图回执没有一张可下载的图片；原始正文已保留。")
+        return {"url": data[0]["url"], "model": document.get("model")}
 
 
 def _structured_submission(result: StructuredProviderResult) -> ProviderSubmission:

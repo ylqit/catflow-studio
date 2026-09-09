@@ -1,43 +1,61 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
-const props = defineProps<{ before: string; after: string; totalFrames: number; parentRevision?: number; stale: boolean }>();
+const props = withDefaults(defineProps<{ before: string; after: string; totalFrames: number; parentRevision?: number; beforeLabel?: string; afterLabel?: string; stale: boolean; initialFrame?: number; frameOffset?: number }>(), { initialFrame: 0, frameOffset: 0 });
 const emit = defineEmits<{ frame: [number] }>();
 const videos = ref<HTMLVideoElement[]>([]);
 const linked = ref(true); const audio = ref<'muted' | 'before' | 'after'>('muted');
-const focus = ref('both'); const frames = ref([0, 0]); const commonFrame = ref(0);
+const focus = ref('both'); const frames = ref([0, 0]); const commonFrame = ref(Math.max(0, Math.min(props.totalFrames - 1, props.initialFrame)));
 const state = ref('等待两侧视频加载'); const playing = ref(false); const aligning = ref(false);
 const capable = computed(() => videos.value.length === 2 && videos.value.every(v => typeof v.requestVideoFrameCallback === 'function'));
 let range: { startFrame: number; endFrame: number } | null = null;
+let positionReady = false;
 let epoch = 0; let disposed = false; let pendingResume = false; let starting = false;
 const callbacks = new Map<HTMLVideoElement, number>();
+const seekCancellations = new Set<() => void>();
 function stopPlayback() { pendingResume = false; playing.value = false; starting = false; videos.value.forEach(v => v.pause()); }
-function pause() { ++epoch; aligning.value = false; stopPlayback(); state.value = '已暂停'; }
+function pause() { ++epoch; seekCancellations.forEach(cancel => cancel()); aligning.value = false; stopPlayback(); state.value = '已暂停'; }
 async function seek(frame: number, resume = false) {
-  const token = ++epoch; stopPlayback(); aligning.value = true; state.value = '正在对齐两侧画面';
+  const token = ++epoch; seekCancellations.forEach(cancel => cancel()); positionReady = false; stopPlayback(); aligning.value = true; state.value = '正在对齐两侧画面';
   const target = Math.max(0, Math.min(props.totalFrames - 1, Math.trunc(frame)));
+  commonFrame.value = target;
   const results = await Promise.all(videos.value.map((v, index) => new Promise<boolean>(resolve => {
     let frameCallback: number | undefined; let settled = false;
-    const finish = (ok: boolean) => { if (settled) return; settled = true; clearTimeout(timeout); v.removeEventListener('seeked', onSeek); if (frameCallback !== undefined) v.cancelVideoFrameCallback(frameCallback); resolve(ok); };
+    const finish = (ok: boolean) => { if (settled) return; settled = true; seekCancellations.delete(cancel); clearTimeout(timeout); v.removeEventListener('seeked', onSeek); v.removeEventListener('canplay', onReady); if (frameCallback !== undefined) v.cancelVideoFrameCallback(frameCallback); resolve(ok); };
+    const cancel = () => finish(false);
+    seekCancellations.add(cancel);
+    let requested = false; let presentedFrame = false;
     const onSeek = () => {
-      if (Math.floor(v.currentTime * 24 + .01) !== target) { v.currentTime = (target + .001) / 24; return; }
-      if (!capable.value) finish(true);
+      if (token !== epoch || disposed) { finish(false); return; }
+      if (!requested || Math.floor(v.currentTime * 24 + .01) !== target) { requestTarget(); return; }
+      if (!capable.value || presentedFrame) finish(true);
     };
     const timeout = window.setTimeout(() => finish(false), 4000);
+    const onReady = () => { if (!requested) requestTarget(); else if (presentedFrame && !v.seeking && Math.floor(v.currentTime * 24 + .01) === target) finish(true); };
     v.addEventListener('seeked', onSeek);
-    if (v.readyState < 2) { finish(false); return; }
-    if (!v.seeking && frames.value[index] === target && Math.floor(v.currentTime * 24 + .01) === target) { finish(true); return; }
+    v.addEventListener('canplay', onReady);
     const presentedTarget = (_now: number, metadata: VideoFrameCallbackMetadata) => {
-      if (Math.floor(metadata.mediaTime * 24 + .01) === target) finish(true);
-      else if (!settled) frameCallback = v.requestVideoFrameCallback(presentedTarget);
+      if (token !== epoch || disposed) { finish(false); return; }
+      presentedFrame = Math.floor(metadata.mediaTime * 24 + .01) === target && Math.floor(v.currentTime * 24 + .01) === target;
+      if (presentedFrame && !v.seeking) finish(true);
+      else if (!settled && !presentedFrame) frameCallback = v.requestVideoFrameCallback(presentedTarget);
     };
-    if (capable.value) frameCallback = v.requestVideoFrameCallback(presentedTarget);
-    v.currentTime = (target + .001) / 24;
+    function requestTarget() {
+      if (settled || token !== epoch || disposed || v.seeking || v.readyState < 2) return;
+      if (!v.seeking && frames.value[index] === target && Math.floor(v.currentTime * 24 + .01) === target) { finish(true); return; }
+      requested = true; presentedFrame = false;
+      if (frameCallback !== undefined) v.cancelVideoFrameCallback(frameCallback);
+      if (capable.value) frameCallback = v.requestVideoFrameCallback(presentedTarget);
+      v.currentTime = (target + .001) / 24;
+    }
+    // Cancelling our listeners cannot cancel a decoder seek. Let it finish before
+    // issuing the latest target, so an older seek cannot land after the new one.
+    if (!v.seeking) requestTarget();
   })));
   if (disposed || token !== epoch) return;
   aligning.value = false;
   if (!results.every(Boolean) || results.length !== 2) { state.value = '定位尚未完成，请等待加载后重新定位'; return; }
-  commonFrame.value = target; emit('frame', target);
+  positionReady = true; commonFrame.value = target; emit('frame', target);
   state.value = capable.value ? '两侧定位就绪' : '浏览器不支持呈现帧反馈，定位同步精度受限';
   if (resume) await play();
 }
@@ -56,7 +74,7 @@ async function playWhole() { range = null; await seek(0, true); }
 function stopLoop() { range = null; }
 function presented(v: HTMLVideoElement, index: number, metadata: VideoFrameCallbackMetadata) {
   frames.value[index] = Math.min(props.totalFrames - 1, Math.floor(metadata.mediaTime * 24 + .01));
-  if (index === 0 && !aligning.value && linked.value) { commonFrame.value = frames.value[0]!; emit('frame', commonFrame.value); }
+  if (index === 0 && positionReady && !aligning.value && linked.value) { commonFrame.value = frames.value[0]!; emit('frame', commonFrame.value); }
   if (linked.value && playing.value && !aligning.value) {
     if (range && frames.value[index]! >= range.endFrame - 1) { void seek(range.startFrame, true); }
     else if (Math.abs(frames.value[0]! - frames.value[1]!) > 1) { state.value = '检测到超过一帧偏差，正在重新对齐'; void seek(commonFrame.value, true); }
@@ -78,7 +96,7 @@ function failed() { pause(); state.value = '一侧视频加载失败，两侧已
 function ended() { if (!linked.value) return; if (range) void seek(range.startFrame, true); else { pause(); state.value = '完整播放结束'; } }
 async function toggleLinked() { pause(); linked.value = !linked.value; range = null; if (linked.value) await seek(commonFrame.value); else state.value = '独立查看：各自使用播放与定位控件'; }
 watch(audio, () => videos.value.forEach((v, i) => { v.muted = audio.value !== (i === 0 ? 'before' : 'after'); }));
-watch(() => [props.before, props.after], async () => { ++epoch; pause(); callbacks.forEach((id, v) => v.cancelVideoFrameCallback(id)); callbacks.clear(); frames.value = [0, 0]; commonFrame.value = 0; range = null; await nextTick(); });
+watch(() => [props.before, props.after], async () => { ++epoch; pause(); callbacks.forEach((id, v) => v.cancelVideoFrameCallback(id)); callbacks.clear(); frames.value = [0, 0]; commonFrame.value = Math.min(props.totalFrames - 1, Math.max(0, props.initialFrame)); range = null; await nextTick(); });
 onBeforeUnmount(() => { disposed = true; ++epoch; pause(); callbacks.forEach((id, v) => v.cancelVideoFrameCallback(id)); });
 defineExpose({ seek, playRange, playWhole, stopLoop, pause });
 </script>
@@ -87,9 +105,9 @@ defineExpose({ seek, playRange, playWhole, stopLoop, pause });
   <section class="linked-comparison" aria-label="双播放器真实试装对比">
     <div class="screens" :class="`focus-${focus}`">
       <figure v-for="(src, index) in [before, after]" v-show="focus === 'both' || focus === String(index)" :key="index">
-        <figcaption>{{ index === 0 ? `修改前 · 父草稿 v${parentRevision ?? '?'}` : '修改后 · 真实完整试装' }}<b v-if="index === 1 && stale"> · 上一份试装</b></figcaption>
+        <figcaption>{{ index === 0 ? (beforeLabel || `修改前 · 父草稿 v${parentRevision ?? '?'}`) : (afterLabel || '修改后 · 本次修改片段') }}<b v-if="index === 1 && stale"> · 上一份试装</b></figcaption>
         <video :ref="el => { if (el) videos[index] = el as HTMLVideoElement; }" :src="src" :aria-label="index === 0 ? '修改前视频' : '修改后视频'" :controls="!linked" :muted="audio !== (index === 0 ? 'before' : 'after')" playsinline preload="auto" @loadeddata="loaded(index)" @waiting="stalled" @canplay="ready" @error="failed" @ended="ended" />
-        <small>{{ index === 0 ? 'A' : 'B' }} · 实际呈现 {{ frames[index] }} / {{ totalFrames - 1 }} 帧</small>
+        <small>{{ index === 0 ? 'A' : 'B' }} · 草稿第 {{ (frames[index] ?? 0) + frameOffset }} 帧 · 片段 {{ frames[index] }} / {{ totalFrames - 1 }} 帧</small>
       </figure>
     </div>
     <div class="controls">

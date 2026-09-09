@@ -4,6 +4,7 @@ export type RepairVerdict = "pass" | "warning" | "fail" | "";
 
 export const EDIT_FRAMES_PER_SECOND = 24;
 export const MIN_ISSUE_FRAMES = 1;
+export const MIN_GENERATION_FRAMES = 4 * EDIT_FRAMES_PER_SECOND;
 export const MAX_ISSUE_FRAMES = 15 * EDIT_FRAMES_PER_SECOND;
 
 const requiredQualityChecks = [
@@ -20,16 +21,16 @@ function clampFrame(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, Math.trunc(value)));
 }
 
-export function clampIssueStart(value: number, endFrame: number, totalFrames: number): number {
+export function clampIssueStart(value: number, endFrame: number, totalFrames: number, minimumDuration = MIN_ISSUE_FRAMES): number {
   const safeEnd = clampFrame(endFrame, 0, totalFrames);
   const minimum = Math.max(0, safeEnd - MAX_ISSUE_FRAMES);
-  const maximum = Math.max(minimum, safeEnd - MIN_ISSUE_FRAMES);
+  const maximum = Math.max(minimum, safeEnd - minimumDuration);
   return clampFrame(value, minimum, maximum);
 }
 
-export function clampIssueEnd(value: number, startFrame: number, totalFrames: number): number {
+export function clampIssueEnd(value: number, startFrame: number, totalFrames: number, minimumDuration = MIN_ISSUE_FRAMES): number {
   const safeStart = clampFrame(startFrame, 0, Math.max(0, totalFrames - 1));
-  const minimum = Math.min(totalFrames, safeStart + MIN_ISSUE_FRAMES);
+  const minimum = Math.min(totalFrames, safeStart + minimumDuration);
   const maximum = Math.min(totalFrames, safeStart + MAX_ISSUE_FRAMES);
   return clampFrame(value, minimum, Math.max(minimum, maximum));
 }
@@ -40,7 +41,7 @@ export function isValidIssueRange(range: FrameRangeDto, totalFrames: number): bo
     && Number.isInteger(range.endFrame)
     && range.startFrame >= 0
     && range.endFrame <= totalFrames
-    && duration >= MIN_ISSUE_FRAMES
+    && duration >= MIN_GENERATION_FRAMES
     && duration <= Math.min(totalFrames, MAX_ISSUE_FRAMES);
 }
 

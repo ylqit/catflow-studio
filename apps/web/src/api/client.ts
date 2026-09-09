@@ -16,6 +16,7 @@ import type {
   VideoReviewDto,
   GenerationPreviewDto,
   JobDto,
+  JobResultDto, JobEventsDto, GenerationPreparationDto,
   JobUsageDto,
   PlannerSnapshotDto,
   ObjectPublisherRuntimeDto,
@@ -322,8 +323,8 @@ export class CatFlowClient {
     );
   }
 
-  seriesAssets(seriesId: string): Promise<SeriesAssetBindingDto[]> {
-    return this.request(`/api/v1/story-series/${seriesId}/assets`);
+  seriesAssets(seriesId: string, signal?: AbortSignal): Promise<SeriesAssetBindingDto[]> {
+    return this.request(`/api/v1/story-series/${seriesId}/assets`, { signal });
   }
 
   updateSeriesAssets(
@@ -360,6 +361,7 @@ export class CatFlowClient {
   }
 
   createStoryImport(command: {
+    productionTargets?: Record<string, import("./types").StoryProductionTarget> | null;
     rawText: string;
     sourceFormat: "paste" | "txt" | "md";
     fileName?: string | null;
@@ -377,6 +379,14 @@ export class CatFlowClient {
     return this.request(`/api/v1/story-imports/${documentId}`);
   }
 
+  updateStoryProductionTargets(documentId: string, command: import("./types").StoryProductionTargetsCommand): Promise<StorySourceDocumentDto> {
+    return this.json("/api/v1/story-imports/" + documentId + "/production-targets", "PATCH", command);
+  }
+
+  updateSeriesProductionTarget(seriesId: string, command: import("./types").SeriesPatchCommand): Promise<StorySeriesDto> {
+    return this.json("/api/v1/story-series/" + seriesId, "PATCH", command);
+  }
+
   reanalyzeStoryImport(
     documentId: string,
     command: { expectedInputHash: string; idempotencyKey: string },
@@ -387,6 +397,10 @@ export class CatFlowClient {
   confirmStoryImport(
     documentId: string,
     command: {
+      defaultEpisodeDurationSeconds?: number;
+      adaptationPolicy?: "preserve_all" | "condense_mainline";
+      narrativeMode?: import("./types").SeriesNarrativeMode;
+      mustKeep?: string[];
       suggestionId: string;
       target: "new_series" | "append_series" | "independent" | "revision" | "reference";
       targetSeriesId?: string | null;
@@ -586,8 +600,29 @@ export class CatFlowClient {
     });
   }
 
+  private jobCache = new Map<string, JobDto>();
+  private jobReads = new Map<string, Promise<JobDto>>();
   job(jobId: string): Promise<JobDto> {
-    return this.request(`/api/v1/jobs/${jobId}`);
+    const pending = this.jobReads.get(jobId); if (pending) return pending;
+    const reading = this.request<JobDto>(`/api/v1/jobs/${jobId}`).then(job => {
+      const previous = this.jobCache.get(jobId);
+      if (previous && (previous.revision ?? 0) > (job.revision ?? 0)) return previous;
+      this.jobCache.set(jobId, job); return job;
+    }).finally(() => this.jobReads.delete(jobId));
+    this.jobReads.set(jobId, reading); return reading;
+  }
+  jobEvents(jobId: string, after = 0): Promise<JobEventsDto> {
+    return this.request(`/api/v1/jobs/${jobId}/events?after=${after}`);
+  }
+  jobResult(jobId: string): Promise<JobResultDto> { return this.request(`/api/v1/jobs/${jobId}/result`); }
+  recoverJob(jobId: string, action: "query_provider" | "process_result", expectedRevision: number, idempotencyKey: string): Promise<JobDto> {
+    return this.json(`/api/v1/jobs/${jobId}/recovery`, "POST", { action, expectedRevision, idempotencyKey });
+  }
+  prepareJobReplacement(jobId: string): Promise<GenerationPreparationDto> {
+    return this.json(`/api/v1/jobs/${jobId}/replacement-preview`, "POST", {});
+  }
+  replaceUnknownJob(jobId: string, inputHash: string, idempotencyKey: string): Promise<JobDto> {
+    return this.json(`/api/v1/jobs/${jobId}/replacement`, "POST", { inputHash, idempotencyKey, acknowledgeDuplicateCharge: true });
   }
 
   jobUsage(jobId: string): Promise<JobUsageDto> {
@@ -624,6 +659,9 @@ export class CatFlowClient {
   renderDraftPreview(projectId: string, draftId: string, command: VideoDraftPreviewCommand): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/previews`, "POST", command);
   }
+  prepareRepairResult(projectId: string, draftId: string, command: { repairId: string; previousPreviewJobId?: string; preserveOriginalAudio?: boolean; retryAfterJobId?: string }): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/results`, "POST", command);
+  }
   renderEditPreview(projectId: string, editVersionId: string, idempotencyKey: string): Promise<JobDto> {
     return this.json(`/api/v1/projects/${projectId}/edit-previews`, "POST", { editVersionId, idempotencyKey });
   }
@@ -645,6 +683,9 @@ export class CatFlowClient {
     return this.json(`/api/v1/projects/${projectId}/exports`, "POST", command);
   }
 
+  prepareSegmentReferences(projectId: string, command: SegmentRepairPreviewCommand & { retryAfterJobId?: string }): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edits/references`, "POST", command);
+  }
   previewVideoRepair(
     projectId: string,
     command: SegmentRepairPreviewCommand,
@@ -713,7 +754,8 @@ export class CatFlowClient {
       headers: {
         ...headers,
         "X-CatFlow-CSRF": this.csrfToken ?? "",
-      },
+  },
+
       body,
     });
   }
