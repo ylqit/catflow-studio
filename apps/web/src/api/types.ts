@@ -43,6 +43,8 @@ export interface RuntimeBootstrapDto {
       blockedReason: string | null;
       maximumImageReferences: number;
       maximumVideoReferences: number;
+      minimumReferenceDurationSeconds?: number;
+      maximumReferenceDurationSeconds?: number;
     };
   };
 }
@@ -159,7 +161,7 @@ export interface SeriesPlanVersionDto {
   promptRevision: string;
   producingJobId?: string | null;
   basePlanVersionId?: string | null;
-  issues: Array<{ code: string; severity: "fatal" | "blocking" | "warning"; path: string; message: string; suggestedAction?: string | null }>;
+  issues: SeriesValidationIssueDto[];
   decidedAt?: string | null;
   createdAt: string;
 }
@@ -202,6 +204,7 @@ export interface SeriesPlanPreviewDto {
   model: string;
   capabilityRevision: string;
   inputHash: string;
+  settingsInputHash?: string;
   prompt: string;
   outputSchema: Record<string, unknown>;
   plannedEpisodeCount: number;
@@ -211,6 +214,21 @@ export interface SeriesPlanPreviewDto {
   defaultEpisodeDurationSeconds: number;
   promptRevision: string;
 }
+
+export interface SeriesValidationIssueDto {
+  code: string;
+  severity: "fatal" | "blocking" | "warning";
+  path: string;
+  message: string;
+  suggestedAction?: string | null;
+  normalizationRevision?: string;
+  beforeValue?: string;
+  afterValue?: string;
+}
+
+export type SeriesPlanMaterializeCommand =
+  | { source?: "edited"; basePlanVersionId: string; plan: SeriesPlanDraft; idempotencyKey: string }
+  | { source: "saved_result"; basePlanVersionId: string; expectedSettingsHash: string; idempotencyKey: string };
 
 export interface SeriesPlanSegmentCommand {
   startEpisodeOrder: number;
@@ -477,13 +495,14 @@ export type GenerationPromptSectionDto = components["schemas"]["GenerationPrompt
 export type ImageGenerationInputSnapshotDto = components["schemas"]["ImageGenerationInputSnapshotDto"];
 
 export interface JobDto {
+  idempotencyKey?: string;
   execution?: JobExecutionDto | null;
   revision?: number;
   id: string;
   projectId?: string | null;
   seriesId?: string | null;
   storySourceDocumentId?: string | null;
-  kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_segment" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export" | "render_edit_preview";
+  kind: "plan_story" | "plan_shots" | "plan_video_edit" | "plan_series" | "plan_series_segment" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export" | "render_edit_preview";
   status:
     | "queued"
     | "submitting"
@@ -506,6 +525,7 @@ export interface JobDto {
   videoRepairId?: string;
   expectedCostMicros?: number | null;
   providerResult?: Record<string, unknown> | null;
+  editPlan?: VideoEditPlanSuggestion | null;
   publication?: {
     id: string;
     state: "uploading" | "ready" | "delete_pending" | "deleted" | "failed";
@@ -523,7 +543,7 @@ export interface JobDto {
   imageInputSnapshot?: ImageGenerationInputSnapshotDto | null;
   frozenInput: Record<string, unknown>;
   resultAssetIds: string[];
-  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; httpStatus?: number; timedOut?: boolean; incompleteReason?: string; providerStatus?: string; maxOutputTokens?: number };
+  error?: { code: string; message: string; retryable: boolean; requestId?: string; submissionUnknown?: boolean; httpStatus?: number; timedOut?: boolean; incompleteReason?: string; providerStatus?: string; maxOutputTokens?: number; diagnostics?: Record<string, unknown> };
   createdAt: string;
   updatedAt: string;
 }
@@ -682,12 +702,17 @@ export interface ShotProductionContextDto {
   targetDurationFrames: number; environmentIntent: string; references: Array<{ assetId: string; role: string; sha256: string }>; jobs: JobDto[];
 }
 export interface ShotMediaPreviewDto {
+  compiledProviderPrompt?: string | null;
+  warnings?: Array<{ code: string; message: string }>;
   purpose: 'shot_frame' | 'shot_video'; inputHash: string; shotPlanVersionId: string; targetShotId: string;
   shotDesignHash: string; prompt: string; negativePrompt: string; model: string; generationMode: string;
   durationSeconds: number | null; targetDurationFrames: number; generateAudio: boolean;
   references: Array<{ assetId: string; role: string; sha256: string }>;
 }
 export interface ShotSpecDto {
+  cameraSpatialRelation?: string | null;
+  interactionConstraints?: string[];
+  visualExclusions?: string[];
   sceneAssetId?: string | null;
   environmentUse?: 'recompose' | 'preserve_layout';
   confirmedFrame?: { assetId: string; sha256: string; designHash: string; checks: string[] } | null;
@@ -792,6 +817,7 @@ export interface ShotPlanGenerationAttemptDto {
 }
 
 export interface GenerationPreviewDto {
+  compiledProviderPrompt?: string | null;
   generateAudio?: boolean;
   inputHash: string;
   provider: string;
@@ -842,6 +868,7 @@ export interface EnvironmentGenerationDraft extends EnvironmentGenerationInput {
 }
 
 export interface AssetGenerationPreviewDto {
+  compiledProviderPrompt?: string | null;
   environmentDraft?: EnvironmentGenerationDraft | null;
   inputHash: string;
   kind: AssetGenerationKind;
@@ -896,6 +923,7 @@ export type EditDecisionListV3Dto = components["schemas"]["EditDecisionListV3"];
 export type FrameEditTimelineDto = EditDecisionListV2Dto | EditDecisionListV3Dto;
 export type EditDecisionListV2Dto = components["schemas"]["EditDecisionListV2"];
 export type SegmentRepairPreviewCommand = components["schemas"]["SegmentRepairPreviewCommand"];
+export type VideoEditPlanSuggestion = components["schemas"]["VideoEditPlanSuggestion"];
 export type SegmentRepairPreviewDto = components["schemas"]["SegmentRepairPreviewDto"];
 export type SegmentRepairCreateCommand = Omit<components["schemas"]["SegmentRepairCreateCommand"], "prepareOnly"> & { prepareOnly?: boolean };
 export type SegmentRepairApproveCommand = components["schemas"]["SegmentRepairApproveCommand"];
@@ -940,4 +968,6 @@ export interface JobExecutionDto {
   resultState: "missing" | "partial" | "complete"; historicalResult: boolean;
 }
 export interface JobResultDto { jobId: string; revision: number; state: string; result: Record<string, unknown> | null; error: Record<string, unknown> | null; assetIds: string[]; historical: boolean; message?: string | null }
+export type ProviderTaskLookupDto = components['schemas']['ProviderTaskLookupDto'];
+export type JobRecoveryCommand = components['schemas']['JobRecoveryCommand'];
 export interface GenerationPreparationDto { preparedOnly: true; kind: string; provider: string; model: string; inputHash: string; executionInputHash: string; input: Record<string, unknown>; expectedCostMicros: number | null; replacesJobId: string | null }

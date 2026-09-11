@@ -1,0 +1,367 @@
+{
+  "method": "13x13 pixel per-channel medians at fixed before/after coordinates. R minus B is an auxiliary warm-cast indicator for sampled white fur, not a whole-image color score or Delta E.",
+  "source": "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png",
+  "samples": {
+    "front-standing.png": {
+      "before": {
+        "size": [
+          969,
+          1623
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              510,
+              1050
+            ],
+            "rgb": [
+              248,
+              242,
+              236
+            ],
+            "hex": "#F8F2EC",
+            "redMinusBlue": 12
+          },
+          "gray": {
+            "center": [
+              499,
+              665
+            ],
+            "rgb": [
+              172,
+              158,
+              147
+            ],
+            "hex": "#AC9E93",
+            "redMinusBlue": 25
+          }
+        }
+      },
+      "after": {
+        "size": [
+          969,
+          1623
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              510,
+              1050
+            ],
+            "rgb": [
+              250,
+              249,
+              247
+            ],
+            "hex": "#FAF9F7",
+            "redMinusBlue": 3
+          },
+          "gray": {
+            "center": [
+              499,
+              665
+            ],
+            "rgb": [
+              171,
+              168,
+              168
+            ],
+            "hex": "#ABA8A8",
+            "redMinusBlue": 3
+          }
+        }
+      }
+    },
+    "side-standing.png": {
+      "before": {
+        "size": [
+          1137,
+          1383
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              300,
+              810
+            ],
+            "rgb": [
+              247,
+              241,
+              236
+            ],
+            "hex": "#F7F1EC",
+            "redMinusBlue": 11
+          },
+          "gray": {
+            "center": [
+              642,
+              662
+            ],
+            "rgb": [
+              231,
+              221,
+              214
+            ],
+            "hex": "#E7DDD6",
+            "redMinusBlue": 17
+          }
+        }
+      },
+      "after": {
+        "size": [
+          1137,
+          1383
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              300,
+              810
+            ],
+            "rgb": [
+              251,
+              250,
+              250
+            ],
+            "hex": "#FBFAFA",
+            "redMinusBlue": 1
+          },
+          "gray": {
+            "center": [
+              642,
+              662
+            ],
+            "rgb": [
+              240,
+              237,
+              236
+            ],
+            "hex": "#F0EDEC",
+            "redMinusBlue": 4
+          }
+        }
+      }
+    },
+    "rear-standing.png": {
+      "before": {
+        "size": [
+          982,
+          1602
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              443,
+              730
+            ],
+            "rgb": [
+              244,
+              237,
+              232
+            ],
+            "hex": "#F4EDE8",
+            "redMinusBlue": 12
+          },
+          "gray": {
+            "center": [
+              550,
+              866
+            ],
+            "rgb": [
+              182,
+              168,
+              158
+            ],
+            "hex": "#B6A89E",
+            "redMinusBlue": 24
+          }
+        }
+      },
+      "after": {
+        "size": [
+          982,
+          1602
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              443,
+              730
+            ],
+            "rgb": [
+              250,
+              249,
+              248
+            ],
+            "hex": "#FAF9F8",
+            "redMinusBlue": 2
+          },
+          "gray": {
+            "center": [
+              550,
+              866
+            ],
+            "rgb": [
+              179,
+              172,
+              167
+            ],
+            "hex": "#B3ACA7",
+            "redMinusBlue": 12
+          }
+        }
+      }
+    },
+    "three-view-board.png": {
+      "before": {
+        "size": [
+          1774,
+          887
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              280,
+              570
+            ],
+            "rgb": [
+              247,
+              241,
+              235
+            ],
+            "hex": "#F7F1EB",
+            "redMinusBlue": 12
+          },
+          "gray": {
+            "center": [
+              902,
+              435
+            ],
+            "rgb": [
+              230,
+              218,
+              209
+            ],
+            "hex": "#E6DAD1",
+            "redMinusBlue": 21
+          }
+        }
+      },
+      "after": {
+        "size": [
+          1774,
+          887
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              280,
+              570
+            ],
+            "rgb": [
+              250,
+              248,
+              246
+            ],
+            "hex": "#FAF8F6",
+            "redMinusBlue": 4
+          },
+          "gray": {
+            "center": [
+              902,
+              435
+            ],
+            "rgb": [
+              232,
+              228,
+              226
+            ],
+            "hex": "#E8E4E2",
+            "redMinusBlue": 6
+          }
+        }
+      }
+    },
+    "pair-scale.png": {
+      "before": {
+        "size": [
+          941,
+          1672
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              582,
+              1160
+            ],
+            "rgb": [
+              245,
+              239,
+              233
+            ],
+            "hex": "#F5EFE9",
+            "redMinusBlue": 12
+          },
+          "gray": {
+            "center": [
+              713,
+              1108
+            ],
+            "rgb": [
+              229,
+              219,
+              211
+            ],
+            "hex": "#E5DBD3",
+            "redMinusBlue": 18
+          }
+        }
+      },
+      "after": {
+        "size": [
+          941,
+          1672
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              582,
+              1160
+            ],
+            "rgb": [
+              249,
+              247,
+              246
+            ],
+            "hex": "#F9F7F6",
+            "redMinusBlue": 3
+          },
+          "gray": {
+            "center": [
+              713,
+              1108
+            ],
+            "rgb": [
+              233,
+              229,
+              227
+            ],
+            "hex": "#E9E5E3",
+            "redMinusBlue": 6
+          }
+        }
+      }
+    }
+  },
+  "childComparison": {
+    "region": [
+      70,
+      230,
+      440,
+      1295
+    ],
+    "meanAbsoluteRGBDifference": 3.7553009347375546,
+    "interpretation": "Nonzero; generated image does not preserve the child's pixels exactly."
+  }
+}
+

@@ -17,6 +17,7 @@ TEXT_JOB_KINDS = frozenset(
     {
         "plan_story",
         "plan_shots",
+        "plan_video_edit",
         "plan_series",
         "plan_series_segment",
         "plan_series_episode",
@@ -118,7 +119,14 @@ class JobExecutionDto(ContractModel):
 
 
 class JobRecoveryCommand(ContractModel):
-    action: Literal["query_provider", "process_result"]
+    action: Literal["query_provider", "process_result", "associate_provider_task"]
+    provider_task_id: str | None = Field(
+        alias="providerTaskId", default=None, pattern=r"^[A-Za-z0-9_-]{1,200}$"
+    )
+    confirm_association: bool = Field(alias="confirmAssociation", default=False)
+    acknowledge_unverified_parameters: bool = Field(
+        alias="acknowledgeUnverifiedParameters", default=False
+    )
     expected_revision: int = Field(alias="expectedRevision", ge=0)
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -268,6 +276,8 @@ def summarize_execution(
         actions.append("process_result")
     if status == "submission_unknown" and not queryable:
         actions.append("prepare_replacement")
+        if provider == "ark" and kind in VIDEO_JOB_KINDS and not task_id:
+            actions.append("lookup_provider_tasks")
     if status in {"queued", "submitting"} and submitted_at is None:
         actions.append("cancel")
     waiting = status in ACTIVE_STATUSES and state not in {"needs_attention", "unavailable"}

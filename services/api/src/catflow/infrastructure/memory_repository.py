@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any
 
 from catflow.application.continuity import (
@@ -33,16 +35,21 @@ from catflow.application.project_library import (
 )
 from catflow.application.series import (
     MAX_SERIES_PLANNING_BATCH,
+    SERIES_NORMALIZATION_REVISION,
     SeriesCreateCommand,
     SeriesEpisodeDto,
     SeriesPatchCommand,
     SeriesPlanDraft,
+    SeriesPlanMaterializeCommand,
     SeriesPlanSegmentActivationCommand,
     SeriesPlanSegmentVersionDto,
     SeriesPlanVersionDto,
     SeriesSourceBeatDto,
     SeriesValidationIssueDto,
     StorySeriesDto,
+    normalize_series_plan_result,
+    series_plan_materialization_hash,
+    series_plan_settings_hash,
     validate_series_plan,
 )
 from catflow.application.service import (
@@ -53,6 +60,7 @@ from catflow.application.service import (
     EditDecisionListDto,
     EditDecisionListV2,
     EditVersionDto,
+    EnvironmentGenerationDraft,
     FixedCanonRole,
     JobDto,
     JobEventDto,
@@ -62,7 +70,6 @@ from catflow.application.service import (
     PlannerMessageDto,
     PlannerSnapshotDto,
     ProjectCreate,
-    EnvironmentGenerationDraft,
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
@@ -80,6 +87,8 @@ from catflow.application.service import (
     VideoRepairDto,
     VideoRepairStatus,
     VideoReviewDto,
+    require_video_edit_available,
+    validate_video_edit_replacement,
 )
 from catflow.application.story_imports import (
     StoryImportAnalysisDraft,
@@ -91,10 +100,13 @@ from catflow.application.story_imports import (
     StorySourceDocumentDto,
     StorySourceRelationSuggestionDto,
     StorySourceUnitDto,
+    story_import_confirmation_request_snapshot,
 )
 from catflow.domain.billing import rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
 from catflow.domain.video_repairs import FrameRange
+
+_provider_association_lock = RLock()
 
 
 class MemoryStudioRepository:
@@ -167,6 +179,7 @@ class MemoryStudioRepository:
         self._episode_reference_manifests: dict[uuid.UUID, list[dict[str, Any]]] = {}
         self._story_source_documents: dict[uuid.UUID, StorySourceDocumentDto] = {}
         self._story_source_materializations: dict[str, StoryImportMaterializationDto] = {}
+        self._story_source_confirmation_requests: dict[str, dict[str, Any]] = {}
         self._project_collections: dict[uuid.UUID, ProjectCollectionDto] = {}
         self._project_collection_ids: dict[uuid.UUID, uuid.UUID | None] = {}
         self._project_tags: dict[uuid.UUID, tuple[ProjectTagDto, ...]] = {}
@@ -182,6 +195,7 @@ class MemoryStudioRepository:
         self._jobs_by_idempotency: dict[str, uuid.UUID] = {}
         self._job_events: list[JobEventDto] = []
         self._edits: dict[uuid.UUID, list[EditVersionDto]] = {}
+        self._edit_draft_lock = RLock()
         self._edit_drafts: dict[uuid.UUID, VideoEditDraftDto] = {}
         self._video_reviews: dict[uuid.UUID, VideoReviewDto] = {}
         self._video_repairs: dict[uuid.UUID, VideoRepairDto] = {}
@@ -242,6 +256,12 @@ class MemoryStudioRepository:
     def current_canon_profile(self) -> CanonProfileDto:
         return next(profile for profile in self._canon_profiles if profile.active)
 
+    def get_canon_profile(self, profile_id: uuid.UUID) -> CanonProfileDto:
+        profile = next((item for item in self._canon_profiles if item.id == profile_id), None)
+        if profile is None:
+            raise StudioNotFoundError("Canon profile not found")
+        return profile
+
     def register_canon_asset(
         self,
         *,
@@ -280,37 +300,41 @@ class MemoryStudioRepository:
             if asset is None or asset.project_id is not None or asset.role != role:
                 raise StudioConflictError("fixed asset must be a matching global Canon candidate")
             fixed[role] = asset
-        document = {
-            "profileId": "canon-v4-healing-child-cat-style-board",
-            "child": {
-                "age": "6-7",
-                "heightCm": 120,
-                "heightRangeCm": [115, 125],
-                "bodyProportion": "约4.5至5头身的柔和儿童插画比例",
-            },
-            "fixedAssets": {
-                role: {"assetId": str(asset.id), "sha256": asset.sha256}
-                for role, asset in fixed.items()
-            },
+        base = self.get_canon_profile(command.base_profile_id) if command.base_profile_id else self.current_canon_profile()
+        document = deepcopy(base.profile)
+        if command.cat is not None:
+            document["cat"] = command.cat.model_dump(mode="json", by_alias=True)
+        document["fixedAssets"] = {
+            role: {"assetId": str(asset.id), "sha256": asset.sha256}
+            for role, asset in fixed.items()
         }
         digest = hashlib.sha256(
-            json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        self._canon_profiles = [
-            profile.model_copy(update={"active": False}) for profile in self._canon_profiles
-        ]
+        existing = next((item for item in self._canon_profiles if item.profile_hash == digest), None)
+        if command.activate:
+            self._canon_profiles = [
+                item.model_copy(update={"active": False}) for item in self._canon_profiles
+            ]
+        if existing is not None:
+            if command.activate:
+                existing = existing.model_copy(update={"active": True})
+                self._canon_profiles = [existing if item.id == existing.id else item for item in self._canon_profiles]
+                self._canon_profile_id = existing.id
+            return existing
         profile = CanonProfileDto(
             id=uuid.uuid4(),
             version=max(item.version for item in self._canon_profiles) + 1,
             specVersion=4,
-            active=True,
+            active=command.activate,
             profileHash=digest,
             profile=document,
             fixedAssets=fixed,
             createdAt=datetime.now(UTC),
         )
         self._canon_profiles.append(profile)
-        self._canon_profile_id = profile.id
+        if command.activate:
+            self._canon_profile_id = profile.id
         return profile
 
     def get_validation_run(self, run_id: uuid.UUID) -> ValidationRunDto | None:
@@ -686,7 +710,7 @@ class MemoryStudioRepository:
             completedCount=0,
             createdAt=now,
             updatedAt=now,
-            **command.model_dump(mode="python", by_alias=True),
+            **command.model_dump(mode="python", by_alias=True, exclude={"canon_profile_id"}),
         )
         self._story_series[series.id] = series
         self._series_plans[series.id] = []
@@ -731,11 +755,16 @@ class MemoryStudioRepository:
                 for field in command.model_fields_set & target_fields
             ):
                 raise StudioConflictError("生产目标不能为空。")
-            if any(
-                job.series_id == series_id
+            planning_jobs = [
+                job for job in self._jobs.values()
+                if job.series_id == series_id
                 and job.kind in {"plan_series", "plan_series_segment"}
-                and job.status not in {"succeeded", "failed", "cancelled"}
-                for job in self._jobs.values()
+            ]
+            superseded = {job.supersedes_job_id for job in planning_jobs}
+            if any(
+                job.status not in {"succeeded", "failed", "cancelled"}
+                and not (job.status == "submission_unknown" and job.id in superseded)
+                for job in planning_jobs
             ):
                 raise StudioConflictError("规划任务尚未终结，请等待结果后调整目标。")
         changes = {
@@ -825,16 +854,19 @@ class MemoryStudioRepository:
     def materialize_series_plan_version(
         self,
         series_id: uuid.UUID,
-        *,
-        base_plan_version_id: uuid.UUID,
-        plan: SeriesPlanDraft,
-        idempotency_key: str,
+        command: SeriesPlanMaterializeCommand,
     ) -> SeriesPlanVersionDto:
+        base_plan_version_id = command.base_plan_version_id
+        idempotency_key = command.idempotency_key
+        input_hash = series_plan_materialization_hash(command)
         plans = self._series_plans.get(series_id, [])
         prior_id = self._series_plan_materialization_idempotency.get(idempotency_key)
         if prior_id is not None:
             prior = next((item for item in plans if item.id == prior_id), None)
-            if prior is None or prior.base_plan_version_id != base_plan_version_id:
+            if (
+                prior is None or prior.base_plan_version_id != base_plan_version_id
+                or prior.input_hash != input_hash
+            ):
                 raise StudioIdempotencyInputConflictError(
                     "idempotency key already belongs to different input"
                 )
@@ -845,46 +877,58 @@ class MemoryStudioRepository:
             raise StudioNotFoundError("series plan version not found")
         if base.active or base.status != "candidate":
             raise StudioConflictError("only a pending series plan can be completed")
-        now = datetime.now(UTC)
-        for item in plans:
-            if item.status == "candidate":
-                item.status = "superseded"
-                item.decided_at = now
-        disposition, issues = validate_series_plan(
-            plan,
+        source_ordinals = {
+            beat.binding_order for beat in self._series_source_beats.get(series_id, [])
+        }
+        if command.source == "saved_result":
+            if command.expected_settings_hash != series_plan_settings_hash(series, source_ordinals):
+                raise StudioConflictError("series settings changed; refresh before revalidation")
+            payload = base.plan.model_dump(mode="json", by_alias=True)
+        else:
+            assert command.plan is not None
+            payload = command.plan.model_dump(mode="json", by_alias=True)
+        normalized = normalize_series_plan_result(
+            payload,
             expected_episode_count=min(
-                series.planned_episode_count or len(plan.episodes),
-                MAX_SERIES_PLANNING_BATCH,
+                series.planned_episode_count or len(payload["episodes"]), MAX_SERIES_PLANNING_BATCH,
             ),
             narrative_mode=series.narrative_mode,
             adaptation_policy=series.adaptation_policy,
             expected_duration_seconds=series.default_episode_duration_seconds,
             must_keep=series.must_keep,
-            source_unit_ordinals={
-                beat.binding_order for beat in self._series_source_beats.get(series_id, [])
-            },
+            source_unit_ordinals=source_ordinals,
+            normalization_revision=(
+                SERIES_NORMALIZATION_REVISION if command.source == "saved_result" else None
+            ),
         )
-        input_hash = hashlib.sha256(
-            json.dumps(
-                {
-                    "basePlanVersionId": str(base_plan_version_id),
-                    "plan": plan.model_dump(mode="json", by_alias=True),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
+        if normalized.plan is None:
+            raise StudioConflictError("saved series plan cannot be parsed")
+        plan = normalized.plan
+        issues = list(normalized.issues)
+        if command.source == "saved_result":
+            issues.append(SeriesValidationIssueDto(
+                code="series_result_revalidated", severity="warning", path="",
+                message="已使用当前系列设置重新校验保存的方案；原始模型返回保留在来源版本。",
+                normalizationRevision=SERIES_NORMALIZATION_REVISION,
+            ))
+        now = datetime.now(UTC)
+        for item in plans:
+            if item.status == "candidate":
+                item.status = "superseded"
+                item.decided_at = now
         version = SeriesPlanVersionDto(
             id=uuid.uuid4(),
             seriesId=series_id,
             revision=len(plans) + 1,
             status="candidate",
             active=False,
-            disposition=disposition,
+            disposition=normalized.disposition,
             plan=plan,
             inputHash=input_hash,
-            promptRevision="manual-series-plan-v1",
+            promptRevision=(
+                "normalized-series-plan-v1"
+                if command.source == "saved_result" else "manual-series-plan-v1"
+            ),
             producingJobId=None,
             basePlanVersionId=base_plan_version_id,
             issues=issues,
@@ -922,6 +966,24 @@ class MemoryStudioRepository:
             raise StudioConflictError("series plan requires completion before adoption")
         if series.active_plan_version_id != expected_active_plan_version_id:
             raise StudioConflictError("active series plan changed")
+        if series.adaptation_policy == "condense_mainline":
+            disposition, _ = validate_series_plan(
+                selected.plan,
+                expected_episode_count=min(
+                    series.planned_episode_count or 12, MAX_SERIES_PLANNING_BATCH
+                ),
+                narrative_mode=series.narrative_mode,
+                source_unit_ordinals={
+                    beat.binding_order for beat in self._series_source_beats.get(series_id, [])
+                },
+                adaptation_policy=series.adaptation_policy,
+                expected_duration_seconds=series.default_episode_duration_seconds,
+                must_keep=series.must_keep,
+            )
+            if disposition != "candidate_ready":
+                raise StudioConflictError(
+                    "方案不再符合当前生产目标，请编辑并保存新版本后再采用。"
+                )
         now = datetime.now(UTC)
         for item in plans:
             item.active = item.id == selected.id
@@ -1569,20 +1631,30 @@ class MemoryStudioRepository:
     ) -> StoryImportMaterializationDto:
         existing = self._story_source_materializations.get(command.idempotency_key)
         if existing is not None:
-            if (
-                existing.suggestion_id != command.suggestion_id
-                or existing.target != command.target
-                or existing.target_series_id != command.target_series_id
-                or existing.target_project_id != command.target_project_id
-                or (
-                    command.target == "new_series"
-                    and existing.series is not None
-                    and (
-                        existing.series.length_mode != command.series_length_mode
-                        or existing.series.planned_episode_count != command.planned_episode_count
+            original_request = self._story_source_confirmation_requests.get(
+                command.idempotency_key
+            )
+            if original_request is not None:
+                input_conflicts = original_request != story_import_confirmation_request_snapshot(
+                    command
+                )
+            else:
+                input_conflicts = (
+                    existing.suggestion_id != command.suggestion_id
+                    or existing.target != command.target
+                    or existing.target_series_id != command.target_series_id
+                    or existing.target_project_id != command.target_project_id
+                    or (
+                        command.target == "new_series"
+                        and existing.series is not None
+                        and (
+                            existing.series.length_mode != command.series_length_mode
+                            or existing.series.planned_episode_count
+                            != command.planned_episode_count
+                        )
                     )
                 )
-            ):
+            if input_conflicts:
                 raise StudioIdempotencyInputConflictError(
                     "idempotency key already belongs to different input"
                 )
@@ -1615,7 +1687,7 @@ class MemoryStudioRepository:
                     worldSetting="由已导入原文中的地点、时间和环境归纳",
                     emotionalDirection="保持原文的情绪变化",
                     recurringElements=[],
-                    mustKeep=command.must_keep or ["保留来源文本中的核心事件"],
+                    mustKeep=command.must_keep,
                     mustAvoid=["不得无依据改写来源事实"],
                     additionalNotes=f"来源文档 {document.id}",
                 ),
@@ -1697,6 +1769,9 @@ class MemoryStudioRepository:
             createdAt=now,
         )
         self._story_source_materializations[command.idempotency_key] = materialization
+        self._story_source_confirmation_requests[command.idempotency_key] = (
+            story_import_confirmation_request_snapshot(command)
+        )
         if all(item.status != "suggested" for item in document.relation_suggestions):
             document.status = "confirmed"
             document.updated_at = now
@@ -2065,7 +2140,10 @@ class MemoryStudioRepository:
         asset_id: uuid.UUID,
         decision: str = "selected",
     ) -> ProjectSelectionDto:
-        if slot in self.current_canon_profile().fixed_assets:
+        project = self._projects.get(project_id)
+        if project is None:
+            raise StudioNotFoundError("project not found")
+        if slot in self.get_canon_profile(project.canon_profile_id).fixed_assets:
             raise StudioConflictError("global Canon slots cannot be overridden by a project")
         asset = self._assets.get(asset_id)
         if asset is None or asset.project_id != project_id:
@@ -2223,6 +2301,96 @@ class MemoryStudioRepository:
             default=None,
         )
 
+    def get_recovery_result(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto | None:
+        with _provider_association_lock:
+            event = next(
+                (
+                    event
+                    for event in self._job_events
+                    if event.job_id == job_id
+                    and event.payload.get("recoveryKey") == command.idempotency_key
+                ),
+                None,
+            )
+            if event is None:
+                return None
+            if (
+                event.payload.get("action") != command.action
+                or event.payload.get("providerTaskId") != command.provider_task_id
+            ):
+                raise StudioIdempotencyInputConflictError("恢复幂等键已用于不同操作。")
+            return self.get_job(job_id)
+
+    def associate_provider_task(
+        self, job_id: uuid.UUID, command: JobRecoveryCommand, evidence: dict[str, Any]
+    ) -> JobDto:
+        # Memory repository is intended for tests; a shared lock also makes its
+        # check-and-bind atomic for concurrent API requests.
+        with _provider_association_lock:
+            job = self.get_job(job_id)
+            if job is None:
+                raise StudioNotFoundError("job not found")
+            prior = next(
+                (
+                    event
+                    for event in self._job_events
+                    if event.job_id == job_id
+                    and event.payload.get("recoveryKey") == command.idempotency_key
+                ),
+                None,
+            )
+            if prior:
+                if (
+                    prior.payload.get("action") != command.action
+                    or prior.payload.get("providerTaskId") != command.provider_task_id
+                ):
+                    raise StudioIdempotencyInputConflictError("恢复幂等键已用于不同操作。")
+                return job
+            job.execution_summary()
+            if (
+                job.revision != command.expected_revision
+                or job.provider_task_id
+                or "lookup_provider_tasks" not in job.execution.available_actions
+            ):
+                raise StudioConflictError("任务状态已变化或不支持关联。")
+            if any(
+                other.provider == "ark" and other.provider_task_id == command.provider_task_id
+                for other in self._jobs.values()
+                if other.id != job_id
+            ):
+                raise StudioConflictError("云端任务已关联其他本地任务。")
+            now = datetime.now(UTC)
+            updated = job.model_copy(
+                update={
+                    "provider_task_id": command.provider_task_id,
+                    "status": "polling",
+                    "error": None,
+                    "updated_at": now,
+                    "next_action_at": now,
+                    "revision": job.revision + 1,
+                    "execution_facts": {
+                        **(job.execution_facts or {}),
+                        "stage": "query",
+                        "recoveryState": "automatic",
+                        "queryFailureCount": 0,
+                        "queryWindowStartedAt": now.isoformat(),
+                        "associationEvidence": evidence,
+                        "providerStatus": evidence["status"],
+                        "unverifiedParametersAttested": True,
+                    },
+                }
+            )
+            updated.execution_summary()
+            self._jobs[job_id] = updated
+            self._record_event(updated, "job.provider_task_associated")
+            self._job_events[-1].payload.update(
+                recoveryKey=command.idempotency_key,
+                action=command.action,
+                providerTaskId=command.provider_task_id,
+                evidence=evidence,
+            )
+            return updated
+
     def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
         job = self.get_job(job_id)
         if job is None:
@@ -2332,6 +2500,24 @@ class MemoryStudioRepository:
         self._edit_drafts[draft.id] = draft
         return draft
 
+    def update_video_edit_draft_input(
+        self, draft_id: uuid.UUID, expected_revision: int, editing_input: dict[str, Any]
+    ) -> VideoEditDraftDto:
+        with self._edit_draft_lock:
+            draft = self._edit_drafts.get(draft_id)
+            if draft is None:
+                raise StudioNotFoundError("video edit draft not found")
+            if draft.input_revision != expected_revision:
+                raise StudioConflictError("编辑输入已在其他页面变化，请重新加载后再保存。")
+            updated = draft.model_copy(
+                update={
+                    "editing_input": deepcopy(editing_input),
+                    "input_revision": expected_revision + 1,
+                }
+            )
+            self._edit_drafts[draft_id] = updated
+            return updated
+
     def get_video_edit_draft(self, draft_id: uuid.UUID) -> VideoEditDraftDto | None:
         return self._edit_drafts.get(draft_id)
 
@@ -2341,27 +2527,30 @@ class MemoryStudioRepository:
         expected_hash: str,
         repair_id: uuid.UUID | None,
     ) -> EditVersionDto:
-        existing = self.get_edit(edit.id)
-        if existing:
-            if existing.save_request_hash != edit.save_request_hash:
-                raise StudioIdempotencyInputConflictError("draft save input changed")
-            return existing
-        draft = self._edit_drafts.get(edit.edit_draft_id)
-        parent = self.get_edit(edit.parent_edit_version_id)
-        if (
-            draft is None
-            or parent is None
-            or draft.head_edit_version_id != parent.id
-            or parent.timeline_hash != expected_hash
-        ):
-            raise StudioConflictError("editing draft has changed")
-        edits = self._edits.setdefault(edit.project_id, [])
-        saved = edit.model_copy(update={"revision": len(edits) + 1})
-        edits.append(saved)
-        self._edit_drafts[draft.id] = draft.model_copy(update={"head_edit_version_id": saved.id})
-        if repair_id:
-            self.set_video_repair_status(repair_id, status="applied_to_draft")
-        return saved
+        with self._edit_draft_lock:
+            existing = self.get_edit(edit.id)
+            if existing:
+                if existing.save_request_hash != edit.save_request_hash:
+                    raise StudioIdempotencyInputConflictError("draft save input changed")
+                return existing
+            draft = self._edit_drafts.get(edit.edit_draft_id)
+            parent = self.get_edit(edit.parent_edit_version_id)
+            if (
+                draft is None
+                or parent is None
+                or draft.head_edit_version_id != parent.id
+                or parent.timeline_hash != expected_hash
+            ):
+                raise StudioConflictError("editing draft has changed")
+            edits = self._edits.setdefault(edit.project_id, [])
+            saved = edit.model_copy(update={"revision": len(edits) + 1})
+            edits.append(saved)
+            self._edit_drafts[draft.id] = draft.model_copy(
+                update={"head_edit_version_id": saved.id}
+            )
+            if repair_id:
+                self.set_video_repair_status(repair_id, status="applied_to_draft")
+            return saved
 
     def list_video_edit_drafts(self, project_id: uuid.UUID) -> list[VideoEditDraftDto]:
         return sorted(
@@ -2457,31 +2646,30 @@ class MemoryStudioRepository:
         return repair
 
     def create_video_repair_job(self, repair: VideoRepairDto, job: JobDto) -> JobDto:
-        existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
-        if existing is not None:
-            return existing
-        if any(
-            item.project_id == job.project_id
-            and item.kind == "regenerate_video_segment"
-            and item.status not in {"succeeded", "failed", "cancelled"}
-            for item in self._jobs.values()
-        ):
-            raise StudioConflictError("已有局部修改任务正在处理，请等待当前任务完成。")
-        if repair.preview.edit_draft_id:
-            draft = self._edit_drafts.get(repair.preview.edit_draft_id)
-            head = self.get_edit(draft.head_edit_version_id) if draft else None
-            if (
-                head is None
-                or head.id != repair.base_edit_version_id
-                or head.timeline_hash != repair.base_timeline_hash
-            ):
-                raise StudioConflictError("编辑草稿已经变化，请刷新后再操作。")
-        self._video_repairs[repair.id] = repair
-        try:
-            return self.create_job(job)
-        except Exception:
-            self._video_repairs.pop(repair.id, None)
-            raise
+        with self._edit_draft_lock:
+            existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
+            if existing is not None:
+                return existing
+            if job.supersedes_job_id is not None:
+                validate_video_edit_replacement(job, self.get_job(job.supersedes_job_id))
+            require_video_edit_available(
+                self.list_project_jobs(job.project_id), job.supersedes_job_id
+            )
+            if repair.preview.edit_draft_id:
+                draft = self._edit_drafts.get(repair.preview.edit_draft_id)
+                head = self.get_edit(draft.head_edit_version_id) if draft else None
+                if (
+                    head is None
+                    or head.id != repair.base_edit_version_id
+                    or head.timeline_hash != repair.base_timeline_hash
+                ):
+                    raise StudioConflictError("编辑草稿已经变化，请刷新后再操作。")
+            self._video_repairs[repair.id] = repair
+            try:
+                return self.create_job(job)
+            except Exception:
+                self._video_repairs.pop(repair.id, None)
+                raise
 
     def get_video_repair(self, repair_id: uuid.UUID) -> VideoRepairDto | None:
         return self._video_repairs.get(repair_id)

@@ -6,9 +6,17 @@ import logging
 import math
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
-from pydantic import Field, field_serializer, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_serializer,
+    model_serializer,
+    model_validator,
+)
 
 from catflow.application.job_execution import (
     GenerationPrepared,
@@ -21,6 +29,21 @@ from catflow.application.job_execution import (
     public_result,
     replacing_unknown,
     summarize_execution,
+)
+from catflow.application.provider_recovery import (
+    ProviderTaskLookupDto,
+    ProviderTaskReader,
+    submission_window,
+    task_candidate,
+)
+from catflow.application.video_edit import (
+    CANON_ROLES,
+    VideoEditDraftInputCommand,
+    VideoEditOptions,
+    VideoEditPlanSuggestion,
+    calculate_edit_window,
+    compile_edit_prompt,
+    planning_prompt,
 )
 from catflow.domain.billing import RateCardItem
 from catflow.domain.contract import ContractModel
@@ -38,6 +61,7 @@ from catflow.domain.models import (
     LifeClipSpec,
     LifeStoryProposalDraft,
     MicroEvent,
+    ProfessionalDirectorOutput,
     ProfessionalShotPlanDraft,
     ShotPlanDraft,
     ShotSpec,
@@ -69,8 +93,9 @@ from .continuity import (
     EpisodeContinuitySnapshotDto,
     SeriesAssetBindingDto,
     SeriesAssetBindingsPatchCommand,
+    compile_continuity_constraints,
 )
-from .image_generation import compile_provider_image_prompt
+from .media_prompt import compile_provider_media_prompt, validate_system_prompt
 from .project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -85,6 +110,7 @@ from .project_library import (
 )
 from .provider_config import ProviderRuntime
 from .series import (
+    SERIES_NORMALIZATION_REVISION,
     ProjectSeriesContextDto,
     SeriesCreateCommand,
     SeriesEpisodeDto,
@@ -138,7 +164,7 @@ from .video_generation import (
     VIDEO_PROMPT_COMPILER_REVISION,
     GenerationPromptSectionDto,
     compile_prompt_sentence,
-    compile_provider_video_prompt,
+    compile_shot_media_prompt,
     compile_video_generation_prompt,
     synchronize_professional_shot_summaries,
 )
@@ -146,6 +172,66 @@ from .video_generation import (
 
 class StudioConflictError(ValueError):
     pass
+
+
+class VideoEditInProgressDetail(ContractModel):
+    code: Literal["video_edit_in_progress"] = "video_edit_in_progress"
+    message: str
+    blocking_job_id: uuid.UUID = Field(alias="blockingJobId")
+    edit_draft_id: uuid.UUID | None = Field(alias="editDraftId")
+    video_repair_id: uuid.UUID | None = Field(alias="videoRepairId")
+
+
+class VideoEditConflictResponse(ContractModel):
+    detail: VideoEditInProgressDetail | str | dict[str, Any]
+    latest_preview: dict[str, Any] | None = Field(alias="latestPreview", default=None)
+
+
+class StudioVideoEditInProgressError(StudioConflictError):
+    def __init__(self, job: JobDto) -> None:
+        super().__init__("已有局部修改任务尚未结束，请先查看该任务。")
+        self.detail = {
+            "code": "video_edit_in_progress",
+            "message": str(self),
+            "blockingJobId": str(job.id),
+            "editDraftId": job.frozen_input.get("editDraftId"),
+            "videoRepairId": str(job.video_repair_id) if job.video_repair_id else None,
+        }
+
+
+def require_video_edit_available(
+    jobs: list[JobDto], replacement_job_id: uuid.UUID | None = None
+) -> None:
+    """Unknown ancestors stop blocking only while they remain unknown."""
+    superseded = {job.supersedes_job_id for job in jobs}
+    for job in jobs:
+        if job.kind != "regenerate_video_segment" or job.status in {
+            "succeeded", "failed", "cancelled"
+        }:
+            continue
+        if job.status == "submission_unknown" and (
+            job.id == replacement_job_id or job.id in superseded
+        ):
+            continue
+        raise StudioVideoEditInProgressError(job)
+
+
+def validate_video_edit_replacement(job: JobDto, original: JobDto | None) -> None:
+    consent = job.frozen_input.get("replacementConsent") or {}
+    if (
+        original is None
+        or original.project_id != job.project_id
+        or original.kind != job.kind
+        or original.frozen_input.get("editDraftId") != job.frozen_input.get("editDraftId")
+        or original.status != "submission_unknown"
+        or original.successor_job_ids
+        or consent.get("jobId") != str(original.id)
+        or consent.get("acknowledgeDuplicateCharge") is not True
+        or not consent.get("inputHash")
+        or consent.get("inputHash") != job.frozen_input.get("executionInputHash")
+        or consent.get("submissionKey") != job.idempotency_key
+    ):
+        raise StudioConflictError("旧任务状态或替代确认已变化，请重新准备。")
 
 
 class StudioIdempotencyInputConflictError(StudioConflictError):
@@ -465,8 +551,16 @@ FIXED_CANON_ROLES: tuple[FixedCanonRole, ...] = (
 )
 
 
+class CanonCatIdentity(ContractModel):
+    identity: str = Field(min_length=1, max_length=1000)
+    locked_traits: list[str] = Field(alias="lockedTraits", min_length=1, max_length=30)
+
+
 class CanonRevisionCreateCommand(ContractModel):
     fixed_assets: dict[FixedCanonRole, uuid.UUID] = Field(alias="fixedAssets")
+    base_profile_id: uuid.UUID | None = Field(alias="baseProfileId", default=None)
+    activate: bool = True
+    cat: CanonCatIdentity | None = None
 
     @model_validator(mode="after")
     def require_all_roles(self) -> CanonRevisionCreateCommand:
@@ -484,6 +578,14 @@ class CanonProfileDto(ContractModel):
     profile: dict[str, Any]
     fixed_assets: dict[FixedCanonRole, AssetDto] = Field(alias="fixedAssets")
     created_at: datetime = Field(alias="createdAt")
+
+    @property
+    def cat_identity_prompt(self) -> str:
+        cat = self.profile.get("cat")
+        if not cat:
+            return "固定同一只灰白虎斑猫，保持毛色分区、眼睛、鼻口、环纹尾巴和正常四足结构"
+        identity = CanonCatIdentity.model_validate(cat)
+        return f"{identity.identity}，保持{'、'.join(identity.locked_traits)}"
 
 
 class ProjectSelectionDto(ContractModel):
@@ -640,6 +742,8 @@ class GenerationVideoSpecDto(ContractModel):
 
 
 class GenerationInputSourceDto(ContractModel):
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
+    canon_profile_hash: str | None = Field(alias="canonProfileHash", default=None)
     edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
     base_edit_version_id: uuid.UUID | None = Field(alias="baseEditVersionId", default=None)
     story_version_id: uuid.UUID | None = Field(alias="storyVersionId", default=None)
@@ -649,7 +753,16 @@ class GenerationInputSourceDto(ContractModel):
     base_timeline_hash: str | None = Field(alias="baseTimelineHash", default=None)
 
 
-class SegmentEditInputDto(ContractModel):
+class SegmentEditInputDto(VideoEditOptions):
+    @model_serializer(mode="wrap")
+    def serialize_versioned_fields(self, handler, info):
+        document = handler(self)
+        if self.edit_contract_version == 1:
+            for name, field in VideoEditOptions.model_fields.items():
+                if name not in {"end_state_policy", "desired_end_state"}:
+                    document.pop(field.alias if info.by_alias else name, None)
+        return document
+
     source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
     reference_preparation_job_id: uuid.UUID | None = Field(
         alias="referencePreparationJobId", default=None
@@ -667,7 +780,7 @@ class SegmentEditInputDto(ContractModel):
     anchor_start_frame: int | None = Field(alias="anchorStartFrame", default=None)
     anchor_end_frame: int | None = Field(alias="anchorEndFrame", default=None)
     base_edl: FrameEditTimeline | None = Field(alias="baseEdl", default=None)
-    end_state_policy: Literal["match_original", "replace"] = Field(
+    end_state_policy: Literal["follow_instruction", "match_original", "replace"] = Field(
         alias="endStatePolicy", default="match_original"
     )
     desired_end_state: str = Field(alias="desiredEndState", default="")
@@ -678,15 +791,20 @@ class SegmentEditInputDto(ContractModel):
 
 
 class GenerationInputSnapshotDto(ContractModel):
-    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
+    schema_version: Literal[1, 2, 3] = Field(alias="schemaVersion")
     kind: Literal["whole_video", "segment_edit"]
     state: Literal["preview", "submitted"]
     provider: str
     model: str
     capability_revision: str = Field(alias="capabilityRevision")
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
-    prompt: str
-    negative_prompt: str = Field(alias="negativePrompt")
+    prompt: Annotated[str, StringConstraints(strip_whitespace=False)]
+    compiled_provider_prompt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = (
+        Field(alias="compiledProviderPrompt", default=None)
+    )
+    negative_prompt: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(
+        alias="negativePrompt"
+    )
     prompt_summary: str | None = Field(alias="promptSummary", default=None)
     prompt_sections: list[GenerationPromptSectionDto] = Field(
         alias="promptSections", default_factory=list
@@ -704,7 +822,7 @@ class GenerationInputSnapshotDto(ContractModel):
 
 class ImageGenerationInputSnapshotDto(ContractModel):
     environment_draft: EnvironmentGenerationDraft | None = Field(alias="environmentDraft", default=None)
-    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
+    schema_version: Literal[1, 2, 3] = Field(alias="schemaVersion")
     state: Literal["preview", "submitted"]
     kind: Literal["environment"]
     subject_policy: Literal["empty_scene"] = Field(alias="subjectPolicy")
@@ -714,6 +832,7 @@ class ImageGenerationInputSnapshotDto(ContractModel):
     model: str
     capability_revision: str = Field(alias="capabilityRevision")
     prompt: str
+    compiled_provider_prompt: str | None = Field(alias="compiledProviderPrompt", default=None)
     negative_prompt: str = Field(alias="negativePrompt")
     references: list[GenerationInputReferenceDto]
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
@@ -722,6 +841,7 @@ class ImageGenerationInputSnapshotDto(ContractModel):
 
 
 class JobDto(ContractModel):
+    edit_plan: VideoEditPlanSuggestion | None = Field(alias="editPlan", default=None)
     execution: JobExecutionDto | None = None
     execution_facts: dict[str, Any] | None = Field(
         alias="executionFacts", default=None, exclude=True
@@ -737,6 +857,7 @@ class JobDto(ContractModel):
     kind: Literal[
         "plan_story",
         "plan_shots",
+        "plan_video_edit",
         "plan_series",
         "plan_series_segment",
         "plan_series_episode",
@@ -790,6 +911,8 @@ class JobDto(ContractModel):
 
     @model_validator(mode="after")
     def execution_summary(self) -> JobDto:
+        if self.kind == "plan_video_edit" and (self.provider_result or {}).get("editPlan"):
+            self.edit_plan = VideoEditPlanSuggestion.model_validate(self.provider_result["editPlan"])
         self.execution = summarize_execution(
             kind=self.kind,
             provider=self.provider,
@@ -869,6 +992,8 @@ class JobEventDto(ContractModel):
 
 
 class GenerationPreviewDto(ContractModel):
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
+    canon_profile_hash: str | None = Field(alias="canonProfileHash", default=None)
     generate_audio: bool = Field(alias="generateAudio", default=False)
     input_hash: str = Field(alias="inputHash")
     kind: Literal["video"] = "video"
@@ -876,6 +1001,7 @@ class GenerationPreviewDto(ContractModel):
     model: str
     capability_revision: str = Field(alias="capabilityRevision")
     prompt: str
+    compiled_provider_prompt: str | None = Field(alias="compiledProviderPrompt", default=None)
     negative_prompt: str = Field(alias="negativePrompt")
     prompt_summary: str = Field(alias="promptSummary")
     prompt_sections: list[GenerationPromptSectionDto] = Field(alias="promptSections")
@@ -903,6 +1029,7 @@ class AssetGenerationPreviewDto(ContractModel):
     model: str
     capability_revision: str = Field(alias="capabilityRevision")
     prompt: str
+    compiled_provider_prompt: str | None = Field(alias="compiledProviderPrompt", default=None)
     negative_prompt: str = Field(alias="negativePrompt")
     references: list[CompiledReference]
     expected_cost_micros: int | None = Field(alias="expectedCostMicros", default=None)
@@ -996,6 +1123,8 @@ class VideoEditDraftCreateCommand(ContractModel):
 
 
 class VideoEditDraftDto(ContractModel):
+    editing_input: dict[str, Any] = Field(alias="editingInput", default_factory=dict)
+    input_revision: int = Field(alias="inputRevision", default=0, ge=0)
     source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
     expected_source_timeline_hash: str | None = Field(
         alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
@@ -1111,7 +1240,7 @@ VideoRepairStatus = Literal[
 ]
 
 
-class SegmentRepairPreviewCommand(ContractModel):
+class SegmentRepairPreviewCommand(VideoEditOptions):
     source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
     expected_source_timeline_hash: str | None = Field(
         alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
@@ -1133,7 +1262,7 @@ class SegmentRepairPreviewCommand(ContractModel):
     issue_range: FrameRange = Field(alias="issueRange")
     instruction: str = Field(min_length=1, max_length=4_000)
     edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
-    end_state_policy: Literal["match_original", "replace"] = Field(
+    end_state_policy: Literal["follow_instruction", "match_original", "replace"] = Field(
         alias="endStatePolicy", default="match_original"
     )
     desired_end_state: str = Field(alias="desiredEndState", default="", max_length=2000)
@@ -1142,18 +1271,24 @@ class SegmentRepairPreviewCommand(ContractModel):
     def require_supported_issue_duration(self) -> SegmentRepairPreviewCommand:
         if self.end_state_policy == "replace" and not self.desired_end_state.strip():
             raise ValueError("replacing the ending requires desiredEndState")
-        if self.issue_range.duration_frames < MIN_GENERATION_FRAMES:
+        if self.edit_contract_version == 1 and self.issue_range.duration_frames < MIN_GENERATION_FRAMES:
             raise ValueError("新生成选区至少 4 秒（96 帧）；历史片段仍可查看。")
         if self.issue_range.duration_frames > MAX_ISSUE_FRAMES:
             raise ValueError("issueRange must not exceed 15 seconds (360 frames)")
         return self
 
 
+class VideoEditPlanCommand(SegmentRepairPreviewCommand, PaidJobCommand):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=False)
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+
 class SegmentReferencePreparationCommand(SegmentRepairPreviewCommand):
     retry_after_job_id: uuid.UUID | None = Field(alias="retryAfterJobId", default=None)
 
 
-class SegmentRepairPreviewDto(ContractModel):
+class SegmentRepairPreviewDto(VideoEditOptions):
+    media_input_hash: str | None = Field(alias="mediaInputHash", default=None)
     source_result_job_id: uuid.UUID | None = Field(alias="sourceResultJobId", default=None)
     expected_source_timeline_hash: str | None = Field(
         alias="expectedSourceTimelineHash", default=None, pattern=r"^[a-f0-9]{64}$"
@@ -1186,7 +1321,9 @@ class SegmentRepairPreviewDto(ContractModel):
     model: str
     capability_revision: str = Field(alias="capabilityRevision")
     instruction: str
+    warnings: list[dict[str, str]] = Field(default_factory=list)
     prompt: str
+    compiled_provider_prompt: str | None = Field(alias="compiledProviderPrompt", default=None)
     negative_prompt: str = Field(alias="negativePrompt")
     image_references: list[SegmentRepairImageReferenceDto] = Field(alias="imageReferences")
     video_reference: SegmentRepairVideoReferenceDto | None = Field(
@@ -1198,7 +1335,7 @@ class SegmentRepairPreviewDto(ContractModel):
     input_snapshot: GenerationInputSnapshotDto | None = Field(alias="inputSnapshot", default=None)
     edit_draft_id: uuid.UUID | None = Field(alias="editDraftId", default=None)
     base_edl: FrameEditTimeline | None = Field(alias="baseEdl", default=None)
-    end_state_policy: Literal["match_original", "replace"] = Field(
+    end_state_policy: Literal["follow_instruction", "match_original", "replace"] = Field(
         alias="endStatePolicy", default="match_original"
     )
     desired_end_state: str = Field(alias="desiredEndState", default="")
@@ -1236,6 +1373,7 @@ class VideoRepairDto(ContractModel):
 
 
 class SegmentRepairCreateCommand(SegmentRepairPreviewCommand, PaidJobCommand):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=False)
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
@@ -1274,6 +1412,8 @@ class StudioRepository(Protocol):
     def list_rate_cards(self) -> list[RateCardRevisionDto]: ...
 
     def current_canon_profile(self) -> CanonProfileDto: ...
+
+    def get_canon_profile(self, profile_id: uuid.UUID) -> CanonProfileDto: ...
 
     def register_canon_asset(
         self,
@@ -1328,10 +1468,7 @@ class StudioRepository(Protocol):
     def materialize_series_plan_version(
         self,
         series_id: uuid.UUID,
-        *,
-        base_plan_version_id: uuid.UUID,
-        plan: SeriesPlanDraft,
-        idempotency_key: str,
+        command: SeriesPlanMaterializeCommand,
     ) -> SeriesPlanVersionDto: ...
 
     def list_series_plan_versions(self, series_id: uuid.UUID) -> list[SeriesPlanVersionDto]: ...
@@ -1551,6 +1688,14 @@ class StudioRepository(Protocol):
 
     def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto: ...
 
+    def get_recovery_result(
+        self, job_id: uuid.UUID, command: JobRecoveryCommand
+    ) -> JobDto | None: ...
+
+    def associate_provider_task(
+        self, job_id: uuid.UUID, command: JobRecoveryCommand, evidence: dict[str, Any]
+    ) -> JobDto: ...
+
     def cancel_job(self, job_id: uuid.UUID) -> JobDto: ...
 
     def list_job_events(self, *, after_event_id: int, limit: int = 100) -> list[JobEventDto]: ...
@@ -1564,6 +1709,10 @@ class StudioRepository(Protocol):
     ) -> VideoEditDraftDto: ...
 
     def get_video_edit_draft(self, draft_id: uuid.UUID) -> VideoEditDraftDto | None: ...
+
+    def update_video_edit_draft_input(
+        self, draft_id: uuid.UUID, expected_revision: int, editing_input: dict[str, Any]
+    ) -> VideoEditDraftDto: ...
 
     def save_video_draft_revision(
         self,
@@ -1631,8 +1780,10 @@ class StudioService:
         repository: StudioRepository,
         *,
         provider_runtime: ProviderRuntime | None = None,
+        provider_task_reader: ProviderTaskReader | None = None,
         project_library_repository: ProjectLibraryRepository | None = None,
     ) -> None:
+        self._provider_task_reader = provider_task_reader
         self._repository = repository
         self._provider_runtime = provider_runtime or ProviderRuntime.from_env(
             segment_reference_publishing_ready=False
@@ -1677,6 +1828,9 @@ class StudioService:
     def current_canon(self) -> CanonProfileDto:
         return self._repository.current_canon_profile()
 
+    def get_canon(self, profile_id: uuid.UUID) -> CanonProfileDto:
+        return self._repository.get_canon_profile(profile_id)
+
     def register_canon_asset(
         self,
         *,
@@ -1699,8 +1853,10 @@ class StudioService:
         return self._repository.list_projects()
 
     def create_story_series(self, command: SeriesCreateCommand) -> StorySeriesDto:
+        profile_id = command.canon_profile_id or self._repository.active_canon_profile_id()
+        self._repository.get_canon_profile(profile_id)
         return self._repository.create_story_series(
-            command, canon_profile_id=self._repository.active_canon_profile_id()
+            command, canon_profile_id=profile_id
         )
 
     def list_story_series(self) -> list[StorySeriesDto]:
@@ -1724,9 +1880,7 @@ class StudioService:
 
     def preview_series_plan(self, series_id: uuid.UUID) -> SeriesPlanPreviewDto:
         series = self.get_story_series(series_id)
-        canon = self._repository.current_canon_profile()
-        if canon.id != series.canon_profile_id:
-            raise StudioConflictError("series Canon changed")
+        canon = self._repository.get_canon_profile(series.canon_profile_id)
         return compile_series_plan_preview(
             series,
             source_beats=self._repository.list_series_source_beats(series_id),
@@ -1771,6 +1925,7 @@ class StudioService:
                     "prompt": preview.prompt,
                     "outputSchema": preview.output_schema,
                     "seriesPlannerPromptRevision": preview.prompt_revision,
+                    "normalizationRevision": SERIES_NORMALIZATION_REVISION,
                     "capabilityRevision": preview.capability_revision,
                 },
                 resultAssetIds=[],
@@ -1803,9 +1958,7 @@ class StudioService:
             > series.planned_episode_count
         ):
             raise StudioConflictError("planning segment exceeds the fixed series length")
-        canon = self._repository.current_canon_profile()
-        if canon.id != series.canon_profile_id:
-            raise StudioConflictError("series Canon changed")
+        canon = self._repository.get_canon_profile(series.canon_profile_id)
         return compile_series_plan_segment_preview(
             series,
             active_plan=active_plan,
@@ -1868,6 +2021,7 @@ class StudioService:
                     "prompt": preview.prompt,
                     "outputSchema": preview.output_schema,
                     "seriesPlannerPromptRevision": preview.prompt_revision,
+                    "normalizationRevision": SERIES_NORMALIZATION_REVISION,
                     "capabilityRevision": preview.capability_revision,
                 },
                 resultAssetIds=[],
@@ -1978,10 +2132,7 @@ class StudioService:
         if command.base_plan_version_id != plan_version_id:
             raise StudioConflictError("base series plan version changed")
         return self._repository.materialize_series_plan_version(
-            series_id,
-            base_plan_version_id=plan_version_id,
-            plan=command.plan,
-            idempotency_key=command.idempotency_key,
+            series_id, command,
         )
 
     def activate_series_plan(
@@ -2085,9 +2236,7 @@ class StudioService:
             incoming = previous.outline.ending_state
             if carryover:
                 incoming = f"{incoming}；需要承接：{carryover}"
-        canon = self._repository.current_canon_profile()
-        if canon.id != series.canon_profile_id:
-            raise StudioConflictError("series Canon changed")
+        canon = self._repository.get_canon_profile(series.canon_profile_id)
         source_segment = None
         if series.adaptation_policy == "condense_mainline":
             source_segment = next(
@@ -2522,7 +2671,7 @@ class StudioService:
                 "capabilityRevision": self._provider_runtime.capability_revision,
                 "prompt": prompt,
                 "outputSchema": output_schema,
-                "plannerPromptRevision": "catflow-life-planner-v2",
+                "plannerPromptRevision": "catflow-life-planner-v3-spatial",
             }
         )
         now = datetime.now(UTC)
@@ -2543,7 +2692,7 @@ class StudioService:
                 "targetDurationSeconds": project.target_duration_seconds,
                 "prompt": prompt,
                 "outputSchema": output_schema,
-                "plannerPromptRevision": "catflow-life-planner-v2",
+                "plannerPromptRevision": "catflow-life-planner-v3-spatial",
                 "capabilityRevision": self._provider_runtime.capability_revision,
             },
             resultAssetIds=[],
@@ -2580,6 +2729,19 @@ class StudioService:
         )
         if existing is not None:
             return existing
+        if job.frozen_input.get("outputContractRevision") == DIRECTOR_OUTPUT_CONTRACT:
+            # Manual result repair shares the same generation contract as Provider output.
+            # exclude_unset preserves the distinction between missing and explicitly empty lists.
+            try:
+                payload = ProfessionalDirectorOutput.model_validate(
+                    payload.model_dump(by_alias=True, exclude_unset=True)
+                )
+            except ValidationError as exc:
+                details = "；".join(
+                    f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                    for error in exc.errors(include_input=False, include_url=False)
+                )
+                raise StudioValidationError(f"新版导演结果需要补充：{details}") from exc
         base_value = job.frozen_input.get("baseShotPlanVersionId")
         base_shot_plan_version_id = uuid.UUID(str(base_value)) if base_value else None
         draft = ProfessionalShotPlanDraft(
@@ -2697,7 +2859,7 @@ class StudioService:
             dialoguePolicy=story.dialogue_policy,
             environmentIntent=story.environment_intent,
         )
-        prompt = _director_prompt(project, story)
+        prompt = _director_prompt(project, story, self.get_canon(project.canon_profile_id).cat_identity_prompt)
         output_schema = director_provider_output_schema()
         selection_hash = self.current_selection_hash(project_id)
         base_shot_plan = self._repository.active_shot_plan(project_id)
@@ -2715,7 +2877,7 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v5-contract",
+            "directorPromptRevision": "catflow-director-v6-spatial",
             "outputContractRevision": DIRECTOR_OUTPUT_CONTRACT,
             "normalizationRevision": DIRECTOR_NORMALIZATION_REVISION,
             "inputInstruction": "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
@@ -2851,27 +3013,19 @@ class StudioService:
                 {"assetId": frame["assetId"], "sha256": frame["sha256"], "role": "first_frame"}
             ]
         duration = max(4, shot["durationSeconds"])
-        shot_description = {key: value for key, value in shot.items() if key != "confirmedFrame"}
+        shot_spec = ShotSpec.model_validate(shot)
+        try:
+            compiled = compile_shot_media_prompt(shot=shot_spec, initial_frame=not is_video)
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
         prompt = (
-            (
-                f"生成单个镜头视频，目标取用{shot['durationSeconds']}秒，模型输出{duration}秒。"
-                "严格从给定首帧开始，按分镜执行动作与已有声音设计，不重复动作填时长。"
-                if is_video
-                else (
-                    "生成9:16、2K的镜头起始画面，允许儿童和猫咪。"
-                    "只画动作开始前的状态，不能提前完成目标动作。"
-                )
-            )
-            + f"故事约束：{context['storyBody']}。场景意图：{context['environmentIntent']}。"
-            + (
-                "沿用场景参考布局。"
-                if shot["environmentUse"] == "preserve_layout"
-                else "保持场景外观与空间关系，允许按照镜头重新构图。"
-            )
-            + "图片按实际清单承担职责："
-            + "、".join(item["role"] for item in references)
-            + "。镜头执行设计："
-            + json.dumps(shot_description, ensure_ascii=False)
+            f"生成单个镜头视频，目标取用{shot['durationSeconds']}秒，模型输出{duration}秒。"
+            "严格从给定首帧开始，不重复动作填时长。\n"
+            if is_video else "生成9:16、2K的镜头起始画面。\n"
+        ) + compiled.prompt
+        final_prompt = compile_provider_media_prompt(
+            prompt=prompt, negative_prompt=compiled.negative_prompt,
+            reference_roles=tuple(item["role"] for item in references),
         )
         frozen = {
             "purpose": command.purpose,
@@ -2885,13 +3039,15 @@ class StudioService:
             "referenceRoles": [r["role"] for r in references],
             "referenceSha256": [r["sha256"] for r in references],
             "prompt": prompt,
-            "negativePrompt": _default_asset_negative_prompt(),
+            "negativePrompt": compiled.negative_prompt,
+            "compiledProviderPrompt": final_prompt,
+            "providerPromptVersion": 1,
             "provider": self._provider_runtime.provider,
             "model": self._provider_runtime.video_model
             if is_video
             else self._provider_runtime.image_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
-            "promptCompilerRevision": "catflow-shot-production-v1",
+            "promptCompilerRevision": "catflow-shot-production-v2",
             "generationMode": "from_frame" if is_video else "references",
             "durationSeconds": duration if is_video else None,
             "targetDurationFrames": context["targetDurationFrames"],
@@ -2903,6 +3059,12 @@ class StudioService:
             "inputHash": _hash_document(frozen),
             "expectedCostMicros": None,
             "costEstimateStatus": "unmetered_paid",
+            "warnings": [
+                {"code": risk.code, "message": risk.message} for risk in shot_spec.generation_risks
+            ] + ([] if shot_spec.camera_spatial_relation else [{
+                "code": "legacy_spatial_design",
+                "message": "旧分镜尚未补充机位空间关系，请检查角色归属、接触与参考图状态。"
+            }]),
         }
 
     @generation_request
@@ -3272,10 +3434,26 @@ class StudioService:
             ),
             None,
         )
+        previous_validation = (job.provider_result or {}).get("validation") or {}
+        # A manually resolved candidate owns its original validation evidence.
+        if existing is not None and previous_validation.get("manualResolution") is not None:
+            return existing
+        if (
+            existing is not None
+            and previous_validation.get("normalizationRevision") == DIRECTOR_NORMALIZATION_REVISION
+        ):
+            return existing
+        normalized = normalize_director_result(
+            provider_payload,
+            output_contract_revision=job.frozen_input.get(
+                "outputContractRevision", "professional-director-v2"
+            ),
+        )
+        self.record_shot_plan_generation_validation(job_id, normalized)
+        # Explicit recovery also refreshes audit metadata for an existing version.
+        # Revalidation never replaces that version or changes its review status.
         if existing is not None:
             return existing
-        normalized = normalize_director_result(provider_payload)
-        self.record_shot_plan_generation_validation(job_id, normalized)
         pending_candidate = next(
             (
                 plan
@@ -3680,14 +3858,7 @@ class StudioService:
         )
         continuity_constraints: list[str] = []
         if confirmed_continuity is not None:
-            continuity_constraints.append(
-                "跨集连续性：必须承接已确认的上一集结束状态："
-                + json.dumps(
-                    confirmed_continuity.state.model_dump(mode="json", by_alias=True),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-            )
+            continuity_constraints.extend(compile_continuity_constraints(confirmed_continuity))
             if any(
                 reference.role.startswith("previous_episode_") and reference.included
                 for reference in compiled.references
@@ -3702,18 +3873,22 @@ class StudioService:
                 "该视频只负责服装、道具、位置、时间、光线与直接接镜；"
                 "不得复制上一集的镜头调度、动作节奏或构图，也不得取代固定五张图片参考。"
             )
+        canon = self.get_canon(project.canon_profile_id)
         compiled_prompt = compile_video_generation_prompt(
             project_title=project.title,
             target_duration_seconds=project.target_duration_seconds,
             shots=shot_plan.shots,
             director_treatment=shot_plan.director_treatment,
             continuity_constraints=tuple(continuity_constraints),
+            cat_identity=canon.cat_identity_prompt,
         )
         prompt = compiled_prompt.prompt
         negative_prompt = compiled_prompt.negative_prompt
-        compiled_provider_prompt = compile_provider_video_prompt(
+        compiled_provider_prompt = compile_provider_media_prompt(
             prompt=prompt,
             negative_prompt=negative_prompt,
+            reference_roles=tuple(item.role for item in compiled.references if item.included),
+            video_reference="previous_episode" if include_previous_episode_video else None,
         )
         document = {
             "projectId": str(project_id),
@@ -3729,6 +3904,8 @@ class StudioService:
             ],
             "compiledProviderPrompt": compiled_provider_prompt,
             "promptCompilerRevision": VIDEO_PROMPT_COMPILER_REVISION,
+            "canonProfileId": str(canon.id),
+            "canonProfileHash": canon.profile_hash,
             "references": [
                 reference.model_dump(mode="json", by_alias=True)
                 for reference in compiled.references
@@ -3752,6 +3929,8 @@ class StudioService:
         }
         input_hash = _hash_document(document)
         preview = GenerationPreviewDto(
+            canonProfileId=canon.id,
+            canonProfileHash=canon.profile_hash,
             inputHash=input_hash,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.video_model,
@@ -3760,6 +3939,7 @@ class StudioService:
             negativePrompt=negative_prompt,
             promptSummary=compiled_prompt.prompt_summary,
             promptSections=list(compiled_prompt.prompt_sections),
+            compiledProviderPrompt=compiled_provider_prompt,
             references=compiled.references,
             videoReferences=video_references,
             expectedCostMicros=None,
@@ -3777,6 +3957,17 @@ class StudioService:
                 {"code": risk.code, "message": risk.message}
                 for shot in shot_plan.shots
                 for risk in shot.generation_risks
+            ] + [
+                {"code": risk.code, "message": risk.message}
+                for risk in (shot_plan.director_treatment.feasibility_warnings
+                             if shot_plan.director_treatment else [])
+            ] + [
+                {
+                    "code": "legacy_spatial_design",
+                    "message": f"镜头{shot.order}尚未补充机位空间关系，当前使用兼容编译，"
+                    "请检查交互归属与参考图状态。",
+                }
+                for shot in shot_plan.shots if not shot.camera_spatial_relation
             ],
         )
         return preview.model_copy(
@@ -3873,9 +4064,17 @@ class StudioService:
                 negative_prompt = _environment_negative_prompt()
         else:
             compiled = compile_references(references, maximum_references=4)
-            prompt = _asset_prompt(project, command.kind)
+            prompt = _asset_prompt(project, command.kind, self.get_canon(project.canon_profile_id).cat_identity_prompt)
             negative_prompt = _default_asset_negative_prompt()
+        if not (environment_draft and environment_draft.mode == "custom"):
+            validate_system_prompt(prompt, source="asset.prompt")
+        compiled_provider_prompt = compile_provider_media_prompt(
+            prompt=prompt, negative_prompt=negative_prompt,
+            reference_roles=tuple(item.role for item in compiled.references if item.included),
+        )
         document = {
+            "compiledProviderPrompt": compiled_provider_prompt,
+            "providerPromptVersion": 1,
             "projectId": str(project_id),
             "canonProfileId": str(project.canon_profile_id),
             "kind": command.kind,
@@ -3911,6 +4110,7 @@ class StudioService:
             model=self._provider_runtime.image_model,
             capabilityRevision=self._provider_runtime.capability_revision,
             prompt=prompt,
+            compiledProviderPrompt=compiled_provider_prompt,
             negativePrompt=negative_prompt,
             references=compiled.references,
             expectedCostMicros=None,
@@ -3963,10 +4163,8 @@ class StudioService:
                     "role": preview.kind,
                     "prompt": preview.prompt,
                     "negativePrompt": preview.negative_prompt,
-                    "compiledProviderPrompt": compile_provider_image_prompt(
-                        prompt=preview.prompt,
-                        negative_prompt=preview.negative_prompt,
-                    ),
+                    "compiledProviderPrompt": preview.compiled_provider_prompt,
+                    "providerPromptVersion": 1,
                     "references": [
                         item.model_dump(mode="json", by_alias=True) for item in preview.references
                     ],
@@ -4032,7 +4230,7 @@ class StudioService:
             "candidateSha256": candidate.sha256,
             "candidateRole": candidate.role,
             "references": references,
-            "canonProfileId": str(self.current_canon_profile_id()),
+            "canonProfileId": str(self._require_project(project_id).canon_profile_id),
             "referenceAssetIds": [reference["assetId"] for reference in references],
         }
         if candidate.role == "environment":
@@ -4114,15 +4312,15 @@ class StudioService:
             inputSnapshot=input_snapshot,
             frozenInput={
                 "inputSnapshot": input_snapshot,
+                "canonProfileId": str(preview.canon_profile_id),
+                "canonProfileHash": preview.canon_profile_hash,
                 "storyVersionId": str(preview.story_version_id),
                 "shotPlanVersionId": str(preview.shot_plan_version_id),
                 "selectionHash": preview.selection_hash,
                 "prompt": preview.prompt,
                 "negativePrompt": preview.negative_prompt,
-                "compiledProviderPrompt": compile_provider_video_prompt(
-                    prompt=preview.prompt,
-                    negative_prompt=preview.negative_prompt,
-                ),
+                "compiledProviderPrompt": preview.compiled_provider_prompt,
+                "providerPromptVersion": 1,
                 "references": [
                     item.model_dump(mode="json", by_alias=True) for item in preview.references
                 ],
@@ -4904,17 +5102,215 @@ class StudioService:
             edit, command.expected_timeline_hash, command.repair_id
         )
 
+    def update_video_edit_draft_input(
+        self, project_id: uuid.UUID, draft_id: uuid.UUID, command: VideoEditDraftInputCommand
+    ) -> VideoEditDraftDto:
+        draft = self.get_video_edit_draft(project_id, draft_id)
+        value = command.editing_input
+        try:
+            VideoEditOptions.model_validate(
+                {
+                    key: value[key]
+                    for key in (field.alias for field in VideoEditOptions.model_fields.values())
+                    if key in value
+                }
+            )
+            for key, expected in (
+                ("projectId", project_id),
+                ("editDraftId", draft_id),
+                ("baseVideoAssetId", draft.source_video_asset_id),
+                ("sourceVideoAssetId", draft.source_video_asset_id),
+            ):
+                if value.get(key) is not None and uuid.UUID(str(value[key])) != expected:
+                    raise ValueError(f"{key} does not match this draft")
+            if value.get("baseEditVersionId"):
+                edit = self._repository.get_edit(uuid.UUID(str(value["baseEditVersionId"])))
+                if edit is None or edit.project_id != project_id or edit.edit_draft_id != draft_id:
+                    raise ValueError("baseEditVersionId does not belong to this draft")
+            for key in (
+                "sourceResultJobId",
+                "referencePreparationJobId",
+                "planSourceJobId",
+                "plannerJobId",
+            ):
+                if value.get(key):
+                    job = self.get_job(uuid.UUID(str(value[key])))
+                    if job.project_id != project_id:
+                        raise ValueError(f"{key} does not belong to this project")
+                    if key == "sourceResultJobId":
+                        _, _, source_timeline = self._completed_repair_result(
+                            project_id, job.id, value.get("expectedSourceTimelineHash")
+                        )
+                        if source_timeline.root_video_asset_id != draft.source_video_asset_id:
+                            raise ValueError("sourceResultJobId belongs to another source video")
+                    if (
+                        key == "referencePreparationJobId"
+                        and job.frozen_input.get("purpose") != "segment_reference"
+                    ):
+                        raise ValueError("referencePreparationJobId is not a reference preparation")
+                    if key in {"planSourceJobId", "plannerJobId"} and job.kind != "plan_video_edit":
+                        raise ValueError("planSourceJobId is not an edit plan")
+        except (ValueError, TypeError) as exc:
+            raise StudioValidationError(str(exc)) from exc
+        return self._repository.update_video_edit_draft_input(
+            draft_id, command.expected_revision, value
+        )
+
+    @generation_request
+    def create_video_edit_plan_job(
+        self, project_id: uuid.UUID, command: VideoEditPlanCommand
+    ) -> JobDto:
+        self._require_project(project_id)
+        base_video, active_edit, timeline, timeline_hash = self._repair_base_timeline(
+            project_id,
+            base_video_asset_id=command.base_video_asset_id,
+            expected_edit_version_id=command.base_edit_version_id,
+            edit_draft_id=command.edit_draft_id,
+        )
+        if command.source_result_job_id:
+            source_job, source_parent, timeline = self._completed_repair_result(
+                project_id, command.source_result_job_id, command.expected_source_timeline_hash
+            )
+            draft = (
+                self.get_video_edit_draft(project_id, command.edit_draft_id)
+                if command.edit_draft_id
+                else None
+            )
+            if not (
+                (
+                    active_edit
+                    and source_parent.id == active_edit.id
+                    and source_job.frozen_input["editDraftId"] == str(command.edit_draft_id)
+                )
+                or (
+                    draft
+                    and draft.source_result_job_id == source_job.id
+                    and timeline_hash == command.expected_source_timeline_hash
+                )
+            ):
+                raise StudioConflictError("来源结果与当前编辑草稿不一致。")
+            result_range = FrameRange.model_validate(
+                source_job.frozen_input.get("resultRange") or source_job.frozen_input["issueRange"]
+            )
+            if (
+                not result_range.start_frame
+                <= command.issue_range.start_frame
+                < command.issue_range.end_frame
+                <= result_range.end_frame
+            ):
+                raise StudioValidationError("继续修改的选区必须位于来源候选的有效范围内。")
+        elif command.expected_source_timeline_hash:
+            raise StudioValidationError("来源时间线哈希必须关联来源结果。")
+        try:
+            validate_issue_range(command.issue_range, total_frames=timeline.total_frames)
+        except ValueError as exc:
+            raise StudioValidationError(str(exc)) from exc
+        self._require_paid_calls_enabled()
+        issue = command.issue_range
+        frames = list(
+            dict.fromkeys(
+                [
+                    issue.start_frame,
+                    issue.start_frame + (issue.duration_frames - 1) // 4,
+                    issue.start_frame + (issue.duration_frames - 1) // 2,
+                    issue.start_frame + 3 * (issue.duration_frames - 1) // 4,
+                    issue.end_frame - 1,
+                ]
+            )
+        )
+        samples = [
+            {
+                "frameNumber": frame,
+                "seconds": frame / 24,
+                "purpose": "start"
+                if frame == issue.start_frame
+                else "end"
+                if frame == issue.end_frame - 1
+                else "process",
+            }
+            for frame in frames
+        ]
+        source_intent = []
+        cursor = 0
+        for segment in timeline.video_segments:
+            if cursor < issue.end_frame and cursor + segment.duration_frames > issue.start_frame:
+                asset = self.get_asset(segment.asset_id)
+                origin = (
+                    self._repository.get_job(asset.producing_job_id)
+                    if asset.producing_job_id
+                    else None
+                )
+                if origin and origin.input_snapshot:
+                    snapshot = origin.input_snapshot
+                    background = {
+                        "jobId": str(origin.id),
+                        "source": snapshot.source.model_dump(mode="json", by_alias=True),
+                        "summary": snapshot.prompt_summary,
+                    }
+                    if snapshot.segment_edit:
+                        background["previousEditIntent"] = {
+                            key: value
+                            for key, value in snapshot.segment_edit.model_dump(
+                                mode="json", by_alias=True
+                            ).items()
+                            if key
+                            in {
+                                "instruction",
+                                "startState",
+                                "actionProcess",
+                                "desiredEndState",
+                                "preserveContent",
+                                "avoidProblems",
+                            }
+                        }
+                    if background not in source_intent:
+                        source_intent.append(background)
+            cursor += segment.duration_frames
+        original = command.model_dump(
+            mode="json", by_alias=True, exclude={"idempotency_key", "validation_run_id"}
+        )
+        frozen = {
+            "editDraftId": str(command.edit_draft_id) if command.edit_draft_id else None,
+            "command": original,
+            "inputEdl": timeline.model_dump(mode="json", by_alias=True),
+            "inputTimelineHash": _hash_document(timeline.model_dump(mode="json", by_alias=True)),
+            "frameSamples": samples,
+            "sourceIntent": source_intent,
+            "prompt": planning_prompt(
+                intent=original, samples=samples, source_intent=source_intent
+            ),
+            "outputSchema": VideoEditPlanSuggestion.model_json_schema(by_alias=True),
+        }
+        now = datetime.now(UTC)
+        return self._create_job(
+            self._with_pricing_snapshot(
+                JobDto(
+                    id=uuid.uuid4(),
+                    projectId=project_id,
+                    kind="plan_video_edit",
+                    status="queued",
+                    inputHash=_hash_document(frozen),
+                    idempotencyKey=command.idempotency_key,
+                    provider=self._provider_runtime.provider,
+                    model=self._provider_runtime.planning_model,
+                    frozenInput=frozen,
+                    resultAssetIds=[],
+                    createdAt=now,
+                    updatedAt=now,
+                )
+            )
+        )
+
     def preview_video_repair(
         self, project_id: uuid.UUID, command: SegmentRepairPreviewCommand
     ) -> SegmentRepairPreviewDto:
         self._require_project(project_id)
+        jobs = self._repository.list_project_jobs(project_id)
+        replacement_id = next((job.id for job in jobs if replacing_unknown(job.id)), None)
+        require_video_edit_available(jobs, replacement_id)
         if command.generation_mode == "edit_existing":
             if reason := self._provider_runtime.segment_repair_block_reason:
                 raise StudioConflictError(reason)
-        elif self._provider_runtime.maximum_segment_image_references < (
-            2 if command.anchor_end_frame is not None else 1
-        ):
-            raise StudioConflictError("当前接口无法接受所选起止帧。")
         base_video, active_edit, timeline, timeline_hash = self._repair_base_timeline(
             project_id,
             base_video_asset_id=command.base_video_asset_id,
@@ -4964,7 +5360,16 @@ class StudioService:
             raise StudioConflictError("video repairs require a 24 fps editing timeline")
         try:
             validate_issue_range(command.issue_range, total_frames=timeline.total_frames)
-            if command.generation_mode == "from_frame":
+            if command.edit_contract_version == 2:
+                window = calculate_edit_window(
+                    command,
+                    command.issue_range,
+                    total_frames=timeline.total_frames,
+                    from_frame=command.generation_mode == "from_frame",
+                    reference_min_seconds=self._provider_runtime.minimum_segment_reference_seconds,
+                    reference_max_seconds=self._provider_runtime.maximum_segment_reference_seconds,
+                )
+            elif command.generation_mode == "from_frame":
                 window = SegmentGenerationWindow(
                     issueRange=command.issue_range,
                     generationRange=command.issue_range,
@@ -4996,11 +5401,15 @@ class StudioService:
                 raise StudioValidationError("选定参考帧超出父草稿范围。")
             if command.end_state_policy == "replace" and command.anchor_end_frame is not None:
                 raise StudioValidationError("原结尾需要替换时不能将其作为目标尾帧。")
-        selections = self._repository.current_selections(project_id)
-        canon_roles = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
+        selections = (
+            {}
+            if command.edit_contract_version == 2
+            else self._repository.current_selections(project_id)
+        )
+        canon_roles = CANON_ROLES
         if command.edit_draft_id and command.generation_mode == "edit_existing":
             draft = self.get_video_edit_draft(project_id, command.edit_draft_id)
-            if not draft.references_confirmed:
+            if not draft.references_confirmed and command.edit_contract_version == 1:
                 raise StudioConflictError("旧视频缺少完整冻结参考，请明确确认编辑参考后继续。")
             selections = {}
             for ref in draft.references:
@@ -5008,6 +5417,11 @@ class StudioService:
                 if asset.sha256 != ref["sha256"]:
                     raise StudioConflictError("editing reference content changed")
                 selections[ref["role"]] = asset
+        if command.edit_contract_version == 2:
+            selected_roles = (
+                command.reference_roles if command.reference_roles is not None else list(selections)
+            )
+            canon_roles = tuple(role for role in canon_roles if role in selected_roles)
         missing = [role for role in canon_roles if role not in selections]
         if missing and command.generation_mode == "edit_existing":
             raise StudioConflictError(f"missing segment repair references: {', '.join(missing)}")
@@ -5038,8 +5452,10 @@ class StudioService:
                 if command.generation_mode == "edit_existing"
             ],
         ]
-        if command.end_state_policy == "replace":
+        if command.end_state_policy in {"replace", "follow_instruction"}:
             image_references = [item for item in image_references if item.role != "anchor_out"]
+        if command.edit_contract_version == 2 and not command.include_in_anchor:
+            image_references = [item for item in image_references if item.role != "anchor_in"]
         video_reference = SegmentRepairVideoReferenceDto(
             role="reference_video",
             assetId=base_video.id,
@@ -5058,7 +5474,10 @@ class StudioService:
                     derived=True,
                 )
             ]
-            if command.anchor_end_frame is not None:
+            if command.anchor_end_frame is not None and (
+                command.edit_contract_version == 1
+                or command.issue_range.duration_frames == window.provider_duration_seconds * 24
+            ):
                 image_references.append(
                     SegmentRepairImageReferenceDto(
                         role="last_frame",
@@ -5069,60 +5488,113 @@ class StudioService:
                         derived=True,
                     )
                 )
-        negative_prompt = (
-            "真实摄影，3D塑料质感，身份漂移，儿童年龄或发型变化，猫咪毛色或虎斑变化，"
-            "额外肢体，融脸，断尾，错误四足，动作双影，背景或光线跳变，文字，Logo，水印，"
-            "静止停帧，原地互看，循环动作填充时长，叶片微距摄影污染"
-        )
-        prompt = _segment_edit_prompt(
-            instruction=command.instruction,
-            issue_range=command.issue_range,
-            generation_range=window.generation_range,
-            frame_rate=frame_rate,
-            end_state_policy=command.end_state_policy,
-            desired_end_state=command.desired_end_state,
-        )
-        compiler_revision = (
-            "segment-edit-v5"
-            if command.reference_preparation_job_id
-            else "segment-edit-v4"
-            if command.audio_mode is not None or command.generation_mode == "from_frame"
-            else "segment-edit-v3"
-        )
-        if command.generation_mode == "from_frame":
-            prompt = (
-                f"以提供的正确起始画面开始，重新生成动作：{command.instruction}。"
-                f"生成完整的{window.provider_duration_seconds}秒连续视频。"
-                "保持起始画面的角色、构图和画风，动作必须可见且完整发生。"
-                + (
-                    "以提供的确认正确的结束画面结束。"
-                    if command.anchor_end_frame is not None
-                    else "不要求返回原结尾。"
-                )
-                + (
-                    f"目标结束状态：{command.desired_end_state}。"
-                    if command.desired_end_state
-                    else ""
-                )
+        warnings = []
+        if len(image_references) > self._provider_runtime.maximum_segment_image_references:
+            raise StudioConflictError("所选参考图片超过当前接口支持数量，请减少参考。")
+        if command.edit_contract_version == 2:
+            compiler_revision = "segment-edit-v7"
+            negative_prompt = command.avoid_problems
+            prompt = compile_edit_prompt(
+                command,
+                instruction=command.instruction,
+                window=window,
+                image_roles=tuple(item.role for item in image_references),
+                from_frame=command.generation_mode == "from_frame",
+                generate_audio=command.audio_mode == "generate_candidate",
+                sound_description=command.sound_description,
             )
-        if command.audio_mode == "generate_candidate":
-            prompt += (
-                "\n生成与修改后的动作同步的环境、物件和动作声音。"
-                "不复用原视频中可能错误的混合声音。声音设计："
-                + (
-                    command.sound_description.strip()
-                    or "自然环境声及与可见动作同步的物件声、动作声。"
+            if (
+                command.generation_mode == "from_frame"
+                and command.anchor_end_frame is not None
+                and not any(item.role == "last_frame" for item in image_references)
+            ):
+                warnings.append(
+                    {
+                        "code": "last_frame_not_strict",
+                        "message": "仅采用部分候选，尾帧不作为严格结束帧；请用期望结束状态描述选区终点。",
+                    }
                 )
+            compiled_provider_prompt = prompt
+        else:
+            negative_prompt = (
+                "真实摄影，3D塑料质感，身份漂移，儿童年龄或发型变化，猫咪毛色或虎斑变化，"
+                "额外肢体，融脸，断尾，错误四足，动作双影，背景或光线跳变，文字，Logo，水印，"
+                "静止停帧，原地互看，循环动作填充时长，叶片微距摄影污染"
             )
-        elif command.audio_mode == "preserve_current":
-            prompt += "\n本次仅生成画面，接回时沿用本次修改起点的声音。"
-        if command.reference_preparation_job_id and command.generation_mode == "edit_existing":
-            prompt += (
-                "\n【参考与输出时长】\n"
-                f"实际参考为{window.generation_range.duration_frames / 24:.3f}秒，"
-                f"本次输出{window.provider_duration_seconds}秒。上述修改时间使用片段内坐标，"
-                "不要通过变速拉伸参考中的动作；额外输出时间自然延续，不以复制静帧填充。"
+            prompt = _segment_edit_prompt(
+                instruction=command.instruction,
+                issue_range=command.issue_range,
+                generation_range=window.generation_range,
+                frame_rate=frame_rate,
+                end_state_policy=command.end_state_policy,
+                desired_end_state=command.desired_end_state,
             )
+            compiler_revision = "segment-edit-v6"
+            if command.generation_mode == "from_frame":
+                prompt = (
+                    f"以提供的正确起始画面开始，重新生成动作：{command.instruction}。"
+                    f"生成完整的{window.provider_duration_seconds}秒连续视频。"
+                    "保持起始画面的角色、构图和画风，动作必须可见且完整发生。"
+                    + (
+                        "以提供的确认正确的结束画面结束。"
+                        if command.anchor_end_frame is not None
+                        else "不要求返回原结尾。"
+                    )
+                    + (
+                        f"目标结束状态：{command.desired_end_state}。"
+                        if command.desired_end_state
+                        else ""
+                    )
+                )
+            if command.audio_mode == "generate_candidate":
+                prompt += (
+                    "\n生成与修改后的动作同步的环境、物件和动作声音。"
+                    "不复用原视频中可能错误的混合声音。声音设计："
+                    + (
+                        command.sound_description.strip()
+                        or "自然环境声及与可见动作同步的物件声、动作声。"
+                    )
+                )
+            elif command.audio_mode == "preserve_current":
+                prompt += "\n本次仅生成画面，接回时沿用本次修改起点的声音。"
+            if command.reference_preparation_job_id and command.generation_mode == "edit_existing":
+                prompt += (
+                    "\n【参考与输出时长】\n"
+                    f"实际参考为{window.generation_range.duration_frames / 24:.3f}秒，"
+                    f"本次输出{window.provider_duration_seconds}秒。上述修改时间使用片段内坐标，"
+                    "不要通过变速拉伸参考中的动作；额外输出时间自然延续，不以复制静帧填充。"
+                )
+            compiled_provider_prompt = compile_provider_media_prompt(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                reference_roles=tuple(item.role for item in image_references),
+                video_reference="segment" if video_reference else None,
+            )
+        edit_options = (
+            command.model_dump(
+                mode="json", by_alias=True, include=set(VideoEditOptions.model_fields)
+            )
+            if command.edit_contract_version == 2
+            else {}
+        )
+        media_input_hash = (
+            _hash_document(
+                {
+                    "referenceRevision": 3,
+                    "inputEdl": timeline.model_dump(mode="json", by_alias=True),
+                    "generationMode": command.generation_mode,
+                    "generationRange": window.generation_range.model_dump(
+                        mode="json", by_alias=True
+                    ),
+                    "imageReferences": [
+                        item.model_dump(mode="json", by_alias=True) for item in image_references
+                    ],
+                    "extraction": {"fps": 24, "width": 480, "height": 854, "audio": False},
+                }
+            )
+            if command.edit_contract_version == 2
+            else None
+        )
         mode_input = {
             "sourceResultJobId": str(command.source_result_job_id)
             if command.source_result_job_id
@@ -5142,6 +5614,10 @@ class StudioService:
             "anchorEndFrame": command.anchor_end_frame,
         }
         document = {
+            **edit_options,
+            **({"mediaInputHash": media_input_hash} if media_input_hash else {}),
+            "compiledProviderPrompt": compiled_provider_prompt,
+            "providerPromptVersion": 1,
             **mode_input,
             "editDraftId": str(command.edit_draft_id) if command.edit_draft_id else None,
             "baseEdl": apply_timeline.model_dump(mode="json", by_alias=True),
@@ -5174,6 +5650,14 @@ class StudioService:
             "capabilityRevision": self._provider_runtime.capability_revision,
         }
         preview = SegmentRepairPreviewDto(
+            **{
+                key: value
+                for key, value in edit_options.items()
+                if key not in {"endStatePolicy", "desiredEndState"}
+            },
+            mediaInputHash=media_input_hash,
+            warnings=warnings,
+            compiledProviderPrompt=compiled_provider_prompt,
             **{key: value for key, value in mode_input.items() if key != "generateAudio"},
             editDraftId=command.edit_draft_id,
             baseEdl=apply_timeline,
@@ -5210,7 +5694,14 @@ class StudioService:
                 or preparation.kind != "extract_continuity_frames"
                 or preparation.status != "succeeded"
                 or preparation.frozen_input.get("purpose") != "segment_reference"
-                or preparation.frozen_input.get("previewHash") != expected_preview.input_hash
+                or preparation.frozen_input.get(
+                    "mediaInputHash" if command.edit_contract_version == 2 else "previewHash"
+                )
+                != (
+                    expected_preview.media_input_hash
+                    if command.edit_contract_version == 2
+                    else expected_preview.input_hash
+                )
             ):
                 raise StudioConflictError("实际参考尚未完成或不再对应当前修改输入，请重新准备。")
             prepared = {
@@ -5276,22 +5767,26 @@ class StudioService:
         frozen = {
             **preview.model_dump(mode="json", by_alias=True, exclude={"input_snapshot"}),
             "purpose": "segment_reference",
-            "referenceRevision": 2,
+            "referenceRevision": 3 if command.edit_contract_version == 2 else 2,
             "previewHash": preview.input_hash,
             "command": clean.model_dump(mode="json", by_alias=True),
         }
-        key = "segment-reference:" + preview.input_hash
+        reference_hash = preview.media_input_hash or preview.input_hash
+        key = "segment-reference:" + reference_hash
         if command.retry_after_job_id:
             failed = self.get_job(command.retry_after_job_id)
             if (
                 failed.project_id != project_id
                 or failed.provider != "local_ffmpeg"
                 or failed.status not in {"failed", "cancelled"}
-                or failed.frozen_input.get("previewHash") != preview.input_hash
+                or failed.frozen_input.get(
+                    "mediaInputHash" if command.edit_contract_version == 2 else "previewHash"
+                )
+                != reference_hash
             ):
                 raise StudioConflictError("只能重试当前输入已失败的本地参考准备。")
             key = "reference-retry:" + _hash_document(
-                {"hash": preview.input_hash, "failed": str(failed.id)}
+                {"hash": reference_hash, "failed": str(failed.id)}
             )
         now = datetime.now(UTC)
         return self._create_job(
@@ -5300,10 +5795,14 @@ class StudioService:
                 projectId=project_id,
                 kind="extract_continuity_frames",
                 status="queued",
-                inputHash=_hash_document(frozen),
+                inputHash=reference_hash
+                if command.edit_contract_version == 2
+                else _hash_document(frozen),
                 idempotencyKey=key,
                 provider="local_ffmpeg",
-                model="ffmpeg-segment-reference-v2",
+                model="ffmpeg-segment-reference-v3"
+                if command.edit_contract_version == 2
+                else "ffmpeg-segment-reference-v2",
                 expectedCostMicros=0,
                 frozenInput=frozen,
                 resultAssetIds=[],
@@ -5317,6 +5816,18 @@ class StudioService:
         self, project_id: uuid.UUID, command: SegmentRepairCreateCommand
     ) -> JobDto:
         self._require_project(project_id)
+        existing = next(
+            (job for job in self._repository.list_project_jobs(project_id)
+             if job.idempotency_key == command.idempotency_key),
+            None,
+        )
+        if existing is not None:
+            if (
+                existing.kind != "regenerate_video_segment"
+                or existing.input_hash != command.expected_input_hash
+            ):
+                raise StudioIdempotencyInputConflictError()
+            return existing
         if not command.reference_preparation_job_id:
             raise StudioConflictError("请先准备并检查实际参考，再提交付费生成。")
         preview = self.preview_video_repair(
@@ -5368,6 +5879,8 @@ class StudioService:
                 expectedCostMicros=preview.expected_cost_micros,
                 inputSnapshot=input_snapshot,
                 frozenInput={
+                    **(preview.model_dump(mode="json", by_alias=True, include=set(VideoEditOptions.model_fields)) if preview.edit_contract_version == 2 else {}),
+                    "mediaInputHash": preview.media_input_hash,
                     "editDraftId": str(preview.edit_draft_id) if preview.edit_draft_id else None,
                     "autoPrepareResult": True,
                     "referencePreparationJobId": str(preview.reference_preparation_job_id),
@@ -5406,6 +5919,8 @@ class StudioService:
                     "providerDurationSeconds": preview.provider_duration_seconds,
                     "instruction": preview.instruction,
                     "prompt": preview.prompt,
+                    "compiledProviderPrompt": preview.compiled_provider_prompt,
+                    "providerPromptVersion": 1,
                     "negativePrompt": preview.negative_prompt,
                     "imageReferences": [
                         item.model_dump(mode="json", by_alias=True) for item in image_references
@@ -5597,8 +6112,82 @@ class StudioService:
             unpricedJobCount=sum(item.billing_status in {"unpriced", "pending"} for item in usages),
         )
 
+    def lookup_provider_tasks(self, job_id: uuid.UUID) -> ProviderTaskLookupDto:
+        job = self.get_job(job_id)
+        job.execution_summary()
+        if "lookup_provider_tasks" not in job.execution.available_actions:
+            raise StudioConflictError("当前任务不支持云端查找。")
+        start, end = submission_window(job)
+        result = ProviderTaskLookupDto(
+            status="query_failed",
+            model=job.model,
+            windowStart=start,
+            windowEnd=end,
+            queriedAt=datetime.now(UTC),
+            message="云端查询失败，请稍后重试。",
+        )
+        if self._provider_task_reader is None or not job.model:
+            return result
+        try:
+            for page in range(1, 6):
+                tasks = self._provider_task_reader.list_tasks(
+                    model=job.model, page=page, page_size=50
+                )
+                for task in tasks:
+                    candidate = task_candidate(job, task)
+                    if (
+                        candidate.created_at is not None
+                        and start <= candidate.created_at <= end
+                        and not any(
+                            item.provider_task_id == candidate.provider_task_id
+                            for item in result.candidates
+                        )
+                    ):
+                        result.candidates.append(candidate)
+                if len(tasks) < 50:
+                    result.coverage_complete = True
+                    break
+        except Exception:
+            return result
+        result.status = (
+            "candidates"
+            if result.candidates
+            else ("not_found" if result.coverage_complete else "query_failed")
+        )
+        result.message = (
+            "候选仅是可能匹配；提示词、输入媒体及未返回参数无法核实，关联前须人工核对确认。"
+            if result.candidates
+            else "当前时间窗口内未找到任务。"
+        )
+        if not result.coverage_complete:
+            result.message += " 查询达到分页上限，覆盖不完整，不能据此确认任务不存在。"
+        return result
+
     def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
-        return self._repository.recover_job(job_id, command)
+        if command.action != "associate_provider_task":
+            return self._repository.recover_job(job_id, command)
+        if not (
+            command.provider_task_id
+            and command.confirm_association
+            and command.acknowledge_unverified_parameters
+        ):
+            raise StudioConflictError("必须确认关联并确认已人工核对提示词、输入媒体及未返回参数。")
+        replay = self._repository.get_recovery_result(job_id, command)
+        if replay is not None:
+            return replay
+        if self._provider_task_reader is None:
+            raise StudioConflictError("云端查询未配置。")
+        job = self.get_job(job_id)
+        try:
+            task = self._provider_task_reader.get_task(command.provider_task_id)
+        except Exception as exc:
+            raise StudioConflictError("云端任务复核失败，请稍后重试。") from exc
+        candidate = task_candidate(job, task)
+        if candidate.provider_task_id != command.provider_task_id or not candidate.can_associate:
+            raise StudioConflictError("云端任务不符合关联条件：" + " ".join(candidate.mismatches))
+        return self._repository.associate_provider_task(
+            job_id, command, candidate.model_dump(mode="json", by_alias=True)
+        )
 
     def resume_job_storage(self, job_id: uuid.UUID) -> JobDto:
         return self._repository.resume_job_storage(job_id)
@@ -5975,30 +6564,11 @@ def _planner_output_schema() -> dict[str, Any]:
 
 
 def _planner_prompt(project: ProjectDto, user_text: str) -> str:
-    fixed_chains = {
-        "雨天擦爪": (
-            "触发：猫咪进门留下湿爪印；孩子：蹲下用软毛巾逐只擦干猫爪；"
-            "猫咪：配合抬爪并主动迈到干燥脚垫；变化：湿爪和地面水印明显减少；"
-            "结尾：孩子拿起并折好毛巾，猫咪沿脚垫向室内走两步，尾巴自然摆动。"
-        ),
-        "浇花": (
-            "触发：花盆表土干燥；孩子：控制水壶水流浇入花盆；"
-            "猫咪：跟随移动水光，主动挪步避开最后一滴水；"
-            "变化：土壤明显变深且托盘接住最后一滴；"
-            "结尾：孩子放回水壶并轻推托盘归位，猫咪绕花盆走一小步、尾巴轻摆。"
-        ),
-        "寻找滚落线团": (
-            "触发：线团从桌边滚落；孩子：弯腰伸手追线团；"
-            "猫咪：用前爪轻拍使线团改变方向；变化：线团滚回收纳篮旁；"
-            "结尾：孩子将线团放进篮子并提起篮子，猫咪跟着向前走两步。"
-        ),
-    }
-    chain = fixed_chains.get(project.theme, "按主题建立一个清晰可见的单一因果链。")
     return (
         f"为原创一人一猫生活短片《{project.title}》生成一条结构化提案。"
         f"用户主题：{user_text}。目标严格为{project.target_duration_seconds}秒、9:16、"
-        "三个约4秒镜头、无对白或极少对白。只允许一个主要生活事件，并清楚表达"
-        f"触发、孩子动作、猫咪反应、可见变化和温暖结尾。指定因果链：{chain}"
+        "无对白或极少对白。只允许一个主要生活事件，并清楚表达"
+        "触发、孩子动作、猫咪反应、可见变化和温暖结尾。"
         "结尾必须继续发生清晰、"
         "自然、可观察的小动作；不得让儿童和猫咪原地互看，不得用静止停帧、"
         "重复呼吸、无意义慢镜头或循环动作填充时长。保持原创，不复制任何现有IP。"
@@ -6007,10 +6577,16 @@ def _planner_prompt(project: ProjectDto, user_text: str) -> str:
         "‘体现治愈感’等空泛套话；每个字段优先描述儿童、猫咪、道具或环境具体、可观察的"
         "动作与状态变化。environmentIntent只描述空间、天气、家具、道具、构图和光线，"
         "不得包含儿童、猫咪或其他角色的动作；角色行为必须写入对应的动作字段。"
+        "先明确本集参与者和道具数量、初始位置、动作目的及结束状态。每件移动道具沿用同一实例，"
+        "接触动作写清谁用哪个身体部位或工具接触什么，并产生何种可见结果。"
+        "区分固定环境、可移动道具与角色携带物；环境意图只安排动作前的陈设，"
+        "不能把角色携带物再放一份在背景，也不能把动作结果提前做成环境。"
+        "角色身份等长期设定与本集的地点、姿态和道具状态分开描述。按目标时长安排"
+        "一个可执行主动作及必要反应，减少同时发生的次要动作；结束后不追加新任务。"
     )
 
 
-def _director_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
+def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: str) -> str:
     event = story.micro_event
     return (
         f"你是CatFlow专业短片导演。把已采用故事《{story.title}》设计为"
@@ -6033,10 +6609,31 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto) -> str:
         "结尾必须继续发生自然动作，不得原地互看、停帧、重复呼吸或循环填时长。"
         "固定儿童为6至7岁、约1.2米、约4.5至5头身、齐下颌短发；动作符合低龄儿童"
         "能力，禁止8岁以上修长比例、青少年脸型、成人化身体或成人化表情。"
-        "固定同一只灰白虎斑猫，保持正确四足、尾巴、毛色分区和可信人猫比例。"
+        f"{cat_identity}。保持正确四足、尾巴和可信人猫比例。"
         "不得复述故事原文，不使用‘围绕……展开’、‘通过……呈现’、‘营造……氛围’、"
         "‘电影感’、‘高级感’等没有对应可见动作的套话。每句话优先说明角色或物件的"
         "初始状态、变化过程和结束状态。"
+        "【空间与交互契约】每镜头必须提供cameraSpatialRelation、interactionConstraints和visualExclusions。"
+        "cameraSpatialRelation用自然语言统一摄影机、角色、接触面、前景与背景的相对位置；"
+        "构图和机位以动作起点为基准，initialState写清起始持有、肢体归属与承托，"
+        "不把后续动作或最终效果写进起始状态、构图和机位字段。"
+        "明确画面左右与角色自身左右，涉及遮挡、容器、门窗、反射时写清主体在哪一侧、"
+        "可见身体部分、支撑面和从何处进入画面，不让相邻镜头无解释地反转空间。"
+        "interactionConstraints只写可执行的正向关系：动作主体→身体部位或工具→接触对象"
+        "→运动方向→可见结果。手臂连接到明确角色，身体有可见承托，接触效果在接触位置发生；"
+        "明确同一物体的数量、归属和移动前后位置，遮挡不能使物体复制或肢体脱离主体。"
+        "visualExclusions只列具体不应出现的视觉结果，不含风险代码、流程指令或‘需退回调整’。"
+        "三字段必须输出，约束列表无适用项可为空；不可确定的空间关系不能凭空补造。"
+        "【参考图核对】实际检查图中已有物体及其数量、状态、可接触表面、落脚点和活动空间。"
+        "图三是图一和图二同一组角色的比例参考，不能增加角色。区分固定陈设、可移动物体和携带物，"
+        "不把环境图中已完成的物体状态作为故事动作起点。冲突写进待处理意见并指出涉及镜头。"
+        "【动作与声音】走位、物理变化和连续性是执行动作的唯一来源；兼容摘要应与它们一致，"
+        "整体基调和导演意图不再给出另一套动作顺序。按各镜时长安排一个主动作及必要反应，"
+        "声音只能对应已经设计的动作和环境，不通过声音重新引入被删除的姿态、人物或道具。"
+        "【输出前自检】在本次调用中逐项核对故事、实际参考图、构图、走位、物理变化、"
+        "结尾及风险意见是否一致。能确定的关系直接写进正式设计；仍不确定的冲突放入"
+        "feasibilityWarnings或generationRisks，明确冲突来源和需要确认的事实，不擅改已采用剧情。"
+        "评语独立于执行约束；字段内容写自然语言，不嵌套JSON、字段名、未解析占位符或内部角色标识。"
         "只返回符合Schema的JSON，不生成多冲突、多转折或依赖对白解释的长剧结构。"
     )
 
@@ -6151,18 +6748,12 @@ def _segment_edit_prompt(
         if end_state_policy == "replace"
         else "出点参考负责与原片结束状态衔接。"
     )
-    roles = (
-        ["入点衔接"]
-        + ([] if end_state_policy == "replace" else ["出点衔接"])
-        + ["儿童身份", "猫咪身份", "人猫比例", "环境", "画风"]
-    )
     return (
         f"【修改目标】\n{instruction.strip()}\n"
         f"【片段内时间】\n参考视频从0秒开始；仅替换{issue_start:.3f}–{issue_end:.3f}秒，结束点不包含。\n"
         "【保留与参考职责】\n视频1提供机位、构图、光线与未指定修改的内容；"
         "需要修正的错误动作和道具状态不得照搬。入点参考负责起始衔接。"
-        + "；".join(f"图{index}：{role}" for index, role in enumerate(roles, 1))
-        + f"。\n【结束状态】\n{ending}\n"
+        + f"\n【结束状态】\n{ending}\n"
         "角色动作必须明确表现初始状态—运动路径—结束状态，并在结束状态形成可观察的"
         "物理闭合；不得静止、原地互看或循环动作填充时长。"
     )
@@ -6175,7 +6766,7 @@ def _whole_generation_input_snapshot(
     state: Literal["preview", "submitted"],
 ) -> dict[str, Any]:
     snapshot = GenerationInputSnapshotDto(
-        schemaVersion=2,
+        schemaVersion=3 if preview.compiled_provider_prompt else 2,
         kind="whole_video",
         state=state,
         provider=preview.provider,
@@ -6183,6 +6774,7 @@ def _whole_generation_input_snapshot(
         capabilityRevision=preview.capability_revision,
         inputHash=preview.input_hash,
         prompt=preview.prompt,
+        compiledProviderPrompt=preview.compiled_provider_prompt,
         negativePrompt=preview.negative_prompt,
         promptSummary=preview.prompt_summary,
         promptSections=preview.prompt_sections,
@@ -6206,6 +6798,8 @@ def _whole_generation_input_snapshot(
             "frameRate": 24,
         },
         source={
+            "canonProfileId": preview.canon_profile_id,
+            "canonProfileHash": preview.canon_profile_hash,
             "storyVersionId": preview.story_version_id,
             "shotPlanVersionId": preview.shot_plan_version_id,
             "selectionHash": preview.selection_hash,
@@ -6233,7 +6827,9 @@ def _segment_generation_input_snapshot(
         for index, item in enumerate(preview.image_references, start=1)
     ]
     snapshot = GenerationInputSnapshotDto(
-        schemaVersion=2 if preview.base_edl is not None else 1,
+        schemaVersion=(
+            3 if preview.compiled_provider_prompt else 2 if preview.base_edl is not None else 1
+        ),
         kind="segment_edit",
         state=state,
         provider=preview.provider,
@@ -6241,6 +6837,7 @@ def _segment_generation_input_snapshot(
         capabilityRevision=preview.capability_revision,
         inputHash=preview.input_hash,
         prompt=preview.prompt,
+        compiledProviderPrompt=preview.compiled_provider_prompt,
         negativePrompt=preview.negative_prompt,
         references=references,
         videoReferences=[
@@ -6268,6 +6865,13 @@ def _segment_generation_input_snapshot(
             "editDraftId": preview.edit_draft_id,
         },
         segmentEdit={
+            **(
+                preview.model_dump(
+                    mode="json", by_alias=True, include=set(VideoEditOptions.model_fields)
+                )
+                if preview.edit_contract_version == 2
+                else {}
+            ),
             "sourceResultJobId": preview.source_result_job_id,
             "referencePreparationJobId": preview.reference_preparation_job_id,
             "inputEdl": preview.input_edl,
@@ -6286,7 +6890,11 @@ def _segment_generation_input_snapshot(
             "generationRange": preview.generation_range,
             "candidateCoreRange": preview.candidate_core_range,
         },
-        promptCompilerRevision="segment-edit-v5"
+        promptCompilerRevision="segment-edit-v7"
+        if preview.edit_contract_version == 2
+        else "segment-edit-v6"
+        if preview.compiled_provider_prompt
+        else "segment-edit-v5"
         if preview.reference_preparation_job_id
         else "segment-edit-v4"
         if preview.audio_mode is not None or preview.generation_mode == "from_frame"
@@ -6295,18 +6903,22 @@ def _segment_generation_input_snapshot(
         else "segment-edit-v2",
         createdAt=created_at,
     )
-    return snapshot.model_dump(mode="json", by_alias=True)
+    document = snapshot.model_dump(mode="json", by_alias=True)
+    if preview.edit_contract_version == 1:
+        for field in VideoEditOptions.model_fields:
+            if field not in {"end_state_policy", "desired_end_state"}:
+                document["segmentEdit"].pop(VideoEditOptions.model_fields[field].alias, None)
+    return document
 
 
-def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind) -> str:
+def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind, cat_identity: str) -> str:
     responsibilities = {
         "episode_child": (
             "生成本集儿童设计：固定同一位6至7岁儿童，身高约1.2米，齐下颌短发，"
             "保持圆润儿童脸型和约4.5至5头身的低龄儿童比例"
         ),
         "episode_cat": (
-            "生成本集猫咪设计：固定同一只灰白虎斑猫，稳定灰白毛色分区、"
-            "眼鼻口、环纹尾巴和正常四足结构"
+            f"生成本集猫咪设计：{cat_identity}"
         ),
         "pair_scale": "生成一人一猫同框比例参考，角色身份不变，人猫尺寸与站位可信",
         "environment": f"生成《{project.title}》的当前生活环境，只控制空间结构与柔和暖光",
@@ -6327,8 +6939,10 @@ def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto, descr
         f"为《{project.title}》生成一张9:16、2K PNG的空场景环境设计图。"
         f"环境意图：{environment_intent}。"
         "只提取环境意图中的空间、天气、家具、道具、构图和光线；"
+        "先区分固定环境、可移动道具和角色携带物：仅绘制被明确指定的动作前环境陈设。"
+        "携带物不要作为背景再复制一份；可移动道具遵守指定数量、初始位置与状态。"
         "即使原文提到儿童、猫咪或动作，也不得在画面中绘制人物、动物、身体局部或倒影。"
-        "为后续一位约1.2米高的6至7岁儿童和一只灰白虎斑猫预留清楚的前景、中景、"
+        "为后续一位约1.2米高的6至7岁儿童和参考中的同一只猫咪预留清楚的前景、中景、"
         "落脚位置与动作空间，但不要把角色画入环境板。"
         "图一是固定画风板，只负责色彩、柔和漫射光、哑光材质、轻微纸感颗粒和暖灰细轮廓线；"
         "这是场景外观与空间关系参考，后续镜头允许重新构图；不得把正在发生的动作或已完成动作冻结为场景陈设。"
@@ -6363,7 +6977,9 @@ def _image_generation_input_snapshot(
     if preview.kind != "environment":
         raise ValueError("only environment generation has an image input snapshot")
     return ImageGenerationInputSnapshotDto(
-        schemaVersion=2 if preview.environment_draft else 1,
+        schemaVersion=(
+            3 if preview.compiled_provider_prompt else 2 if preview.environment_draft else 1
+        ),
         environmentDraft=preview.environment_draft,
         state=state,
         kind="environment",
@@ -6374,6 +6990,7 @@ def _image_generation_input_snapshot(
         model=preview.model,
         capabilityRevision=preview.capability_revision,
         prompt=preview.prompt,
+        compiledProviderPrompt=preview.compiled_provider_prompt,
         negativePrompt=preview.negative_prompt,
         references=[
             GenerationInputReferenceDto.model_validate(

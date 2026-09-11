@@ -1,0 +1,121 @@
+{
+  "status": "wrong-target-version-for-request",
+  "correctResult": "../white-cat-v4-color-corrected/README.md",
+  "createdDate": "2026-09-10",
+  "generator": "built-in-imagegen",
+  "generationCallCount": 8,
+  "scope": "Color adjustment of the five v3 images explicitly listed by the user; not a new approval of their anatomy or hidden-back design.",
+  "editTargets": "../white-cat-v3",
+  "colorAuthority": {
+    "source": "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png",
+    "file": "color-source.png",
+    "size": [
+      2048,
+      2048
+    ],
+    "mode": "RGBA",
+    "byteIdentical": true,
+    "sha256": "1af8a984551aefd3c6af9c79c81359724fbb246cecfbc79d1f22d119f784e12d"
+  },
+  "runtimeIntegrated": false,
+  "images": [
+    {
+      "file": "front-standing.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "mode": "RGB",
+      "sha256": "b85a06e22832ca485fb611246a69fcacfb00def20c4cd5406b795ba0143cdd3e",
+      "bytes": 1697736,
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v3/front-standing.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-e52619fd-03a7-4dc2-bfc8-bac86a796990.png",
+      "generationRecordKey": "front-standing"
+    },
+    {
+      "file": "side-standing.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "mode": "RGB",
+      "sha256": "f87ef71097488678fde2b2d62f260b0b48baadb586608009b30e4d48ce057592",
+      "bytes": 1822167,
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v3/side-standing.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-4a7a1980-a6ef-48ff-9500-5c7b3951a862.png",
+      "generationRecordKey": "side-standing"
+    },
+    {
+      "file": "rear-standing.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "mode": "RGB",
+      "sha256": "ca92405d82c720911733d13a4f70d3129742abbd21f8e2e9d8c8175dc287c47b",
+      "bytes": 1637507,
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v3/rear-standing.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-29a31933-723d-406a-a01a-0a8bd5356957.png",
+      "generationRecordKey": "rear-standing"
+    },
+    {
+      "file": "three-view-board.png",
+      "size": [
+        2172,
+        724
+      ],
+      "mode": "RGB",
+      "sha256": "8579c5c558a8239a3f5515babab696b2b614e5fd0faa76b7e3fd98c37e290142",
+      "bytes": 1739253,
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v3/three-view-board.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-79aedd45-0d70-446e-899f-402fe6e38bff.png",
+      "generationRecordKey": "three-view-board"
+    },
+    {
+      "file": "pair-scale.png",
+      "size": [
+        941,
+        1672
+      ],
+      "mode": "RGB",
+      "sha256": "dcda1fc21ef975c9b3290b824d094ef53c04e7c773cea61ec2b2b6419a4360de",
+      "bytes": 1490979,
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v3/pair-scale.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-a45d1190-fa77-4663-8e4f-c159a413b8a2.png",
+      "generationRecordKey": "pair-scale-white-pass"
+    }
+  ],
+  "validation": {
+    "allPngDecoded": true,
+    "allOutputSizesMatchEditTargets": true,
+    "visualReview": true,
+    "videoTested": false,
+    "pixelExactPreservation": false,
+    "formalCanonChecks": [
+      {
+        "file": "episode-child.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "episode-cat.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "pair-scale.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "style-board.png",
+        "matchesManifest": true
+      }
+    ]
+  },
+  "prompts": "generation-prompts.md",
+  "colorChecks": "color-check.json",
+  "draftsExcludedFromDeliverables": true
+}

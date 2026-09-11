@@ -69,6 +69,45 @@ class EpisodeContinuityDto(ContractModel):
     outgoing: EpisodeContinuitySnapshotDto | None = None
 
 
+def compile_continuity_constraints(snapshot: EpisodeContinuitySnapshotDto) -> tuple[str, ...]:
+    """Render the confirmed effective incoming state, including reset/adjust decisions."""
+    if not snapshot.confirmed or snapshot.direction != "incoming":
+        raise ValueError("只有已确认的入集连续性可编译为本集约束")
+    labels = {
+        "wardrobe": "服装",
+        "location": "场景",
+        "weather": "天气",
+        "timeOfDay": "时段",
+        "lighting": "光线",
+        "childState": "儿童状态",
+        "catState": "猫咪状态",
+        "spatialPositions": "相对位置",
+        "unfinishedActions": "待续动作",
+        "endingImage": "本集开场画面",
+    }
+    decisions = {"inherit": "沿用已确认状态", "adjust": "按本集确认调整", "reset": "在本集重新设置"}
+    state = snapshot.state.model_dump(by_alias=True)
+    clauses = []
+    for key, label in labels.items():
+        value = state[key]
+        if not value:
+            continue
+        if isinstance(value, list):
+            value = "；".join(value)
+        decision = decisions.get(snapshot.decisions.get(key), "本集已确认")
+        clauses.append(f"{label}（{decision}）：{value}")
+    owners = {"child": "儿童", "cat": "猫咪", "environment": "环境"}
+    for prop in snapshot.state.props:
+        decision = decisions.get(snapshot.decisions.get("props"), "本集已确认")
+        parts = [f"道具{prop.name}（{decision}）：{prop.state}"]
+        if prop.location:
+            parts.append(f"位置：{prop.location}")
+        if prop.owner:
+            parts.append(f"归属：{owners[prop.owner]}")
+        clauses.append("；".join(parts))
+    return tuple(clauses)
+
+
 class EpisodeContinuityConfirmCommand(ContractModel):
     direction: ContinuityDirection
     state: EpisodeContinuityState
@@ -138,19 +177,16 @@ def planned_continuity_state(
 ) -> EpisodeContinuityState:
     locations = {item.key: item.name for item in bible.recurring_locations}
     props = {item.key: item for item in bible.recurring_props}
-    location = "、".join(
-        locations.get(key, key) for key in episode.recurring_location_keys
-    ) or "未在当前简纲中指定"
+    location = (
+        "、".join(locations.get(key, key) for key in episode.recurring_location_keys)
+        or "未在当前简纲中指定"
+    )
     wardrobe = "；".join(bible.wardrobe_rules) or "未在系列方案中指定"
     selected_props = [
         ContinuityPropState(
             key=key,
             name=props[key].name if key in props else key,
-            state=(
-                props[key].continuity_rule
-                if key in props
-                else "状态需在制作本集时确认"
-            ),
+            state=(props[key].continuity_rule if key in props else "状态需在制作本集时确认"),
         )
         for key in episode.recurring_prop_keys
     ]
@@ -158,9 +194,7 @@ def planned_continuity_state(
         inherited = previous_episode.ending_state if previous_episode is not None else None
         state = inherited or episode.opening_state
         unfinished = (
-            list(previous_episode.continuity_carryover)
-            if previous_episode is not None
-            else []
+            list(previous_episode.continuity_carryover) if previous_episode is not None else []
         )
         ending_image = episode.opening_state
     else:

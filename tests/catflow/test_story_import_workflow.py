@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from catflow.application.provider_config import ProviderRuntime
-from catflow.application.series import SeriesCreateCommand
+from catflow.application.series import SeriesCreateCommand, SeriesPatchCommand
 from catflow.application.service import (
     ProjectCreate,
     StudioIdempotencyInputConflictError,
@@ -373,6 +373,98 @@ def test_analysis_preserves_source_units_until_user_confirms_relationship() -> N
     assert result.series.planned_episode_count == 2
     assert len(service.list_story_series()) == 1
     assert service.list_projects() == []
+
+
+@pytest.mark.parametrize("must_keep", [[], ["保留来源文本中的核心事件"]])
+def test_new_series_preserves_the_confirmed_must_keep_list(must_keep: list[str]) -> None:
+    service = _service()
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    created = service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=SOURCE_TEXT,
+            sourceFormat="paste",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey=f"analyze-must-keep-{len(must_keep)}",
+        )
+    )
+    assert created.analysis_job is not None
+    analyzed = service.complete_story_import_analysis(created.analysis_job.id, _analysis())
+    command = StoryImportConfirmCommand(
+        suggestionId=analyzed.relation_suggestions[0].id,
+        target="new_series",
+        seriesLengthMode="fixed",
+        plannedEpisodeCount=2,
+        mustKeep=must_keep,
+        idempotencyKey=f"confirm-must-keep-{len(must_keep)}",
+    )
+
+    result = service.confirm_story_import(analyzed.id, command)
+
+    assert result.series is not None
+    assert result.series.must_keep == must_keep
+
+
+def test_confirmation_replay_compares_the_original_request_after_series_edit() -> None:
+    repository = MemoryStudioRepository()
+    service = StudioService(
+        repository,
+        provider_runtime=replace(
+            ProviderRuntime.from_env(segment_reference_publishing_ready=False),
+            paid_calls_enabled=True,
+        ),
+    )
+    preview = service.preview_story_import(
+        StoryImportPreviewCommand(rawText=SOURCE_TEXT, sourceFormat="paste")
+    )
+    created = service.create_story_import(
+        StoryImportCreateCommand(
+            rawText=SOURCE_TEXT,
+            sourceFormat="paste",
+            expectedInputHash=preview.input_hash,
+            idempotencyKey="analyze-stable-confirmation-request",
+        )
+    )
+    assert created.analysis_job is not None
+    analyzed = service.complete_story_import_analysis(created.analysis_job.id, _analysis())
+    command = StoryImportConfirmCommand(
+        suggestionId=analyzed.relation_suggestions[0].id,
+        target="new_series",
+        seriesLengthMode="fixed",
+        plannedEpisodeCount=2,
+        adaptationPolicy="condense_mainline",
+        mustKeep=[],
+        idempotencyKey="stable-confirmation-request",
+    )
+    first = service.confirm_story_import(analyzed.id, command)
+    assert first.series is not None
+    service.update_story_series(
+        first.series.id,
+        SeriesPatchCommand(plannedEpisodeCount=3, mustKeep=["后来编辑的要求"]),
+    )
+
+    replay = service.confirm_story_import(analyzed.id, command)
+
+    assert replay.id == first.id
+    with pytest.raises(StudioIdempotencyInputConflictError):
+        service.confirm_story_import(
+            analyzed.id,
+            command.model_copy(update={"planned_episode_count": 4}),
+        )
+
+    service.update_story_series(
+        first.series.id,
+        SeriesPatchCommand(
+            plannedEpisodeCount=2,
+            mustKeep=["保留来源文本中的核心事件"],
+        ),
+    )
+    repository._story_source_confirmation_requests.pop(command.idempotency_key)
+
+    legacy_replay = service.confirm_story_import(analyzed.id, command)
+
+    assert legacy_replay.id == first.id
 
 
 def test_eleven_beats_recommend_eight_episodes_and_create_a_fixed_series_without_projects() -> None:

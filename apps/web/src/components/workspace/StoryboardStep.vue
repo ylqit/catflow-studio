@@ -65,6 +65,7 @@ function issuePathLabel(path: string) {
     childBlocking: '儿童动作', catBlocking: '猫咪动作', initialState: '开始状态', movementPath: '动作过程', endState: '结束状态',
     durationFrames: '帧数', durationSeconds: '时长', sound: '声音', musicIntent: '音乐意图', physicalChange: '画面变化',
     continuity: '连续性', finalFrame: '最后画面', directorTreatment: '故事导演解析', lens: '镜头设计', composition: '构图', lighting: '光照', directorIntent: '导演意图',
+    cameraSpatialRelation: '机位与空间关系', interactionConstraints: '交互约束', visualExclusions: '画面排除项',
   };
   return path.replace(/^shots\.(\d+)/, (_, index) => `镜头 ${Number(index) + 1}`).split('.').map(part => labels[part] ?? part).join(' → ') || '整体分镜';
 }
@@ -204,6 +205,7 @@ const comparisonSummary = computed(() => {
   if (!left || !right) return { added: 0, removed: 0, changed: 0, durationClosed: false };
   const coreFields: CoreComparisonField[] = [
     "durationSeconds", "framing", "cameraMovement", "childAction", "catAction", "environmentChange", "finalFrame", "transition",
+    "cameraSpatialRelation", "interactionConstraints", "visualExclusions",
   ];
   let changed = 0;
   for (let index = 0; index < Math.min(left.shots.length, right.shots.length); index += 1) {
@@ -219,7 +221,7 @@ const comparisonSummary = computed(() => {
   };
 });
 
-type CoreComparisonField = "durationSeconds" | "framing" | "cameraMovement" | "childAction" | "catAction" | "environmentChange" | "finalFrame" | "transition";
+type CoreComparisonField = "durationSeconds" | "framing" | "cameraMovement" | "childAction" | "catAction" | "environmentChange" | "finalFrame" | "transition" | "cameraSpatialRelation" | "interactionConstraints" | "visualExclusions";
 
 function trimSummaryBoundary(value?: string | null) {
   return (value ?? "").trim().replace(/[，,；;。.!！?？：:]+$/u, "");
@@ -272,6 +274,8 @@ function coreFieldValue(shot: ShotSpecDto, field: CoreComparisonField): string |
   if (field === "catAction") return catSummary(shot);
   if (field === "environmentChange") return changeSummary(shot);
   if (field === "finalFrame") return finalFrameSummary(shot);
+  if (field === "interactionConstraints" || field === "visualExclusions") return JSON.stringify(shot[field]) ?? "未记录";
+  if (field === "cameraSpatialRelation") return shot.cameraSpatialRelation ?? "未记录";
   return shot[field];
 }
 
@@ -287,6 +291,9 @@ const professionalFieldDefinitions = [
   ["动作与状态", "物理变化", (shot: ShotSpecDto) => shot.physicalChange],
   ["镜头画面", "焦距与机位", (shot: ShotSpecDto) => shot.lens],
   ["镜头画面", "构图与轴线", (shot: ShotSpecDto) => shot.composition],
+  ["空间与交互", "机位与空间关系", (shot: ShotSpecDto) => shot.cameraSpatialRelation],
+  ["空间与交互", "交互约束", (shot: ShotSpecDto) => shot.interactionConstraints],
+  ["空间与交互", "画面排除项", (shot: ShotSpecDto) => shot.visualExclusions],
   ["连续性与结尾", "镜头连续性", (shot: ShotSpecDto) => shot.continuity],
   ["光线与声音", "光线与色彩", (shot: ShotSpecDto) => shot.lighting],
   ["光线与声音", "声音设计", (shot: ShotSpecDto) => shot.sound],
@@ -797,6 +804,25 @@ async function closeComparison() {
 
           <details :data-shot-details-id="shot.id" data-testid="professional-shot-details" class="professional-details">
             <summary>查看镜头细节</summary>
+            <fieldset class="professional-editor" :disabled="!canEditSelected">
+              <div class="professional-grid">
+                <section class="detail-group span-two" aria-label="空间与交互设计">
+                  <h3>空间与交互</h3>
+                  <label>机位与空间关系<textarea v-model="shot.cameraSpatialRelation" aria-label="机位与空间关系" rows="3" /></label>
+                  <p v-if="shot.cameraSpatialRelation == null" class="empty-detail">历史分镜未记录机位与空间关系，可手工补充。</p>
+                  <div class="micro-motion-editor"><b>交互约束</b>
+                    <div v-for="(_, index) in shot.interactionConstraints" :key="`interaction-${index}`"><textarea v-model="shot.interactionConstraints![index]" :aria-label="`交互约束 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除交互约束 ${index + 1}`" @click="shot.interactionConstraints?.splice(index, 1)">移除</button></div>
+                    <span v-if="shot.interactionConstraints == null">历史分镜未记录交互约束，可手工补充。</span><span v-else-if="!shot.interactionConstraints.length">未设置交互约束</span>
+                    <button type="button" class="secondary" @click="(shot.interactionConstraints ??= []).push('')">添加交互约束</button>
+                  </div>
+                  <div class="micro-motion-editor"><b>画面排除项</b>
+                    <div v-for="(_, index) in shot.visualExclusions" :key="`exclusion-${index}`"><textarea v-model="shot.visualExclusions![index]" :aria-label="`画面排除项 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除画面排除项 ${index + 1}`" @click="shot.visualExclusions?.splice(index, 1)">移除</button></div>
+                    <span v-if="shot.visualExclusions == null">历史分镜未记录画面排除项，可手工补充。</span><span v-else-if="!shot.visualExclusions.length">未设置画面排除项</span>
+                    <button type="button" class="secondary" @click="(shot.visualExclusions ??= []).push('')">添加画面排除项</button>
+                  </div>
+                </section>
+              </div>
+            </fieldset>
             <fieldset v-if="shot.lens && shot.composition && shot.childBlocking && shot.catBlocking && shot.physicalChange && shot.continuity && shot.lighting && shot.sound" class="professional-editor" :disabled="!canEditSelected">
             <div class="professional-grid">
               <section class="detail-group span-two"><h3>动作与状态</h3><div class="detail-subgrid detail-three">
@@ -813,7 +839,7 @@ async function closeComparison() {
               <section class="detail-group span-two"><h3>导演意图与风险</h3><label>导演意图<textarea v-model="shot.directorIntent" /></label><div v-for="(risk, index) in shot.generationRisks" :key="`${risk.code}-${index}`" class="risk"><code>{{ risk.code }}</code><span>{{ risk.message }}</span><button type="button" class="quiet" :aria-label="`移除生成风险 ${risk.code}`" @click="shot.generationRisks?.splice(index, 1)">移除</button></div><p v-if="!shot.generationRisks?.length" class="empty-detail">暂无制作风险</p></section>
             </div>
             </fieldset>
-            <p v-else class="notice warn">这是旧版简化分镜，只保留当时的历史摘要，缺少可编辑的镜头细节。建议重新生成分镜。</p>
+            <p v-else class="notice warn">这是旧版简化分镜，只保留当时的历史摘要；其他专业镜头细节未记录。上方空间与交互设计可手工补充。</p>
           </details>
         </article>
       </div>

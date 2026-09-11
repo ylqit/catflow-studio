@@ -168,7 +168,7 @@ class ExecutionLifecycle:
 
     def _reconcile_receipts(self):
         """Replay durable evidence after outages, including jobs no longer claimable."""
-        if self._lane not in {None, "query"} or time.monotonic() < self._next_receipt_scan:
+        if self._lane not in {None, "reconcile"} or time.monotonic() < self._next_receipt_scan:
             return
         self._next_receipt_scan = time.monotonic() + 5
         identifiers = []
@@ -212,6 +212,10 @@ class ExecutionLifecycle:
 
     def run_once(self) -> bool:
         self._reconcile_receipts()
+        if self._lane == "reconcile":
+            # Historical evidence recovery must not hold up queries for accepted
+            # tasks. This lane never claims work or calls a paid provider.
+            return False
         job_id = self._claim()
         if job_id is None:
             return False
@@ -293,11 +297,19 @@ class ExecutionLifecycle:
                 return
         prepare = getattr(self._provider, "prepare_submission", None)
         if prepare:
+            started = time.monotonic()
             try:
                 prepare(job_id=job_id, kind=kind, frozen_input=frozen)
             except Exception as exc:
                 self._fail(job_id, self._error(exc), stage="prepare")
                 return
+            finally:
+                call = provider_call.get()
+                if call is not None and kind in {"generate_video", "regenerate_video_segment"}:
+                    call.diagnostics["localPreparationMs"] = round(
+                        (time.monotonic() - started) * 1000, 3
+                    )
+                    call.receive({"result": {"preparationDiagnostics": dict(call.diagnostics)}})
         with self._sessions.begin() as session:
             job = self._owned(session, job_id)
             if job.status != "submitting" or job.provider_submission_started_at:

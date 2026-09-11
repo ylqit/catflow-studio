@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import JobStatusCard from "../JobStatusCard.vue";
+import ProviderPrompt from "../ProviderPrompt.vue";
 import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
 import type { AssetDto, AssetGenerationKind, AssetGenerationPreviewDto, AssetSlot, FixedCanonRole, JobDto, WorkspaceDto, EnvironmentGenerationDraft, EnvironmentGenerationInput } from "../../api/types";
@@ -39,8 +40,10 @@ const viewerTitle = ref("");
 const viewerAssets = ref<AssetDto[]>([]);
 const viewerActiveAssetId = ref<string | null>(null);
 const viewerPrompt = ref<string | null>(null);
+const viewerCompiledPrompt = ref<string | null>(null);
 const viewerNegativePrompt = ref<string | null>(null);
 const viewerPromptUnavailable = ref(false);
+const viewerPromptLoadError = ref("");
 const viewerQualityReport = ref<Record<string, unknown> | null>(null);
 let unsubscribeJobs: (() => void) | undefined;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
@@ -215,7 +218,7 @@ function editFullPrompt(field: "prompt" | "negativePrompt", value: string) {
 function useDescriptionMode(resetStory = false) {
   const draft = environmentDraft.value;
   if (!draft) return;
-  if ((draft.mode === "custom" || resetStory) && !window.confirm("将按场景描述重新编译完整指令，替换当前手工修改。是否继续？")) return;
+  if ((draft.mode === "custom" || resetStory) && !window.confirm("将按场景描述重新编译指令正文，替换当前手工修改。是否继续？")) return;
   draft.mode = "description"; draft.prompt = null; draft.negativePrompt = null;
   if (resetStory && props.workspace.activeStory) {
     draft.description = props.workspace.activeStory.environmentIntent;
@@ -343,6 +346,7 @@ async function openViewer(slot: AssetGenerationKind, asset: AssetDto) {
     : [asset];
   viewerActiveAssetId.value = asset.id;
   viewerPrompt.value = null;
+  viewerCompiledPrompt.value = null;
   viewerNegativePrompt.value = null;
   viewerPromptUnavailable.value = false;
   viewerQualityReport.value = asset.metadata.qualityReport as Record<string, unknown> | undefined ?? null;
@@ -352,8 +356,10 @@ async function openViewer(slot: AssetGenerationKind, asset: AssetDto) {
 
 async function loadViewerPrompt(asset: AssetDto) {
   const request = ++viewerRequest;
+  viewerPromptLoadError.value = "";
   viewerActiveAssetId.value = asset.id;
   viewerPrompt.value = null;
+  viewerCompiledPrompt.value = null;
   viewerNegativePrompt.value = null;
   viewerPromptUnavailable.value = false;
   viewerQualityReport.value = asset.metadata.qualityReport as Record<string, unknown> | undefined ?? null;
@@ -362,10 +368,13 @@ async function loadViewerPrompt(asset: AssetDto) {
     const job = await api.job(asset.producingJobId);
     if (request !== viewerRequest) return;
     viewerPrompt.value = job.imageInputSnapshot?.prompt ?? null;
+    viewerCompiledPrompt.value = job.imageInputSnapshot?.compiledProviderPrompt
+      ?? (job.frozenInput?.providerPromptVersion === 1 && typeof job.frozenInput.compiledProviderPrompt === "string"
+        ? job.frozenInput.compiledProviderPrompt : null);
     viewerNegativePrompt.value = job.imageInputSnapshot?.negativePrompt ?? null;
-    viewerPromptUnavailable.value = !job.imageInputSnapshot;
+    viewerPromptUnavailable.value = !job.imageInputSnapshot && !viewerCompiledPrompt.value;
   } catch {
-    if (request === viewerRequest) viewerPromptUnavailable.value = true;
+    if (request === viewerRequest) viewerPromptLoadError.value = "此候选的生成指令记录暂时无法读取，请重新打开图片重试。";
   }
 }
 
@@ -439,7 +448,7 @@ onBeforeUnmount(() => {
             <div class="environment-preview" :class="{ loading: previewBusy }">
               <div class="environment-editor"><b>编辑环境内容</b>
                 <template v-if="environmentDraft">
-                  <p>{{ environmentDraft.mode === 'custom' ? '自定义完整指令 · 以下描述仅作为来源说明，实际发送内容见完整指令。' : '场景描述 · 保存后用于下一次环境生成。' }}</p>
+                  <p>{{ environmentDraft.mode === 'custom' ? '自定义指令正文 · 以下描述仅作为来源说明，实际发送文本见最终模型指令预览。' : '场景描述 · 保存后用于下一次环境生成。' }}</p>
                   <label>{{ environmentDraft.mode === 'custom' ? '来源场景描述（只读）' : '场景描述' }}<textarea v-model="environmentDraft.description" aria-label="场景描述" rows="5" maxlength="2000" :readonly="environmentDraft.mode === 'custom'" :disabled="editorBusy" @input="scheduleEnvironmentPreview" /></label>
                   <p v-if="environmentOutdated" class="notice warn">故事来源已变化。<button class="secondary" :disabled="editorBusy" @click="confirmEnvironmentStory">继续使用此草稿并确认当前故事</button><button class="secondary" :disabled="editorBusy" @click="useDescriptionMode(true)">恢复新故事默认描述</button></p>
                   <div class="editor-actions"><button class="primary" :disabled="editorBusy || !environmentDirty || environmentOutdated" @click="saveEnvironmentDraft">保存修改</button><button class="secondary" :disabled="editorBusy" @click="loadEnvironmentDraft">{{ environmentDirty ? '放弃未保存修改并读取最新草稿' : '重新读取草稿' }}</button><button v-if="environmentDraft.mode === 'custom'" class="secondary" :disabled="editorBusy" @click="useDescriptionMode()">返回场景描述模式</button></div>
@@ -450,14 +459,15 @@ onBeforeUnmount(() => {
                 <span class="empty-scene-label">环境参考：预留动作空间，不包含人物与猫咪</span>
               </div>
               <ul v-if="generationPreview"><li v-for="reference in generationPreview.references.filter((item) => item.included)" :key="reference.assetId">{{ generationReferenceLabel(reference.role) }}</li></ul>
-              <details v-if="environmentDraft" class="prompt-editor"><summary>查看与编辑完整生成指令</summary>
-                <p>直接修改后使用自定义指令。保存不调用模型；最终指令与避免项共同发送。</p>
-                <label>完整 Prompt<textarea aria-label="完整 Prompt" :value="environmentDraft.mode === 'custom' ? environmentDraft.prompt : generationPreview?.prompt" rows="9" maxlength="12000" :disabled="editorBusy || (environmentDraft.mode === 'description' && previewBusy)" @input="editFullPrompt('prompt', ($event.target as HTMLTextAreaElement).value)" /></label>
+              <details v-if="environmentDraft" class="prompt-editor"><summary>查看与编辑生成指令正文</summary>
+                <p>直接修改后使用自定义正文。保存不调用模型；最终模型指令还会包含避免项与参考图职责，请核对下方预览。</p>
+                <label>生成指令正文<textarea aria-label="生成指令正文" :value="environmentDraft.mode === 'custom' ? environmentDraft.prompt : generationPreview?.prompt" rows="9" maxlength="12000" :disabled="editorBusy || (environmentDraft.mode === 'description' && previewBusy)" @input="editFullPrompt('prompt', ($event.target as HTMLTextAreaElement).value)" /></label>
                 <label>需要避免的问题<textarea aria-label="需要避免的问题" :value="environmentDraft.mode === 'custom' ? environmentDraft.negativePrompt : generationPreview?.negativePrompt" rows="4" maxlength="4000" :disabled="editorBusy || (environmentDraft.mode === 'description' && previewBusy)" @input="editFullPrompt('negativePrompt', ($event.target as HTMLTextAreaElement).value)" /></label>
                 <p v-if="previewReason" role="alert">{{ previewReason }}</p><p v-else-if="previewBusy">正在更新免费预览…</p>
                 <p v-if="generationPreview">{{ generationPreview.model }} · 2K · 9:16 · 待核价付费生成</p>
                 <details v-if="generationPreview" class="technical-details"><summary>技术详情</summary><p>{{ generationPreview.provider }} · {{ generationPreview.capabilityRevision }}</p><code>{{ generationPreview.inputHash }}</code></details>
               </details>
+              <ProviderPrompt v-if="generationPreview && !previewBusy && !previewReason" :compiled-provider-prompt="generationPreview.compiledProviderPrompt" :prompt="generationPreview.prompt" :negative-prompt="generationPreview.negativePrompt" :warnings="generationPreview.warnings" />
             </div>
 
             <div class="candidates environment-candidates">
@@ -478,7 +488,7 @@ onBeforeUnmount(() => {
       </article>
     </div>
 
-    <AssetImageViewer :open="viewerOpen" :title="viewerTitle" :assets="viewerAssets" :active-asset-id="viewerActiveAssetId" :comparisons="viewerTitle === '当前环境参考' ? comparisonAssets : []" :prompt="viewerPrompt" :negative-prompt="viewerNegativePrompt" :prompt-unavailable="viewerPromptUnavailable" :quality-report="viewerQualityReport" :allow-prompt-reuse="viewerTitle === '当前环境参考'" @reuse-prompt="reuseEnvironmentPrompt" @asset-change="loadViewerPrompt" @close="viewerOpen = false" />
+    <AssetImageViewer :open="viewerOpen" :title="viewerTitle" :assets="viewerAssets" :active-asset-id="viewerActiveAssetId" :comparisons="viewerTitle === '当前环境参考' ? comparisonAssets : []" :compiled-provider-prompt="viewerCompiledPrompt" :prompt="viewerPrompt" :negative-prompt="viewerNegativePrompt" :prompt-unavailable="viewerPromptUnavailable" :prompt-load-error="viewerPromptLoadError" :quality-report="viewerQualityReport" :allow-prompt-reuse="viewerTitle === '当前环境参考'" @reuse-prompt="reuseEnvironmentPrompt" @asset-change="loadViewerPrompt" @close="viewerOpen = false" />
   </section>
 </template>
 

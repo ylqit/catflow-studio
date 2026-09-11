@@ -1,0 +1,167 @@
+{
+  "version": 4,
+  "revision": "color-corrected",
+  "status": "v4-color-correction-preview",
+  "createdDate": "2026-09-11",
+  "generator": "built-in-imagegen",
+  "generationCallCount": 5,
+  "editTargetDirectory": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit",
+  "colorAuthority": {
+    "source": "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png",
+    "file": "color-source.png",
+    "size": [
+      2048,
+      2048
+    ],
+    "mode": "RGBA",
+    "byteIdentical": true,
+    "sha256": "1af8a984551aefd3c6af9c79c81359724fbb246cecfbc79d1f22d119f784e12d"
+  },
+  "v3ImagesUsed": false,
+  "runtimeIntegrated": false,
+  "images": [
+    {
+      "file": "front-standing.png",
+      "size": [
+        969,
+        1623
+      ],
+      "mode": "RGB",
+      "bytes": 1399981,
+      "sha256": "71aef741f913395eca6a458ef76f1a3e2e4add7cec60c36941837fb5e639c361",
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/front-standing.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-4413c26f-2c8a-4dd4-b926-f666aa5e7dd2.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/front-standing.png",
+        "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png"
+      ]
+    },
+    {
+      "file": "side-standing.png",
+      "size": [
+        1137,
+        1383
+      ],
+      "mode": "RGB",
+      "bytes": 1570626,
+      "sha256": "8fe143090a8212724cc1f57010c8d68aae21e6efcb77d87d7ea4d7d7f84697f4",
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/side-standing.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-3a2f99ad-c29a-4432-85e1-47ca57257e76.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/side-standing.png",
+        "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png"
+      ]
+    },
+    {
+      "file": "rear-standing.png",
+      "size": [
+        982,
+        1602
+      ],
+      "mode": "RGB",
+      "bytes": 1457362,
+      "sha256": "dc9b02d84745895bc4e8bb39a2e7d1f73e7ce40b79bec08d25277e566a637601",
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/rear-standing.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-1503d0e4-daa4-4cba-984c-46bcb5277976.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/rear-standing.png",
+        "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png"
+      ]
+    },
+    {
+      "file": "three-view-board.png",
+      "size": [
+        1774,
+        887
+      ],
+      "mode": "RGB",
+      "bytes": 1569786,
+      "sha256": "825acf275ec0bb0beaf2ecd91a635fb9d6ff67a588ce6e9c494eca891ba0bdf5",
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/three-view-board.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-3db5469d-9274-4f4e-8d83-65636de3a32e.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/three-view-board.png",
+        "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-4413c26f-2c8a-4dd4-b926-f666aa5e7dd2.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-3a2f99ad-c29a-4432-85e1-47ca57257e76.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-1503d0e4-daa4-4cba-984c-46bcb5277976.png"
+      ]
+    },
+    {
+      "file": "pair-scale.png",
+      "size": [
+        941,
+        1672
+      ],
+      "mode": "RGB",
+      "bytes": 1392103,
+      "sha256": "11556da7e75017fb3270e5129c6839e8589aff5503cfbcf67fe81c109ecb9bdb",
+      "decodeVerified": true,
+      "editTarget": "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/pair-scale.png",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-4d3d6e40-df4b-43e8-ae59-13e728fd8f66.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/assets/character-previews/white-cat-v4-template-edit/pair-scale.png",
+        "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-3a2f99ad-c29a-4432-85e1-47ca57257e76.png"
+      ]
+    }
+  ],
+  "validation": {
+    "allPngDecoded": true,
+    "allSizesMatchV4Inputs": true,
+    "visualReviewCompleted": true,
+    "pixelExactPreservation": false,
+    "videoTested": false,
+    "originalV4Checks": [
+      {
+        "file": "identity-source.png",
+        "matchesSavedIndex": true
+      },
+      {
+        "file": "front-standing.png",
+        "matchesSavedIndex": true
+      },
+      {
+        "file": "side-standing.png",
+        "matchesSavedIndex": true
+      },
+      {
+        "file": "rear-standing.png",
+        "matchesSavedIndex": true
+      },
+      {
+        "file": "three-view-board.png",
+        "matchesSavedIndex": true
+      },
+      {
+        "file": "pair-scale.png",
+        "matchesSavedIndex": true
+      }
+    ],
+    "formalCanonChecks": [
+      {
+        "file": "episode-child.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "episode-cat.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "pair-scale.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "style-board.png",
+        "matchesManifest": true
+      }
+    ]
+  },
+  "colorChecks": "color-check.json",
+  "prompts": "generation-prompts.md"
+}
+

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from "vue-router";
 
 import JobStatusCard from "../JobStatusCard.vue";
+import ProviderPrompt from "../ProviderPrompt.vue";
 import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
 import ShotSequenceProduction from "./ShotSequenceProduction.vue";
@@ -248,10 +249,6 @@ async function generateVideo() {
   }
 }
 
-async function copyText(value: string) {
-  await navigator.clipboard.writeText(value);
-}
-
 function candidateInputState(job: JobDto | undefined): string {
   const source = job?.inputSnapshot?.source;
   if (!source) return "旧任务未记录完整输入";
@@ -483,7 +480,7 @@ watch(
           <div class="model-strip"><span><small>视频规格</small><b>{{ preview.durationSeconds }} 秒 · 480p · 9:16</b></span><span><small>内容来源</small><b>故事版本 {{ workspace.activeStory?.revision }} · 分镜版本 {{ workspace.activeShotPlan?.revision }}</b></span><span><small>参考图</small><b>{{ preview.references.filter((item) => item.included).length }}/{{ preview.references.length }} 张</b></span><span><small>费用</small><b>{{ preview.costEstimateStatus === "unmetered_paid" ? "待核价付费调用" : `预计 ¥${((preview.expectedCostMicros ?? 0) / 1_000_000).toFixed(4)}` }}</b></span></div>
           <section v-if="preview.warnings.length" class="generation-warnings notice warn" data-testid="video-generation-warnings">
             <b>制作前请留意</b>
-            <p>这些提示不会替你修改分镜，也不会自动阻止生成；请先确认当前时长能够完成全部动作。</p>
+            <p>这些建议供人工检查，不属于最终模型指令，也不会自动阻止生成；请核对镜头设计与动作时长。</p>
             <ul><li v-for="warning in preview.warnings" :key="`${warning.code}:${warning.message}`">{{ warning.message }}</li></ul>
           </section>
           <div class="prompt-block">
@@ -497,7 +494,7 @@ watch(
               <p v-if="previousVideoBlockedReason" class="notice warn">{{ previousVideoBlockedReason }}</p>
               <p v-else class="video-reference-status">{{ includePreviousEpisodeVideo ? "已加入本次输入" : "当前未使用" }}<span v-if="previousVideoReference.durationSeconds"> · {{ previousVideoReference.durationSeconds }} 秒</span></p>
             </details>
-            <p>声音请求：{{ preview.generateAudio ? "生成原生环境、物件、动作声音；音乐和对白沿用分镜中的明确设计。" : "历史输入未要求生成声音。" }}</p><details><summary>查看完整生成指令</summary><div class="prompt-actions"><button class="secondary" @click="copyText(preview.prompt)">复制生成指令</button><button class="secondary" @click="copyText(preview.negativePrompt)">复制需要避免的问题</button></div><div v-if="preview.promptSections?.length" class="prompt-sections"><section v-for="section in preview.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><div v-else class="legacy-prompt"><label>完整生成指令</label><p>{{ preview.prompt }}</p></div><label>需要避免的问题</label><p>{{ preview.negativePrompt }}</p><div class="reference-list"><div v-for="reference in preview.references" :key="reference.role" :class="{ omitted: !reference.included }"><span class="priority">{{ reference.priority }}</span><b>{{ referenceLabels[reference.role] ?? reference.role }}</b><span>{{ reference.included ? "已使用" : `未使用：${reference.omittedReason}` }}</span></div><div v-for="reference in preview.videoReferences" :key="reference.assetId" :class="{ omitted: !reference.included }"><span class="priority">V</span><b>上一集完整成片</b><span>{{ reference.included ? "已使用" : "默认不使用" }}</span></div></div><details class="technical-details"><summary>技术详情</summary><p>模型服务：{{ preview.provider }} · {{ preview.model }}</p><div class="hash-row"><span>输入标识</span><code>{{ preview.inputHash }}</code></div><p>能力版本 {{ preview.capabilityRevision }} · 故事 {{ preview.storyVersionId }} · 分镜 {{ preview.shotPlanVersionId }} · 选择 {{ preview.selectionHash }}</p><div class="reference-technical"><p v-for="reference in preview.references" :key="`technical-${reference.assetId}`">{{ referenceLabels[reference.role] ?? reference.role }} · {{ reference.assetId }} · {{ reference.sha256 }}</p><p v-for="reference in preview.videoReferences" :key="`technical-video-${reference.assetId}`">上一集完整成片 · {{ reference.assetId }} · {{ reference.sha256 }}</p></div></details></details>
+            <p>声音请求：{{ preview.generateAudio ? "生成原生环境、物件、动作声音；音乐和对白沿用分镜中的明确设计。" : "历史输入未要求生成声音。" }}</p><details><summary>查看生成指令记录</summary><ProviderPrompt :compiled-provider-prompt="preview.compiledProviderPrompt" :prompt="preview.prompt" :negative-prompt="preview.negativePrompt" :prompt-sections="preview.promptSections" /><div class="reference-list"><div v-for="reference in preview.references" :key="reference.role" :class="{ omitted: !reference.included }"><span class="priority">{{ reference.priority }}</span><b>{{ referenceLabels[reference.role] ?? reference.role }}</b><span>{{ reference.included ? "已使用" : `未使用：${reference.omittedReason}` }}</span></div><div v-for="reference in preview.videoReferences" :key="reference.assetId" :class="{ omitted: !reference.included }"><span class="priority">V</span><b>上一集完整成片</b><span>{{ reference.included ? "已使用" : "默认不使用" }}</span></div></div><details class="technical-details"><summary>技术详情</summary><p>模型服务：{{ preview.provider }} · {{ preview.model }}</p><div class="hash-row"><span>输入标识</span><code>{{ preview.inputHash }}</code></div><p>能力版本 {{ preview.capabilityRevision }} · 故事 {{ preview.storyVersionId }} · 分镜 {{ preview.shotPlanVersionId }} · 选择 {{ preview.selectionHash }}</p><div class="reference-technical"><p v-for="reference in preview.references" :key="`technical-${reference.assetId}`">{{ referenceLabels[reference.role] ?? reference.role }} · {{ reference.assetId }} · {{ reference.sha256 }}</p><p v-for="reference in preview.videoReferences" :key="`technical-video-${reference.assetId}`">上一集完整成片 · {{ reference.assetId }} · {{ reference.sha256 }}</p></div></details></details>
           </div>
         </template>
       </div>
@@ -524,7 +521,7 @@ watch(
         <p v-if="videoErrors[activeAssetId]" class="notice error">{{ videoErrors[activeAssetId] }}</p>
         <div class="checkpoints"><button class="secondary" @click="togglePlayback">{{ playing ? "暂停" : "播放" }}</button><button v-for="time in [0.5, 3, 6, 9, 11.5]" :key="time" class="secondary" @click="jumpTo(time)">跳到 {{ time }}s</button><button class="secondary" @click="videoElements.get(activeAssetId)?.requestFullscreen()">全屏查看</button></div>
         <details class="technical"><summary>查看视频技术信息</summary><div><span>文件校验值 <code>{{ activeAsset.sha256 }}</code></span><span>规格 {{ activeAsset.metadata.resolution ?? "读取中" }} · {{ activeAsset.metadata.ratio ?? "读取中" }}</span><span>尺寸 {{ activeAsset.metadata.width }} × {{ activeAsset.metadata.height }}</span><span>时长 {{ Number(activeAsset.metadata.durationMs ?? 0) / 1000 }}s</span><span>编码 {{ activeAsset.metadata.codec ?? "读取中" }}</span></div></details>
-        <section class="submitted-prompt"><b>该候选使用的生成指令 · {{ candidateInputState(reviewVideoJob ?? undefined) }}</b><div v-if="activeInputSnapshot?.promptSections?.length" class="prompt-sections"><section v-for="section in activeInputSnapshot.promptSections" :key="section.key" class="prompt-section"><h3>{{ section.title }}</h3><p>{{ section.content }}</p></section></div><template v-else-if="activeInputSnapshot"><p>{{ activeInputSnapshot.prompt }}</p><small>旧任务未记录分段展示，以上为当时实际提交的完整指令。</small></template><p v-else>旧任务未记录完整生成指令，系统不会用当前内容推测。</p><details v-if="activeInputSnapshot"><summary>查看需要避免的问题与技术信息</summary><p>{{ activeInputSnapshot.negativePrompt }}</p><code>{{ activeInputSnapshot.inputHash }}</code></details></section>
+        <section class="submitted-prompt"><b>该候选使用的生成指令 · {{ candidateInputState(reviewVideoJob ?? undefined) }}</b><ProviderPrompt historical :compiled-provider-prompt="activeInputSnapshot?.compiledProviderPrompt" :prompt="activeInputSnapshot?.prompt" :negative-prompt="activeInputSnapshot?.negativePrompt" :prompt-sections="activeInputSnapshot?.promptSections" /><details v-if="activeInputSnapshot"><summary>查看技术信息</summary><code>{{ activeInputSnapshot.inputHash }}</code></details></section>
         <p v-if="loadingReview" role="status">正在读取已保存的验收记录…</p>
         <p v-if="reviewLoadError" role="alert">{{ reviewLoadError }}</p>
         <div class="quality-grid"><fieldset v-for="[key, label] in qualityItems" :key="key" :disabled="!reviewReady || savingReview"><legend>{{ label }}</legend><label v-for="verdict in verdictOptions" :key="verdict"><input v-model="quality[key]" type="radio" :name="key" :value="verdict" />{{ verdictLabels[verdict] }}</label></fieldset></div>
@@ -561,8 +558,7 @@ header h2 { margin-bottom: 0; font-size: 20px; }
 .prompt-block { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
 .prompt-block label { color: #b35f49; font-size: 10px; font-weight: 800; }
 .prompt-block p { margin: 7px 0 13px; color: #615a54; font-size: 12px; line-height: 1.65; }
-.prompt-block summary { cursor: pointer; font-weight: 700; }.prompt-actions { display: flex; gap: 7px; margin: 12px 0; }.technical-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-.prompt-sections { display: grid; gap: 10px; margin: 12px 0; }.prompt-section { padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: #faf7f2; }.prompt-section h3 { margin: 0; color: #9d5845; font-size: 11px; }.prompt-section p { margin: 6px 0 0; white-space: pre-wrap; }.legacy-prompt { margin: 12px 0; }
+.prompt-block summary { cursor: pointer; font-weight: 700; }.technical-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .advanced-continuity { margin: 12px 0; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: #faf7f2; }.video-reference-option { display: flex; align-items: flex-start; gap: 9px; margin-top: 10px; color: inherit !important; }.video-reference-option input { margin-top: 3px; }.video-reference-option span { display: grid; gap: 3px; }.video-reference-option small, .video-reference-status { color: var(--muted); font-size: 10px; line-height: 1.5; }.video-reference-status { margin-bottom: 0 !important; }
 .reference-list { display: grid; gap: 7px; margin: 15px 0; }
 .reference-list > div { display: grid; grid-template-columns: 28px 120px 1fr; align-items: center; padding: 9px; border-radius: 9px; background: var(--sage-soft); color: #58705c; font-size: 10px; }

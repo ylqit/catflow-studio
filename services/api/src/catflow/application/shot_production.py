@@ -54,8 +54,13 @@ class ShotAssemblyCommand(ContractModel):
 
 def shot_design_hash(shot: ShotSpec, references: list[dict], environment_intent: str) -> str:
     # Confirmation is deliberately excluded: selecting a frame must not invalidate itself.
+    shot_document = shot.model_dump(mode="json", by_alias=True, exclude={"confirmed_frame"})
+    # Empty new fields carry no design information; preserve historical confirmations.
+    for field in ("cameraSpatialRelation", "interactionConstraints", "visualExclusions"):
+        if not shot_document[field]:
+            del shot_document[field]
     document = {
-        "shot": shot.model_dump(mode="json", by_alias=True, exclude={"confirmed_frame"}),
+        "shot": shot_document,
         "references": references,
         "environmentIntent": environment_intent,
     }

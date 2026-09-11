@@ -20,6 +20,8 @@ class ProviderRuntime:
     maximum_video_input_references: int = 3
     maximum_segment_image_references: int = 9
     maximum_segment_video_references: int = 1
+    minimum_segment_reference_seconds: float = 2
+    maximum_segment_reference_seconds: float = 15
     segment_reference_publishing_ready: bool = False
     api_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     response_retention_seconds: int = 259200
@@ -39,6 +41,13 @@ class ProviderRuntime:
             raise ValueError(
                 "Ark endpoint must be an HTTPS URL without credentials or query parameters"
             )
+        if (
+            not 0
+            < self.minimum_segment_reference_seconds
+            <= self.maximum_segment_reference_seconds
+            <= 15
+        ):
+            raise ValueError("segment reference duration capability must be within 0–15 seconds")
         if not 1 <= self.response_retention_seconds <= 259200:
             raise ValueError("Response retention must be between 1 and 259200 seconds")
 
@@ -51,8 +60,6 @@ class ProviderRuntime:
             )
         if self.maximum_segment_video_references < 1:
             return "configured Provider capability cannot accept the repair context video"
-        if self.maximum_segment_image_references < 7:
-            return "configured Provider capability cannot accept seven ordered repair images"
         return None
 
     @property
@@ -81,6 +88,12 @@ class ProviderRuntime:
             == "true",
             maximum_video_references=int(os.environ.get("ARK_MAX_VIDEO_IMAGE_REFERENCES", "9")),
             maximum_video_input_references=int(os.environ.get("ARK_MAX_VIDEO_REFERENCES", "3")),
+            minimum_segment_reference_seconds=float(
+                os.environ.get("ARK_MIN_SEGMENT_REFERENCE_SECONDS", "2")
+            ),
+            maximum_segment_reference_seconds=float(
+                os.environ.get("ARK_MAX_SEGMENT_REFERENCE_SECONDS", "15")
+            ),
             maximum_segment_image_references=int(
                 os.environ.get("ARK_MAX_SEGMENT_IMAGE_REFERENCES", "9")
             ),

@@ -51,7 +51,7 @@ class SegmentVideoGenerationRequest:
     context_video_url: str | None
     issue_start_seconds: float
     issue_end_seconds: float
-    anchor_in_path: Path
+    anchor_in_path: Path | None
     anchor_out_path: Path | None
     canon_reference_paths: tuple[Path, ...]
     canon_reference_roles: tuple[str, ...]
@@ -61,6 +61,7 @@ class SegmentVideoGenerationRequest:
     prompt_compiler_revision: str = "segment-edit-v2"
     generation_mode: Literal["edit_existing", "from_frame"] = "edit_existing"
     generate_audio: bool = False
+    compiled_provider_prompt: str | None = None
 
     def __post_init__(self) -> None:
         if not self.instruction.strip():
@@ -71,7 +72,8 @@ class SegmentVideoGenerationRequest:
             raise ValueError("segment generation duration must be between 4 and 15 seconds")
         if self.generation_mode == "from_frame":
             if (
-                self.context_video_url is not None
+                self.anchor_in_path is None
+                or self.context_video_url is not None
                 or self.canon_reference_paths
                 or self.canon_reference_roles
             ):
@@ -79,16 +81,14 @@ class SegmentVideoGenerationRequest:
             return
         if self.generation_mode != "edit_existing":
             raise ValueError("unknown segment generation mode")
-        if len(self.canon_reference_paths) != 5:
-            raise ValueError("segment generation requires all five Canon references")
-        if self.canon_reference_roles != (
-            "episode_child",
-            "episode_cat",
-            "pair_scale",
-            "environment",
-            "style_board",
+        canonical = ("episode_child", "episode_cat", "pair_scale", "environment", "style_board")
+        expected = tuple(role for role in canonical if role in self.canon_reference_roles)
+        if self.canon_reference_roles != expected or len(self.canon_reference_paths) != len(
+            expected
         ):
             raise ValueError("segment generation Canon roles are incomplete or out of order")
+        if self.prompt_compiler_revision != "segment-edit-v7" and expected != canonical:
+            raise ValueError("legacy segment generation requires all five Canon references")
         parsed = urlsplit(self.context_video_url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("segment generation context video must use an HTTPS URL")
@@ -100,7 +100,11 @@ class PlanningGateway(Protocol):
     ) -> StructuredProviderResult: ...
 
     def plan_shots(
-        self, *, prompt: str, output_schema: dict[str, object], image_paths: tuple[Path, ...] = (),
+        self,
+        *,
+        prompt: str,
+        output_schema: dict[str, object],
+        image_paths: tuple[Path, ...] = (),
         input_instruction: str = "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
     ) -> StructuredProviderResult: ...
 
@@ -125,6 +129,7 @@ class ImageGenerationGateway(Protocol):
         negative_prompt: str,
         reference_paths: tuple[Path, ...],
         reference_roles: tuple[str, ...],
+        compiled_provider_prompt: str | None = None,
     ) -> ImageProviderResult: ...
 
 
@@ -150,6 +155,7 @@ class VideoGenerationGateway(Protocol):
         resolution: str,
         generate_audio: bool = False,
         generation_mode: str = "references",
+        provider_prompt_version: int = 0,
     ) -> VideoSubmissionResult: ...
 
     def submit_segment_video(
@@ -177,6 +183,7 @@ class ProviderGatewayError(RuntimeError):
         retry_after_seconds: float | None = None,
         response_id: str | None = None,
         client_request_id: str | None = None,
+        diagnostics: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -193,6 +200,7 @@ class ProviderGatewayError(RuntimeError):
         self.retry_after_seconds = retry_after_seconds
         self.response_id = response_id
         self.client_request_id = client_request_id
+        self.diagnostics = diagnostics
 
     def as_error_document(self) -> dict[str, object]:
         document: dict[str, object] = {
@@ -208,6 +216,7 @@ class ProviderGatewayError(RuntimeError):
             ("retryAfterSeconds", self.retry_after_seconds),
             ("responseId", self.response_id),
             ("clientRequestId", self.client_request_id),
+            ("diagnostics", self.diagnostics),
         ):
             if value is not None:
                 document[key] = value

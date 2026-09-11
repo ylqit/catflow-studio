@@ -83,7 +83,7 @@ function seconds(mode: "in" | "out", input: HTMLInputElement) {
   const next = { ...range.value, [mode === 'in' ? 'startFrame' : 'endFrame']: value };
   const length = next.endFrame - next.startFrame;
   if (!input.value.trim() || !Number.isFinite(value) || next.startFrame < bounds.value.startFrame || next.endFrame > bounds.value.endFrame || length < props.minDurationFrames || length > 360) {
-    rangeError.value = '请选择有效范围内 4–15 秒的区间；起止位置仍可精确到帧。';
+    rangeError.value = `请选择有效范围内 ${props.minDurationFrames}–360 帧的区间。`;
     emit("invalid", true); input.setCustomValidity(rangeError.value); input.reportValidity(); return;
   }
   input.setCustomValidity(''); rangeError.value = ''; emit('invalid', false); emit('update:modelValue', next); emit('seek', mode === 'in' ? next.startFrame : next.endFrame - 1);
@@ -119,7 +119,16 @@ function seconds(mode: "in" | "out", input: HTMLInputElement) {
       <button type="button" class="secondary" @click="emit('play')">播放选区</button>
     </div>
     <div v-else class="compact-inputs"><span>0 秒 / 0 帧</span><label v-if="fixedLength">取用起点<input aria-label="可视取用起点" type="number" min="0" :max="totalFrames - (range.endFrame - range.startFrame)" :value="range.startFrame" :disabled="disabled" @change="update('in', Number(($event.target as HTMLInputElement).value))" /></label><label v-else>定位帧<input aria-label="草稿定位帧" type="number" min="0" :max="totalFrames - 1" :value="positionDraft ?? currentFrame" @focus="positionDraft = String(currentFrame)" @input="positionDraft = ($event.target as HTMLInputElement).value" @change="emit('seek', Math.max(0, Math.min(totalFrames - 1, Math.trunc(Number(($event.target as HTMLInputElement).value) || 0))))" @blur="positionDraft = null" /></label><span>{{ (totalFrames / (rate || 24)).toFixed(3) }} 秒 / {{ totalFrames }} 帧</span></div>
-    <div v-if="minDurationFrames > 1 && !disabled" class="seconds-inputs"><label>开始（秒）<input aria-label="选区开始秒数" type="number" step="any" :value="(range.startFrame / (rate || 24)).toFixed(3)" @change="seconds('in', $event.target as HTMLInputElement)" /></label><label>结束（秒）<input aria-label="选区结束秒数" type="number" step="any" :value="(range.endFrame / (rate || 24)).toFixed(3)" @change="seconds('out', $event.target as HTMLInputElement)" /></label><b>{{ ((range.endFrame - range.startFrame) / (rate || 24)).toFixed(3) }} 秒 · 最少 4 秒</b><p v-if="rangeError" role="alert">{{ rangeError }}</p></div>
+    <div v-if="!disabled && !fixedLength" class="seconds-inputs">
+      <label>开始（秒）<input aria-label="选区开始秒数" type="number" step="any" :value="(range.startFrame / (rate || 24)).toFixed(3)" @change="seconds('in', $event.target as HTMLInputElement)" /></label>
+      <label>结束（秒）<input aria-label="选区结束秒数" type="number" step="any" :value="(range.endFrame / (rate || 24)).toFixed(3)" @change="seconds('out', $event.target as HTMLInputElement)" /></label>
+      <template v-if="compact">
+        <label>入点帧<input aria-label="选区入点帧" type="number" :min="bounds.startFrame" :max="range.endFrame - minDurationFrames" :value="range.startFrame" @change="update('in', Number(($event.target as HTMLInputElement).value))" /></label>
+        <label>出点帧<input aria-label="选区出点帧" type="number" :min="range.startFrame + minDurationFrames" :max="bounds.endFrame" :value="range.endFrame" @change="update('out', Number(($event.target as HTMLInputElement).value))" /></label>
+      </template>
+      <b>{{ range.endFrame - range.startFrame }} 帧 · {{ ((range.endFrame - range.startFrame) / (rate || 24)).toFixed(3) }} 秒</b>
+      <p v-if="rangeError" role="alert">{{ rangeError }}</p>
+    </div>
     <small v-if="!compact">拖动两端调整，拖动色块整体移动；方向键逐帧调整，Shift 调整 10 帧。</small>
   </section>
 </template>

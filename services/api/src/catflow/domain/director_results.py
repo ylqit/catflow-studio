@@ -10,8 +10,8 @@ from pydantic import ValidationError
 
 from .models import DirectorPlanPayload, ProfessionalDirectorOutput
 
-DIRECTOR_OUTPUT_CONTRACT = "professional-director-v2"
-DIRECTOR_NORMALIZATION_REVISION = "director-normalizer-v2"
+DIRECTOR_OUTPUT_CONTRACT = "professional-director-v3"
+DIRECTOR_NORMALIZATION_REVISION = "director-normalizer-v3"
 
 DirectorResultDisposition = Literal["candidate_ready", "needs_input", "invalid"]
 DirectorValidationSeverity = Literal["fatal", "blocking", "warning"]
@@ -295,7 +295,8 @@ def _normalize_blocking_paths(
 
 
 def normalize_director_result(
-    payload: object, *, legacy: bool = False
+    payload: object, *, legacy: bool = False,
+    output_contract_revision: str = DIRECTOR_OUTPUT_CONTRACT,
 ) -> DirectorNormalizationResult:
     """Normalize the untrusted Provider boundary without weakening saved ShotPlan DTOs."""
 
@@ -402,8 +403,20 @@ def normalize_director_result(
     # retained as an adoption-blocking issue.
     while True:
         try:
-            contract = DirectorPlanPayload if legacy else ProfessionalDirectorOutput
+            contract = (
+                DirectorPlanPayload
+                if legacy or output_contract_revision == "professional-director-v2"
+                else ProfessionalDirectorOutput
+            )
             plan = contract.model_validate(normalized)
+            issues.append(DirectorValidationIssue(
+                code="ending_review",
+                severity="warning",
+                path=f"shots.{len(plan.shots) - 1}.continuity.finalFrame",
+                message="结尾已按原文保留；文字结构校验不能判断最终画面的动作是否自然可见。",
+                suggested_action="结合末镜走位、微动作、物理变化与最终画面复核，并在成片中确认结尾效果。",
+                provider_value=plan.shots[-1].continuity.final_frame,
+            ))
             blocked = any(issue.severity != "warning" for issue in issues)
             return DirectorNormalizationResult(
                 raw_payload=raw_payload,

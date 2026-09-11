@@ -14,6 +14,7 @@ const names: Record<string, string> = {
   initialState: '开始状态', movementPath: '动作过程', endState: '结束状态', microMotions: '微动作（每行一项）',
   lens: '镜头设计', focalLengthEquivalent: '等效焦距', cameraHeight: '机位高度', cameraAngle: '拍摄角度', perspectiveIntent: '透视意图',
   composition: '构图', subjectPlacement: '主体位置', foreground: '前景', middleGround: '中景', background: '背景', screenDirection: '屏幕方向', eyeLine: '视线',
+  cameraSpatialRelation: '机位与空间关系', interactionConstraints: '交互约束（每行一项）', visualExclusions: '画面排除项（每行一项）',
   physicalChange: '可见变化', subject: '变化主体', before: '变化前', after: '变化后',
   continuity: '连续性', incoming: '入场承接', outgoing: '结尾承接', sharedVisualElement: '共享视觉元素', finalFrame: '最后画面',
   lighting: '光照', direction: '方向', softness: '柔和程度', colorIntent: '色彩意图',
@@ -29,7 +30,7 @@ const requiredGroups: Record<string, string[]> = {
 type Field = { path: string[]; label: string; value: string; list: boolean; missing: boolean };
 function fields(shot: Record<string, unknown>): Field[] {
   const result: Field[] = [];
-  for (const key of ['framing', 'cameraMovement', 'childAction', 'catAction', 'environmentChange', ...Object.keys(requiredGroups), 'directorIntent']) {
+  for (const key of ['framing', 'cameraMovement', 'childAction', 'catAction', 'environmentChange', 'cameraSpatialRelation', 'interactionConstraints', 'visualExclusions', ...Object.keys(requiredGroups), 'directorIntent']) {
     const children = requiredGroups[key];
     if (children) {
       const group = shot[key] && typeof shot[key] === 'object' ? shot[key] as Record<string, unknown> : {};
@@ -37,9 +38,9 @@ function fields(shot: Record<string, unknown>): Field[] {
     } else add([key], shot[key], true);
   }
   function add(path: string[], value: unknown, required: boolean) {
-    const list = Array.isArray(value);
+    const list = Array.isArray(value) || ['interactionConstraints', 'visualExclusions'].includes(path[0]);
     result.push({ path, label: path.map(part => names[part] ?? part).join(' → '),
-      value: value == null ? '' : list ? value.join('\n') : typeof value === 'object' ? JSON.stringify(value) : String(value),
+      value: value == null ? '' : Array.isArray(value) ? value.join('\n') : typeof value === 'object' ? JSON.stringify(value) : String(value),
       list, missing: required && (value == null || value === '') });
   }
   return result;
@@ -69,6 +70,7 @@ function update(index: number, path: string[], value: string, list = false) {
         <label v-for="field in fields(shot)" :key="field.path.join('.')" :class="{ missing: field.missing }">
           {{ field.label }} <strong v-if="field.missing">待补充</strong>
           <textarea rows="2" :aria-label="`镜头 ${index + 1} ${field.label}`" :value="field.value" @input="update(index, field.path, ($event.target as HTMLTextAreaElement).value, field.list)" />
+          <button v-if="field.list && field.missing" type="button" class="secondary" :aria-label="`镜头 ${index + 1} ${field.label} 标记为空列表`" @click="update(index, field.path, '', true)">无适用项，记录为空列表</button>
         </label>
       </details>
     </article>

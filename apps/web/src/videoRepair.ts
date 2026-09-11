@@ -41,7 +41,7 @@ export function isValidIssueRange(range: FrameRangeDto, totalFrames: number): bo
     && Number.isInteger(range.endFrame)
     && range.startFrame >= 0
     && range.endFrame <= totalFrames
-    && duration >= MIN_GENERATION_FRAMES
+    && duration >= MIN_ISSUE_FRAMES
     && duration <= Math.min(totalFrames, MAX_ISSUE_FRAMES);
 }
 

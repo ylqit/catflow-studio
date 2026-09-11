@@ -156,7 +156,7 @@ def add_job(sessions, project, **values):
                 idempotency_key=str(identifier),
                 provider="ark",
                 model="isolated-rules",
-                frozen_input_json={},
+                frozen_input_json=values.pop("frozen_input_json", {}),
                 **values,
             )
         )
@@ -306,6 +306,57 @@ def test_late_task_receipt_recovers_unknown_without_submission(database, tmp_pat
     job = repository.get_job(identifier)
     assert job.provider_task_id == "late-task" and job.status == "polling"
     assert job.execution.provider_status == "running"
+
+
+def test_query_lane_does_not_wait_for_unrelated_historical_receipts(database, tmp_path):
+    sessions, repository, project = database
+    historical = add_job(
+        sessions, project, status="succeeded", execution_json={"providerStatus": "succeeded"}
+    )
+    ReceiptJournal(tmp_path).append(historical, {"providerStatus": "failed"})
+    current = add_job(
+        sessions, project, status="submitted", provider_task_id="accepted-current-task"
+    )
+    query = DurableJobWorker(
+        sessions, NoCreateProvider(), worker_id="active-query", receipt_root=tmp_path, lane="query"
+    )
+    assert query.run_once()
+    # The current task is queried; historical reconciliation has its own lane.
+    assert repository.get_job(current).execution.query_failure_count == 1
+    assert not repository.get_job(historical).execution_facts.get("receiptConflict")
+
+    recovery = DurableJobWorker(
+        sessions, NoCreateProvider(), worker_id="receipt-recovery",
+        receipt_root=tmp_path, lane="reconcile",
+    )
+    recovery.run_once()
+    assert repository.get_job(historical).execution_facts["receiptConflict"] is True
+
+
+def test_reconciliation_lane_restores_unknown_without_claiming_provider_work(database, tmp_path):
+    sessions, repository, project = database
+    identifier = add_job(sessions, project, status="submission_unknown")
+    ReceiptJournal(tmp_path).append(
+        identifier, {"taskId": "late-accepted-task", "providerStatus": "running"}
+    )
+    recovery = DurableJobWorker(
+        sessions, NoCreateProvider(), worker_id="receipt-only",
+        receipt_root=tmp_path, lane="reconcile",
+    )
+    recovery.run_once()
+    job = repository.get_job(identifier)
+    assert job.provider_task_id == "late-accepted-task"
+    assert job.status == "polling"
+    assert job.execution.query_failure_count == 0
+    with sessions() as session:
+        assert session.get(JobRecord, identifier).lease_epoch == 0
+
+    query = DurableJobWorker(
+        sessions, NoCreateProvider(), worker_id="restored-query",
+        receipt_root=tmp_path, lane="query",
+    )
+    assert query.run_once()
+    assert repository.get_job(identifier).execution.query_failure_count == 1
 
 
 def test_new_query_request_id_is_not_a_task_conflict(database, tmp_path):
@@ -483,3 +534,313 @@ def test_corrupt_receipt_pauses_its_job_without_resubmission(database, tmp_path)
     )
     assert not worker.run_once()
     assert repository.get_job(identifier).execution.query_error["code"] == "receipt_read_error"
+
+
+class SimulatedTaskReader:
+    def __init__(self, task=None, *, fail=False, full=False):
+        self.task = task
+        self.fail = fail
+        self.full = full
+        self.get_calls = []
+
+    def list_tasks(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("secret provider error https://private.example")
+        return [self.task] * (50 if self.full else 1) if self.task else []
+
+    def get_task(self, task_id):
+        self.get_calls.append(task_id)
+        if self.fail:
+            raise RuntimeError("private")
+        return dict(self.task)
+
+
+def test_cloud_lookup_and_confirmed_association_then_poll_without_create(database, tmp_path):
+    sessions, repository, project = database
+    now = datetime.now(UTC)
+    identifier = add_job(
+        sessions, project, status="submission_unknown", provider_submission_started_at=now
+    )
+    reader = SimulatedTaskReader(
+        {
+            "id": "cloud-task",
+            "model": "isolated-rules",
+            "created_at": int(now.timestamp()),
+            "status": "running",
+            "content": {"video_url": "secret"},
+        }
+    )
+    service = StudioService(repository, provider_task_reader=reader)
+    found = service.lookup_provider_tasks(identifier)
+    assert found.status == "candidates" and found.coverage_complete
+    assert found.candidates[0].can_associate
+    assert "secret" not in found.model_dump_json()
+    assert repository.get_job(identifier).provider_task_id is None
+    command = JobRecoveryCommand(
+        action="associate_provider_task",
+        providerTaskId="cloud-task",
+        expectedRevision=0,
+        idempotencyKey="cloud-association",
+        confirmAssociation=True,
+        acknowledgeUnverifiedParameters=True,
+    )
+    with pytest.raises(StudioConflictError):
+        service.recover_job(identifier, command.model_copy(update={"confirm_association": False}))
+    first = service.recover_job(identifier, command)
+    assert first.status == "polling" and first.provider_task_id == "cloud-task"
+    assert reader.get_calls == ["cloud-task"]
+    reader.fail = True
+    assert service.recover_job(identifier, command).revision == first.revision
+    reader.fail = False
+    duplicate = add_job(
+        sessions,
+        project,
+        status="submission_unknown",
+        provider_submission_started_at=now,
+        frozen_input_json={"targetShotId": "other-shot"},
+    )
+    with pytest.raises(StudioConflictError, match="已关联"):
+        service.recover_job(duplicate, command)
+    worker = DurableJobWorker(
+        sessions, NoCreateProvider(), worker_id="association-test", receipt_root=tmp_path
+    )
+    assert worker.run_once()
+    assert repository.get_job(identifier).execution.query_failure_count == 1
+
+
+@pytest.mark.parametrize("case", ["empty", "failed", "bounded", "mismatch", "stale", "lease"])
+def test_cloud_lookup_failures_and_association_guards(database, case):
+    sessions, repository, project = database
+    now = datetime.now(UTC)
+    identifier = add_job(
+        sessions,
+        project,
+        status="submission_unknown",
+        provider_submission_started_at=now,
+        leased_until=now + timedelta(minutes=1) if case == "lease" else None,
+    )
+    task = {
+        "id": "cloud-task",
+        "model": "isolated-rules",
+        "status": "running",
+        "created_at": int(now.timestamp()),
+    }
+    if case == "mismatch":
+        task["model"] = "wrong-model"
+    reader = SimulatedTaskReader(
+        None if case == "empty" else task, fail=case == "failed", full=case == "bounded"
+    )
+    service = StudioService(repository, provider_task_reader=reader)
+    result = service.lookup_provider_tasks(identifier)
+    if case == "empty":
+        assert result.status == "not_found" and result.coverage_complete
+    elif case == "failed":
+        assert result.status == "query_failed" and "private" not in result.model_dump_json()
+    elif case == "bounded":
+        assert not result.coverage_complete and "覆盖不完整" in result.message
+    else:
+        command = JobRecoveryCommand(
+            action="associate_provider_task",
+            providerTaskId="cloud-task",
+            expectedRevision=99 if case == "stale" else 0,
+            idempotencyKey="cloud-guard",
+            confirmAssociation=True,
+            acknowledgeUnverifiedParameters=True,
+        )
+        with pytest.raises(StudioConflictError):
+            service.recover_job(identifier, command)
+        assert repository.get_job(identifier).provider_task_id is None
+
+
+def test_association_parameter_mismatches_and_missing_evidence():
+    from types import SimpleNamespace
+
+    from catflow.application.provider_recovery import task_candidate
+
+    now = datetime.now(UTC)
+    job = SimpleNamespace(
+        model="frozen",
+        provider_submission_started_at=now,
+        created_at=now,
+        frozen_input={},
+        input_snapshot=SimpleNamespace(
+            video={
+                "durationSeconds": 8,
+                "resolution": "480p",
+                "aspectRatio": "9:16",
+                "generateAudio": False,
+            }
+        ),
+    )
+    task = {
+        "id": "cloud",
+        "model": "frozen",
+        "created_at": int(now.timestamp()),
+        "status": "running",
+        "duration": 5,
+        "resolution": "https://private.example",
+    }
+    candidate = task_candidate(job, task)
+    assert not candidate.can_associate
+    assert len(candidate.mismatches) == 2
+    assert "https://" not in candidate.model_dump_json()
+    task.update(duration=8, resolution="480p")
+    assert task_candidate(job, task).can_associate
+    job.provider_submission_started_at = None
+    assert not task_candidate(job, task).can_associate
+
+
+def test_concurrent_association_is_atomic_and_keys_bind_task_id(database):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from catflow.application.service import StudioIdempotencyInputConflictError
+
+    sessions, repository, project = database
+    now = datetime.now(UTC)
+    ids = [
+        add_job(
+            sessions,
+            project,
+            status="submission_unknown",
+            provider_submission_started_at=now,
+            frozen_input_json={"targetShotId": f"shot-{index}"},
+        )
+        for index in range(2)
+    ]
+    reader = SimulatedTaskReader(
+        {
+            "id": "shared-task",
+            "model": "isolated-rules",
+            "created_at": int(now.timestamp()),
+            "status": "running",
+        }
+    )
+    service = StudioService(repository, provider_task_reader=reader)
+    command = JobRecoveryCommand(
+        action="associate_provider_task",
+        providerTaskId="shared-task",
+        expectedRevision=0,
+        idempotencyKey="concurrent-key",
+        confirmAssociation=True,
+        acknowledgeUnverifiedParameters=True,
+    )
+
+    def associate(identifier):
+        try:
+            return service.recover_job(identifier, command)
+        except StudioConflictError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(associate, ids))
+    winners = [result for result in results if result is not None]
+    assert len(winners) == 1
+    reader.task["id"] = "another-task"
+    with pytest.raises(StudioIdempotencyInputConflictError):
+        service.recover_job(
+            winners[0].id, command.model_copy(update={"provider_task_id": "another-task"})
+        )
+
+
+def test_associated_task_reaches_success_through_existing_landing_path(database, tmp_path):
+    from catflow_worker.runner import ProviderPoll
+
+    sessions, repository, project = database
+    now = datetime.now(UTC)
+    identifier = add_job(
+        sessions, project, status="submission_unknown", provider_submission_started_at=now
+    )
+    reader = SimulatedTaskReader(
+        {
+            "id": "finished-task",
+            "model": "isolated-rules",
+            "created_at": int(now.timestamp()),
+            "status": "succeeded",
+        }
+    )
+    service = StudioService(repository, provider_task_reader=reader)
+    service.recover_job(
+        identifier,
+        JobRecoveryCommand(
+            action="associate_provider_task",
+            providerTaskId="finished-task",
+            expectedRevision=0,
+            idempotencyKey="finished-association",
+            confirmAssociation=True,
+            acknowledgeUnverifiedParameters=True,
+        ),
+    )
+    landed = []
+
+    class CompletedProvider(NoCreateProvider):
+        def poll(self, task_id):
+            assert task_id == "finished-task"
+            return ProviderPoll(
+                status="succeeded", result={"videoUrl": "https://example.invalid/test"}
+            )
+
+    class SimulatedLanding:
+        def store_result(self, job_id):
+            landed.append(job_id)
+
+    worker = DurableJobWorker(
+        sessions,
+        CompletedProvider(),
+        worker_id="finished-association",
+        receipt_root=tmp_path,
+        result_handler=SimulatedLanding(),
+    )
+    assert worker.run_once()
+    assert worker.run_once()
+    assert landed == [identifier]
+    assert repository.get_job(identifier).status == "succeeded"
+
+
+def test_frozen_only_parameters_cannot_silently_match():
+    from types import SimpleNamespace
+
+    from catflow.application.provider_recovery import task_candidate
+
+    now = datetime.now(UTC)
+    job = SimpleNamespace(
+        model="frozen",
+        provider_submission_started_at=now,
+        created_at=now,
+        input_snapshot=None,
+        frozen_input={"durationSeconds": 8, "resolution": "480p", "generateAudio": True},
+    )
+    task = {
+        "id": "cloud",
+        "model": "frozen",
+        "created_at": int(now.timestamp()),
+        "status": "running",
+        "duration": 4,
+        "resolution": "720p",
+        "generate_audio": False,
+    }
+    candidate = task_candidate(job, task)
+    assert not candidate.can_associate and len(candidate.mismatches) == 3
+
+
+def test_api_owned_reader_only_issues_read_requests(monkeypatch):
+    import httpx
+
+    from catflow.infrastructure.ark_provider_reader import ArkProviderTaskReader
+
+    calls = []
+
+    def transport(request):
+        calls.append(request)
+        assert request.method == "GET"
+        if request.url.path.endswith("/tasks"):
+            assert request.url.params["filter.model"] == "frozen"
+            assert request.url.params["page_num"] == "2"
+            return httpx.Response(200, json={"items": [{"id": "cloud-task"}]})
+        return httpx.Response(200, json={"id": "cloud-task"})
+
+    monkeypatch.setenv("ARK_API_KEY", "simulated-key")
+    monkeypatch.setenv("ARK_BASE_URL", "https://provider.invalid/api/v3")
+    reader = ArkProviderTaskReader(transport=httpx.MockTransport(transport))
+    assert reader.list_tasks(model="frozen", page=2, page_size=50) == [{"id": "cloud-task"}]
+    assert reader.get_task("cloud-task") == {"id": "cloud-task"}
+    assert len(calls) == 2

@@ -70,7 +70,7 @@ const JOB_PRESENTATIONS: Record<JobDto["status"], StatusPresentation> = {
     terminal: true,
   },
   submission_unknown: {
-    label: "提交状态待确认",
+    label: "提交结果待核实",
     description: "提交状态需要人工确认，系统不会自动重复生成。",
     tone: "warn",
     terminal: true,
@@ -91,6 +91,48 @@ const JOB_PRESENTATIONS: Record<JobDto["status"], StatusPresentation> = {
 
 export function jobPresentation(status: JobDto["status"]): StatusPresentation {
   return JOB_PRESENTATIONS[status];
+}
+
+/** Present execution facts consistently across task cards and media placeholders. */
+export function jobExecutionPresentation(job: JobDto): StatusPresentation {
+  const base = jobPresentation(job.status);
+  const execution = job.execution;
+  if (job.status === 'submission_unknown') return { ...base, description: '提交结果待核实，暂未收到可查询编号。系统不会自动重复生成。' };
+  if (execution?.queryError) return {
+    ...base, tone: 'warn',
+    label: '外部进度待核实',
+    description: execution.queryError.code === 'local_adapter_error'
+      ? '本地查询组件异常，尚未取得火山最新状态。已暂停自动核实，修复后可重新核实原任务。'
+      : `暂时无法查询最新进度；上次确认：${execution.providerStatus ?? '未取得外部状态'}。`,
+  };
+  if (job.status === 'cancelled' || job.status === 'cancel_requested') return base;
+  const phase = job.kind === 'plan_video_edit' ? ['修改建议', '保存修改建议']
+    : job.kind === 'extract_continuity_frames' ? ['参考素材', '裁切参考视频与提取参考图片']
+    : job.kind === 'render_edit_preview' ? ['接回预览', '合成时间线与声音，准备接回预览']
+    : ['结果', '保存结果'];
+  if (job.status === 'succeeded') return { ...base, label: `${phase[0]}已保存`, description: `${phase[0]}已保存，等待人工查看。` };
+  if (job.status === 'failed') {
+    if (execution?.providerStatus === 'failed') return { ...base, description: '火山任务明确失败，返回详情已保存。' };
+    if (execution?.stage === 'submit' && job.error?.submissionUnknown === false && job.error.httpStatus) return {
+      ...base, label: '提交被拒绝', description: job.error.code === 'AccountOverdueError'
+        ? '火山因账户欠费拒绝本次提交；未创建生成任务，拒绝回执已保存。'
+        : `火山拒绝本次提交（HTTP ${job.error.httpStatus}），拒绝回执已保存。`,
+    };
+    const received = ['completed', 'succeeded'].includes(execution?.providerStatus ?? '') || execution?.resultState === 'complete';
+    if (received && ['generate_video', 'regenerate_video_segment'].includes(job.kind)) return { ...base, label: '结果下载或保存中断', description: '外部已生成，结果下载或保存未完成。可恢复原任务的结果处理。' };
+    return { ...base, label: `${phase[0]}未完成`, description: `${phase[1]}阶段中断，请查看错误后恢复。` };
+  }
+  if (job.kind === 'extract_continuity_frames' || job.kind === 'render_edit_preview') return {
+    ...base, label: job.kind === 'extract_continuity_frames' ? '正在准备参考' : '正在准备接回预览',
+    description: `${phase[1]}，不调用生成模型。`,
+  };
+  if (job.status === 'storing' || ['completed', 'succeeded'].includes(execution?.providerStatus ?? '')) {
+    if (['generate_video', 'regenerate_video_segment'].includes(job.kind)) return { ...base, label: '正在下载并保存视频', description: '云端已生成，正在下载结果并保存完整候选。' };
+    return { ...base, label: `正在${phase[1]}`, description: `${phase[1]}，完成后可查看。` };
+  }
+  if (job.kind === 'plan_video_edit') return { ...base, label: '正在整理修改建议', description: 'AI 正在整理文字方案，完成后由你决定是否填入。' };
+  if (job.status === 'submitting') return { ...base, description: '正在提交或接收' };
+  return base;
 }
 
 export function paidModelBlockedReason(

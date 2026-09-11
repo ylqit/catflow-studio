@@ -183,10 +183,21 @@ function segmentJobLabel(job: JobDto | null): string {
 
 function planStatus(plan: SeriesPlanVersionDto): string {
   if (plan.active) return "当前方案";
-  if (plan.status === "candidate") return plan.disposition === "needs_input" ? "待补充" : "新方案 · 待确认";
   if (plan.status === "rejected") return "未采用";
   if (plan.status === "superseded") return "已被新方案取代";
+  if (plan.status === "candidate") {
+    if (plan.promptRevision === "normalized-series-plan-v1") return plan.disposition === "needs_input" ? "规范化版本 · 待补充" : "规范化版本 · 待确认";
+    return plan.disposition === "needs_input" ? "待补充" : "新方案 · 待确认";
+  }
   return "历史方案";
+}
+
+function issueText(issue: SeriesPlanVersionDto["issues"][number]): string {
+  if (issue.code !== "normalized_source_coverage") return `${issue.message}${issue.suggestedAction ? ` ${issue.suggestedAction}` : ""}`;
+  const change = issue.beforeValue !== undefined || issue.afterValue !== undefined
+    ? `${issue.beforeValue ?? "（空）"} → ${issue.afterValue ?? "（空）"}`
+    : issue.message;
+  return `${issue.path}：${change}${issue.message && issue.message !== change ? `；${issue.message}` : ""}`;
 }
 
 function episodeAction(episode: SeriesEpisodeDto): string {
@@ -425,6 +436,26 @@ async function saveEditedPlan() {
   finally { actionBusy.value = false; }
 }
 
+async function normalizeSavedPlan(plan: SeriesPlanVersionDto) {
+  if (actionBusy.value) return;
+  actionBusy.value = true; error.value = "";
+  try {
+    const currentPreview = await api.previewSeriesPlan(seriesId);
+    preview.value = currentPreview;
+    const expectedSettingsHash = currentPreview.settingsInputHash;
+    if (!expectedSettingsHash) throw new Error("当前设置缺少校验标识，请刷新后重试。");
+    const saved = await api.materializeSeriesPlan(seriesId, plan.id, {
+      source: "saved_result",
+      basePlanVersionId: plan.id,
+      expectedSettingsHash,
+      idempotencyKey: `series-normalize:${plan.id}:${expectedSettingsHash.slice(0, 32)}`,
+    });
+    await load();
+    selectedPlanId.value = saved.id;
+  } catch (reason) { error.value = reason instanceof Error ? reason.message : "方案没有完成规范化校验。"; }
+  finally { actionBusy.value = false; }
+}
+
 async function openEpisode(episode: SeriesEpisodeDto) {
   if (actionBusy.value) return;
   actionBusy.value = true; error.value = "";
@@ -581,13 +612,13 @@ watch(selectedPlanId, () => { editingPlan.value = false; editablePlan.value = nu
       </section>
 
       <section v-if="plans.length" class="plan-versions">
-        <button v-for="plan in plans" :key="plan.id" :class="['plan-version', { active: selectedPlan?.id === plan.id }]" @click="selectedPlanId = plan.id"><b>方案 {{ plan.revision }}</b><span>{{ planStatus(plan) }}</span></button>
+        <button v-for="plan in plans" :key="plan.id" :class="['plan-version', { active: selectedPlan?.id === plan.id }]" @click="selectedPlanId = plan.id"><b>方案 {{ plan.revision }}</b><span>{{ planStatus(plan) }}</span><span v-if="plan.promptRevision === 'normalized-series-plan-v1' && plan.basePlanVersionId">来源方案 {{ plans.find((item) => item.id === plan.basePlanVersionId)?.revision ?? plan.basePlanVersionId }}</span></button>
       </section>
 
       <section v-if="selectedPlan" id="route" class="card studio-section">
-        <header><div><h2>整季路线</h2><p>{{ selectedPlan.plan.seriesBible.logline }}</p></div><div v-if="selectedPlan.status === 'candidate'" class="candidate-actions"><button class="ghost" @click="startPlanEdit(selectedPlan)">{{ selectedPlan.disposition === "needs_input" ? "补充方案" : "编辑方案" }}</button><button class="ghost" @click="rejectPlan(selectedPlan)">不采用</button><button class="primary" :disabled="selectedPlan.disposition !== 'candidate_ready' || actionBusy" @click="adoptPlan(selectedPlan)">采用整季方案</button></div></header>
+        <header><div><h2>整季路线</h2><p>{{ selectedPlan.plan.seriesBible.logline }}</p></div><div v-if="selectedPlan.status === 'candidate'" class="candidate-actions"><button class="secondary normalize-plan" :disabled="actionBusy" @click="normalizeSavedPlan(selectedPlan)">规范化并重新校验</button><button class="ghost" @click="startPlanEdit(selectedPlan)">{{ selectedPlan.disposition === "needs_input" ? "补充方案" : "编辑方案" }}</button><button class="ghost" @click="rejectPlan(selectedPlan)">不采用</button><button class="primary" :disabled="selectedPlan.disposition !== 'candidate_ready' || actionBusy" @click="adoptPlan(selectedPlan)">采用整季方案</button></div></header>
         <p v-if="selectedPlan.issues.length" class="notice">方案还包含 {{ selectedPlan.issues.length }} 项需要查看的内容。{{ selectedPlan.disposition === "needs_input" ? "补充后才能采用，但不需要重新调用模型。" : "不影响查看。" }}</p>
-        <ul v-if="selectedPlan.issues.length" class="notice"><li v-for="(issue, index) in selectedPlan.issues" :key="index">{{ issue.message }} {{ issue.suggestedAction }}</li></ul>
+        <ul v-if="selectedPlan.issues.length" class="notice"><li v-for="(issue, index) in selectedPlan.issues" :key="index">{{ issueText(issue) }}</li></ul>
         <section v-if="!editingPlan && series.adaptationPolicy === 'condense_mainline'" class="adaptation-review">
           <h3>原文如何缩编</h3>
           <article v-for="item in selectedPlan.plan.sourceTreatments" :key="item.sourceUnitOrdinal"><b>来源 {{ item.sourceUnitOrdinal }} · {{ treatmentLabels[item.treatment] }}</b><p>{{ item.reason }}</p><small>{{ item.treatment === 'omitted' ? '已省略，不计入覆盖' : '用于第 ' + item.episodeOrders.join('、') + ' 集' }}</small></article>

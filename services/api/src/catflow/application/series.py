@@ -22,9 +22,11 @@ SeriesPlanDisposition = Literal["candidate_ready", "needs_input", "invalid"]
 SourceCoverageMode = Literal["whole", "partial", "continuation"]
 MAX_SERIES_PLANNING_BATCH = 30
 DEFAULT_ONGOING_PLANNING_BATCH = 12
+SERIES_NORMALIZATION_REVISION = "series-plan-normalization-v2"
 
 
 class SeriesCreateCommand(ContractModel):
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
     adaptation_policy: AdaptationPolicy = Field(alias="adaptationPolicy", default="preserve_all")
     title: str = Field(min_length=1, max_length=160)
     premise: str = Field(min_length=1, max_length=4_000)
@@ -192,6 +194,9 @@ class SeriesValidationIssueDto(ContractModel):
     path: str
     message: str
     suggested_action: str | None = Field(alias="suggestedAction", default=None)
+    normalization_revision: str | None = Field(alias="normalizationRevision", default=None)
+    before_value: str | None = Field(alias="beforeValue", default=None)
+    after_value: str | None = Field(alias="afterValue", default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +206,7 @@ class SeriesPlanNormalizationResult:
     disposition: SeriesPlanDisposition
     issues: tuple[SeriesValidationIssueDto, ...]
     plan: SeriesPlanDraft | None = None
+    normalization_revision: str | None = None
 
     @property
     def recoverable(self) -> bool:
@@ -211,6 +217,7 @@ class SeriesPlanNormalizationResult:
             "disposition": self.disposition,
             "recoverable": self.recoverable,
             "issues": [issue.model_dump(mode="json", by_alias=True) for issue in self.issues],
+            "normalizationRevision": self.normalization_revision,
         }
         if self.normalized_payload is not None:
             document["normalizedPayload"] = self.normalized_payload
@@ -282,6 +289,7 @@ class SeriesPlanPreviewDto(ContractModel):
     model: str
     capability_revision: str = Field(alias="capabilityRevision")
     input_hash: str = Field(alias="inputHash", pattern=r"^[a-f0-9]{64}$")
+    settings_input_hash: str = Field(alias="settingsInputHash", pattern=r"^[a-f0-9]{64}$")
     prompt: str
     output_schema: dict[str, Any] = Field(alias="outputSchema")
     planned_episode_count: int = Field(alias="plannedEpisodeCount")
@@ -371,8 +379,21 @@ class SeriesPlanActivationCommand(ContractModel):
 
 class SeriesPlanMaterializeCommand(ContractModel):
     base_plan_version_id: uuid.UUID = Field(alias="basePlanVersionId")
-    plan: SeriesPlanDraft
+    source: Literal["edited", "saved_result"] = "edited"
+    plan: SeriesPlanDraft | None = None
+    expected_settings_hash: str | None = Field(
+        alias="expectedSettingsHash", default=None, pattern=r"^[a-f0-9]{64}$"
+    )
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> SeriesPlanMaterializeCommand:
+        if self.source == "saved_result":
+            if "plan" in self.model_fields_set or self.expected_settings_hash is None:
+                raise ValueError("saved_result requires expectedSettingsHash and forbids plan")
+        elif self.plan is None or self.expected_settings_hash is not None:
+            raise ValueError("edited requires plan and does not accept expectedSettingsHash")
+        return self
 
 
 class SeriesEpisodeMaterializeCommand(ContractModel):
@@ -538,8 +559,12 @@ def normalize_series_plan_result(
     adaptation_policy: AdaptationPolicy = "preserve_all",
     expected_duration_seconds: int | None = None,
     must_keep: list[str] | None = None,
+    normalization_revision: str | None = None,
 ) -> SeriesPlanNormalizationResult:
     """Preserve paid Provider output while separating parseability from adoption rules."""
+
+    if normalization_revision not in {None, SERIES_NORMALIZATION_REVISION}:
+        raise ValueError(f"unsupported series normalization revision: {normalization_revision}")
 
     if not isinstance(payload, dict):
         issue = SeriesValidationIssueDto(
@@ -548,7 +573,9 @@ def normalize_series_plan_result(
             path="",
             message="模型结果不是可读取的 JSON 对象。",
         )
-        return SeriesPlanNormalizationResult({}, None, "invalid", (issue,))
+        return SeriesPlanNormalizationResult(
+            {}, None, "invalid", (issue,), normalization_revision=normalization_revision
+        )
     raw_payload = deepcopy(payload)
     extras: list[str] = []
     normalized = _normalize_series_plan_shape(payload, extras)
@@ -559,7 +586,9 @@ def normalize_series_plan_result(
             path="",
             message="模型结果缺少可读取的系列设定或剧集列表。",
         )
-        return SeriesPlanNormalizationResult(raw_payload, None, "invalid", (issue,))
+        return SeriesPlanNormalizationResult(
+            raw_payload, None, "invalid", (issue,), normalization_revision=normalization_revision
+        )
     try:
         plan = SeriesPlanDraft.model_validate(normalized)
     except ValidationError as exc:
@@ -572,7 +601,60 @@ def normalize_series_plan_result(
             )
             for error in exc.errors(include_url=False)
         )
-        return SeriesPlanNormalizationResult(raw_payload, normalized, "invalid", issues)
+        return SeriesPlanNormalizationResult(
+            raw_payload, normalized, "invalid", issues,
+            normalization_revision=normalization_revision,
+        )
+
+    normalization_issues: list[SeriesValidationIssueDto] = []
+    if normalization_revision == SERIES_NORMALIZATION_REVISION and (
+        adaptation_policy == "condense_mainline"
+    ):
+        episode_orders = [episode.order for episode in plan.episodes]
+        treatment_ordinals = [item.source_unit_ordinal for item in plan.source_treatments]
+        for treatment in plan.source_treatments:
+            ordinal = treatment.source_unit_ordinal
+            if (
+                treatment.treatment not in {"merged", "simplified"}
+                or ordinal not in (source_unit_ordinals or set())
+                or treatment_ordinals.count(ordinal) != 1
+                or not treatment.reason.strip()
+                or not treatment.episode_orders
+                or len(set(treatment.episode_orders)) != len(treatment.episode_orders)
+                or len(set(episode_orders)) != len(episode_orders)
+                or not set(treatment.episode_orders) <= set(episode_orders)
+            ):
+                continue
+            references = [
+                (episode_index, coverage_index, episode.order, coverage)
+                for episode_index, episode in enumerate(plan.episodes)
+                for coverage_index, coverage in enumerate(episode.source_coverage)
+                if coverage.source_unit_ordinal == ordinal
+            ]
+            if (
+                {order for _, _, order, _ in references} != set(treatment.episode_orders)
+                or len(references) != len(treatment.episode_orders)
+                or any(not coverage.coverage_note.strip() for _, _, _, coverage in references)
+            ):
+                continue
+            for episode_index, coverage_index, _, coverage in references:
+                if coverage.coverage != "whole":
+                    continue
+                coverage.coverage = "partial"
+                normalized["episodes"][episode_index]["sourceCoverage"][coverage_index][
+                    "coverage"
+                ] = "partial"
+                normalization_issues.append(
+                    SeriesValidationIssueDto(
+                        code="normalized_source_coverage",
+                        severity="warning",
+                        path=f"episodes.{episode_index}.sourceCoverage.{coverage_index}.coverage",
+                        message="模型已声明合并或简化该来源，覆盖程度按部分覆盖记录；剧情原文未改写。",
+                        normalizationRevision=normalization_revision,
+                        beforeValue="whole",
+                        afterValue="partial",
+                    )
+                )
 
     validation_disposition, validation_issues = validate_series_plan(
         plan,
@@ -594,13 +676,14 @@ def normalize_series_plan_result(
         )
         for path in extras
     ]
-    issues = (*validation_issues, *extra_issues)
+    issues = (*validation_issues, *normalization_issues, *extra_issues)
     return SeriesPlanNormalizationResult(
         raw_payload,
         normalized,
         validation_disposition,
         issues,
         plan,
+        normalization_revision,
     )
 
 
@@ -868,12 +951,49 @@ CONDENSE_PLANNING_INSTRUCTIONS = (
     "episodeOrders 列出实际使用它的集数，reason 解释保留内容和删改原因。"
     "省略事件的 episodeOrders 为空且不得进入 sourceCoverage；"
     "合并或简化使用 partial 并说明保留部分。"
-    "在 preservedRequirements 中逐条原样引用必须保留的要求，"
-    "说明 handling 与对应 episodeOrders。"
+    "在 preservedRequirements 中只逐条原样引用【用户必须保留要求】列表中的条目，"
+    "说明 handling 与对应 episodeOrders；该列表为空时返回空数组。"
+    "不要把故事全文、通用创作规则、时长或输出字段说明当成用户要求列入该数组。"
     "无法容纳、冲突或关键结局无法保留时，在 adaptationRisks 中"
     "明确 blocking=true；保留方案供修改。"
     "动作时长只是规划估计，不能声称保证模型执行成功。"
 )
+
+
+def series_plan_settings_hash(
+    series: StorySeriesDto, source_unit_ordinals: set[int]
+) -> str:
+    """Bind local revalidation to editable settings and the source reference universe."""
+    document = {
+        "series": series.model_dump(
+            mode="json", by_alias=True,
+            include=set(SeriesCreateCommand.model_fields) | {"id", "canon_profile_id"},
+        ),
+        "sourceUnitOrdinals": sorted(source_unit_ordinals),
+    }
+    return hashlib.sha256(
+        json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def series_plan_materialization_hash(command: SeriesPlanMaterializeCommand) -> str:
+    # Keep the existing edited-version hash so historical idempotent replays remain valid.
+    if command.source == "saved_result":
+        document = {
+            "basePlanVersionId": str(command.base_plan_version_id),
+            "source": command.source,
+            "expectedSettingsHash": command.expected_settings_hash,
+            "normalizationRevision": SERIES_NORMALIZATION_REVISION,
+        }
+    else:
+        assert command.plan is not None  # Validated by the command's source contract.
+        document = {
+            "basePlanVersionId": str(command.base_plan_version_id),
+            "plan": command.plan.model_dump(mode="json", by_alias=True),
+        }
+    return hashlib.sha256(
+        json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def compile_series_plan_preview(
@@ -885,7 +1005,7 @@ def compile_series_plan_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesPlanPreviewDto:
-    prompt_revision = "catflow-series-planner-v2"
+    prompt_revision = "catflow-series-planner-v5-contract"
     source_beats = source_beats or []
     requested_episode_count = min(
         series.planned_episode_count or DEFAULT_ONGOING_PLANNING_BATCH,
@@ -908,6 +1028,12 @@ def compile_series_plan_preview(
             "continuation 及覆盖内容。"
         )
     prompt = (
+        "每集写清参与者、道具数量、初始位置、动作目的和结束状态；物体移动保持同一实例。"
+        "区分身份等长期连续性与本集重新设置的场景、姿态、持有物，不把整季行为顺序搬进单集。"
+        "继承、调整、重置应遵守已确认决定。主动作按主体、身体部位或工具、接触对象、方向、"
+        "可见结果形成因果链，安排必要反应，确保目标时长足够执行。"
+        "环境意图区分固定陈设、可移动道具与角色携带物，只描述动作前的环境；"
+        "不把携带物额外复制进背景，不把动作结果提前冻结为陈设。"
         "你是 CatFlow 系列策划。只规划整季系列圣经和逐集简纲，不生成完整剧本、分镜或媒体。\n"
         f"系列：{series.title}\n核心构想：{series.premise}\n"
         f"叙事模式：{series.narrative_mode}\n系列长度：{series.length_mode}\n"
@@ -916,7 +1042,8 @@ def compile_series_plan_preview(
         f"世界设定：{series.world_setting}\n情绪方向：{series.emotional_direction}\n"
         f"结局目标：{series.ending_goal or '由整季路线自然收束'}\n"
         f"贯穿元素：{'、'.join(series.recurring_elements) or '无额外指定'}\n"
-        f"必须保留：{'、'.join(series.must_keep) or '固定儿童、猫咪和画风'}\n"
+        "【通用创作规则】保留来源核心因果与结局，保持既定儿童、猫咪身份和画风。\n"
+        f"【用户必须保留要求】{json.dumps(series.must_keep, ensure_ascii=False)}\n"
         f"必须避免：{'、'.join(series.must_avoid) or '危险动作和身份漂移'}\n"
         "每集必须能在 8–15 秒内完成一个可见事件，包含开场状态、触发、儿童动作、"
         "猫咪反应、可见变化和结尾状态。连续模式必须写清相邻剧集承接点。"
@@ -924,8 +1051,12 @@ def compile_series_plan_preview(
         f"单次最多规划 {MAX_SERIES_PLANNING_BATCH} 集；这是调用批量边界，不是系列总集数上限。"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-planner-v3-condense"
+        prompt_revision = "catflow-series-planner-v5-condense-contract"
         prompt += CONDENSE_PLANNING_INSTRUCTIONS
+
+    if series.additional_notes:
+        prompt += f"\n【补充制作约束】\n{series.additional_notes}"
+        prompt_revision += "-notes"
 
     schema = series_plan_output_schema()
     document = {
@@ -936,6 +1067,7 @@ def compile_series_plan_preview(
         "model": model,
         "capabilityRevision": capability_revision,
         "promptRevision": prompt_revision,
+        "normalizationRevision": SERIES_NORMALIZATION_REVISION,
         "prompt": prompt,
         "outputSchema": schema,
         "sourceBeats": [beat.model_dump(mode="json", by_alias=True) for beat in source_beats],
@@ -950,6 +1082,9 @@ def compile_series_plan_preview(
         model=model,
         capabilityRevision=capability_revision,
         inputHash=digest,
+        settingsInputHash=series_plan_settings_hash(
+            series, {beat.binding_order for beat in source_beats}
+        ),
         prompt=prompt,
         outputSchema=schema,
         plannedEpisodeCount=requested_episode_count,
@@ -978,7 +1113,7 @@ def compile_series_plan_segment_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesPlanSegmentPreviewDto:
-    prompt_revision = "catflow-series-segment-planner-v1"
+    prompt_revision = "catflow-series-segment-planner-v3-contract"
     end_episode_order = command.start_episode_order + command.requested_episode_count - 1
     remaining_episode_count = (
         max((series.planned_episode_count or 0) - end_episode_order, 0)
@@ -990,6 +1125,12 @@ def compile_series_plan_segment_preview(
         or "本系列没有绑定来源剧情节拍。"
     )
     prompt = (
+        "每集写清参与者、道具数量、初始位置、动作目的和结束状态；物体移动保持同一实例。"
+        "区分身份等长期连续性与本集重新设置的场景、姿态、持有物，不把整季行为顺序搬进单集。"
+        "继承、调整、重置应遵守已确认决定。主动作按主体、身体部位或工具、接触对象、方向、"
+        "可见结果形成因果链，安排必要反应，确保目标时长足够执行。"
+        "环境意图区分固定陈设、可移动道具与角色携带物，只描述动作前的环境；"
+        "不把携带物额外复制进背景，不把动作结果提前冻结为陈设。"
         "你是 CatFlow 长系列分段策划。当前系列圣经和首段方案已经采用；"
         "本次只规划用户明确指定的下一段，不生成后续段、完整剧本、图片、分镜或视频。\n"
         f"系列：{series.title}\n当前采用方案：版本 {active_plan.revision}\n"
@@ -1003,11 +1144,12 @@ def compile_series_plan_segment_preview(
         f"{source_section}\n"
         "剧集 order 必须与本次范围逐一对应。sourceCoverage 只能引用上述安全序号；"
         "允许组合相邻节拍或把过长节拍拆到连续剧集，并明确 whole、partial 或 continuation。"
+        "\n【通用创作规则】保留来源核心因果与结局，保持既定儿童、猫咪身份和画风。\n"
+        f"【用户必须保留要求】{json.dumps(series.must_keep, ensure_ascii=False)}\n"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-segment-planner-v2-condense"
+        prompt_revision = "catflow-series-segment-planner-v3-condense-contract"
         prompt += CONDENSE_PLANNING_INSTRUCTIONS
-        prompt += f"必须保留：{json.dumps(series.must_keep, ensure_ascii=False)}"
     schema = series_plan_output_schema()
     document = {
         "seriesId": str(series.id),
@@ -1025,6 +1167,7 @@ def compile_series_plan_segment_preview(
         "model": model,
         "capabilityRevision": capability_revision,
         "promptRevision": prompt_revision,
+        "normalizationRevision": SERIES_NORMALIZATION_REVISION,
         "prompt": prompt,
         "outputSchema": schema,
     }
@@ -1063,9 +1206,15 @@ def compile_series_episode_story_preview(
 ) -> SeriesEpisodeStoryPreviewDto:
     if episode.project_id is None:
         raise ValueError("series episode must be materialized before story planning")
-    prompt_revision = "catflow-series-episode-planner-v2-context"
+    prompt_revision = "catflow-series-episode-planner-v4-spatial"
     outline = episode.outline
     prompt = (
+        "每集写清参与者、道具数量、初始位置、动作目的和结束状态；物体移动保持同一实例。"
+        "区分身份等长期连续性与本集重新设置的场景、姿态、持有物，不把整季行为顺序搬进单集。"
+        "继承、调整、重置应遵守已确认决定。主动作按主体、身体部位或工具、接触对象、方向、"
+        "可见结果形成因果链，安排必要反应，确保目标时长足够执行。"
+        "环境意图区分固定陈设、可移动道具与角色携带物，只描述动作前的环境；"
+        "不把携带物额外复制进背景，不把动作结果提前冻结为陈设。"
         "你是 CatFlow 单集故事策划。根据已经采用的整季路线，只扩写当前这一集，"
         "不得生成其他集、分镜、图片或视频。\n"
         f"系列：{series.title}\n整季核心：{active_plan.plan.series_bible.logline}\n"
@@ -1083,7 +1232,7 @@ def compile_series_episode_story_preview(
         "变化过程和结束状态。保持固定儿童、猫咪身份与系列设定，不擅自改写整季路线。"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-episode-planner-v3-condense"
+        prompt_revision = "catflow-series-episode-planner-v4-condense-spatial"
         treatment_document = [
             item.model_dump(mode="json", by_alias=True)
             for item in (

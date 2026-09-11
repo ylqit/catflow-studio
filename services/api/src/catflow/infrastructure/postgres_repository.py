@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import delete, func, or_, select, text, update
@@ -22,17 +24,22 @@ from catflow.application.job_execution import JobRecoveryCommand
 from catflow.application.project_library import suggested_theme_tags
 from catflow.application.series import (
     MAX_SERIES_PLANNING_BATCH,
+    SERIES_NORMALIZATION_REVISION,
     SeriesCreateCommand,
     SeriesEpisodeDto,
     SeriesEpisodeOutlineDraft,
     SeriesPatchCommand,
     SeriesPlanDraft,
+    SeriesPlanMaterializeCommand,
     SeriesPlanSegmentActivationCommand,
     SeriesPlanSegmentVersionDto,
     SeriesPlanVersionDto,
     SeriesSourceBeatDto,
     SeriesValidationIssueDto,
     StorySeriesDto,
+    normalize_series_plan_result,
+    series_plan_materialization_hash,
+    series_plan_settings_hash,
     validate_series_plan,
 )
 from catflow.application.service import (
@@ -44,6 +51,7 @@ from catflow.application.service import (
     EditDecisionListV2,
     EditDecisionListV3,
     EditVersionDto,
+    EnvironmentGenerationDraft,
     FixedCanonRole,
     GenerationInputSnapshotDto,
     ImageGenerationInputSnapshotDto,
@@ -56,7 +64,6 @@ from catflow.application.service import (
     PlannerMessageDto,
     PlannerSnapshotDto,
     ProjectCreate,
-    EnvironmentGenerationDraft,
     ProjectDto,
     ProjectPatch,
     ProjectSelectionDto,
@@ -75,6 +82,8 @@ from catflow.application.service import (
     VideoRepairDto,
     VideoRepairStatus,
     VideoReviewDto,
+    require_video_edit_available,
+    validate_video_edit_replacement,
 )
 from catflow.application.story_imports import (
     StoryImportAnalysisDraft,
@@ -87,12 +96,13 @@ from catflow.application.story_imports import (
     StorySourceRelationSuggestionDto,
     StorySourceUnitDto,
     recommended_episode_count,
+    story_import_confirmation_request_snapshot,
 )
 from catflow.domain.billing import RateCardItem, rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
 from catflow.domain.video_repairs import FrameRange, RationalFrameRate
 
-from .database import canon_v4_document, ensure_canon_v4
+from .database import ensure_canon_v4
 from .job_lifecycle import record_job_event, schedule_recovery
 from .models import (
     AssetRecord,
@@ -226,6 +236,13 @@ class PostgresStudioRepository:
             record = ensure_canon_v4(session)
             return _canon_profile_dto(session, record)
 
+    def get_canon_profile(self, profile_id: uuid.UUID) -> CanonProfileDto:
+        with self._sessions() as session:
+            record = session.get(CanonProfileRecord, profile_id)
+            if record is None:
+                raise StudioNotFoundError("Canon profile not found")
+            return _canon_profile_dto(session, record)
+
     def register_canon_asset(
         self,
         *,
@@ -267,13 +284,21 @@ class PostgresStudioRepository:
                         "fixed asset must be a matching global Canon candidate"
                     )
                 fixed[role] = asset
-            active = ensure_canon_v4(session)
+            active = (
+                session.get(CanonProfileRecord, command.base_profile_id)
+                if command.base_profile_id is not None
+                else ensure_canon_v4(session)
+            )
+            if active is None:
+                raise StudioNotFoundError("base Canon profile not found")
             version = session.scalar(
                 select(func.coalesce(func.max(CanonProfileRecord.version), 0)).where(
                     CanonProfileRecord.profile_key == active.profile_key
                 )
             )
-            document = canon_v4_document()
+            document = deepcopy(active.profile_json)
+            if command.cat is not None:
+                document["cat"] = command.cat.model_dump(mode="json", by_alias=True)
             document["fixedAssets"] = {
                 role: {"assetId": str(asset.id), "sha256": asset.sha256}
                 for role, asset in fixed.items()
@@ -290,15 +315,17 @@ class PostgresStudioRepository:
                 select(CanonProfileRecord).where(CanonProfileRecord.profile_hash == profile_hash)
             )
             if existing is not None:
-                session.execute(update(CanonProfileRecord).values(active=False))
-                existing.active = True
+                if command.activate:
+                    session.execute(update(CanonProfileRecord).values(active=False))
+                    existing.active = True
                 session.flush()
                 return _canon_profile_dto(session, existing)
-            session.execute(update(CanonProfileRecord).values(active=False))
+            if command.activate:
+                session.execute(update(CanonProfileRecord).values(active=False))
             record = CanonProfileRecord(
                 profile_key=active.profile_key,
                 version=int(version or 0) + 1,
-                active=True,
+                active=command.activate,
                 profile_json=document,
                 profile_hash=profile_hash,
             )
@@ -460,14 +487,18 @@ class PostgresStudioRepository:
                     for field in command.model_fields_set & target_fields
                 ):
                     raise StudioValidationError("生产目标不能为空。")
-                if session.scalar(
-                    select(JobRecord.id)
+                planning_jobs = session.execute(
+                    select(JobRecord.id, JobRecord.status, JobRecord.supersedes_job_id)
                     .where(
                         JobRecord.series_id == series_id,
                         JobRecord.kind.in_(["plan_series", "plan_series_segment"]),
-                        JobRecord.status.not_in(["succeeded", "failed", "cancelled"]),
                     )
-                    .limit(1)
+                ).all()
+                superseded = {job.supersedes_job_id for job in planning_jobs}
+                if any(
+                    job.status not in {"succeeded", "failed", "cancelled"}
+                    and not (job.status == "submission_unknown" and job.id in superseded)
+                    for job in planning_jobs
                 ):
                     raise StudioConflictError("规划任务尚未终结，请等待结果后调整目标。")
             for field_name in command.model_fields_set:
@@ -578,12 +609,16 @@ class PostgresStudioRepository:
     def materialize_series_plan_version(
         self,
         series_id: uuid.UUID,
-        *,
-        base_plan_version_id: uuid.UUID,
-        plan: SeriesPlanDraft,
-        idempotency_key: str,
+        command: SeriesPlanMaterializeCommand,
     ) -> SeriesPlanVersionDto:
+        base_plan_version_id = command.base_plan_version_id
+        idempotency_key = command.idempotency_key
+        input_hash = series_plan_materialization_hash(command)
         with self._sessions.begin() as session:
+            # Serialize before checking the key; concurrent replays must see the winner.
+            series = session.scalar(
+                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
+            )
             prior = session.scalar(
                 select(SeriesPlanVersionRecord).where(
                     SeriesPlanVersionRecord.materialization_idempotency_key == idempotency_key
@@ -593,14 +628,12 @@ class PostgresStudioRepository:
                 if (
                     prior.series_id != series_id
                     or prior.base_plan_version_id != base_plan_version_id
+                    or prior.input_hash != input_hash
                 ):
                     raise StudioIdempotencyInputConflictError(
                         "idempotency key already belongs to different input"
                     )
                 return _series_plan_dto(prior)
-            series = session.scalar(
-                select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
-            )
             base = session.scalar(
                 select(SeriesPlanVersionRecord)
                 .where(
@@ -613,6 +646,50 @@ class PostgresStudioRepository:
                 raise StudioNotFoundError("series plan version not found")
             if base.active or base.status != "candidate":
                 raise StudioConflictError("only a pending series plan can be completed")
+            source_ordinals = set(
+                session.scalars(
+                    select(SeriesSourceBindingRecord.binding_order).where(
+                        SeriesSourceBindingRecord.series_id == series_id
+                    )
+                ).all()
+            )
+            if command.source == "saved_result":
+                if command.expected_settings_hash != series_plan_settings_hash(
+                    _story_series_dto(session, series), source_ordinals
+                ):
+                    raise StudioConflictError(
+                        "series settings changed; refresh before revalidation"
+                    )
+                payload = base.plan_json
+            else:
+                assert command.plan is not None
+                payload = command.plan.model_dump(mode="json", by_alias=True)
+            normalized = normalize_series_plan_result(
+                payload,
+                expected_episode_count=min(
+                    series.planned_episode_count or len(payload["episodes"]),
+                    MAX_SERIES_PLANNING_BATCH,
+                ),
+                narrative_mode=series.narrative_mode,
+                adaptation_policy=series.adaptation_policy,
+                expected_duration_seconds=series.default_episode_duration_seconds,
+                must_keep=series.must_keep_json,
+                source_unit_ordinals=source_ordinals,
+                normalization_revision=(
+                    SERIES_NORMALIZATION_REVISION if command.source == "saved_result" else None
+                ),
+            )
+            if normalized.plan is None:
+                raise StudioConflictError("saved series plan cannot be parsed")
+            plan = normalized.plan
+            issues = list(normalized.issues)
+            if command.source == "saved_result":
+                issues.append(SeriesValidationIssueDto(
+                    code="series_result_revalidated", severity="warning", path="",
+                    message="已使用当前系列设置重新校验保存的方案；原始模型返回保留在来源版本。",
+                    normalizationRevision=SERIES_NORMALIZATION_REVISION,
+                ))
+            disposition = normalized.disposition
             now = datetime.now(UTC)
             session.execute(
                 update(SeriesPlanVersionRecord)
@@ -633,35 +710,6 @@ class PostgresStudioRepository:
                 )
                 + 1
             )
-            disposition, issues = validate_series_plan(
-                plan,
-                expected_episode_count=min(
-                    series.planned_episode_count or len(plan.episodes),
-                    MAX_SERIES_PLANNING_BATCH,
-                ),
-                narrative_mode=series.narrative_mode,
-                adaptation_policy=series.adaptation_policy,
-                expected_duration_seconds=series.default_episode_duration_seconds,
-                must_keep=series.must_keep_json,
-                source_unit_ordinals=set(
-                    session.scalars(
-                        select(SeriesSourceBindingRecord.binding_order).where(
-                            SeriesSourceBindingRecord.series_id == series_id
-                        )
-                    ).all()
-                ),
-            )
-            input_hash = hashlib.sha256(
-                json.dumps(
-                    {
-                        "basePlanVersionId": str(base_plan_version_id),
-                        "plan": plan.model_dump(mode="json", by_alias=True),
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode()
-            ).hexdigest()
             created = SeriesPlanVersionRecord(
                 series_id=series_id,
                 revision=revision,
@@ -671,7 +719,10 @@ class PostgresStudioRepository:
                 plan_json=plan.model_dump(mode="json", by_alias=True),
                 issues_json=[issue.model_dump(mode="json", by_alias=True) for issue in issues],
                 input_hash=input_hash,
-                prompt_revision="manual-series-plan-v1",
+                prompt_revision=(
+                    "normalized-series-plan-v1"
+                    if command.source == "saved_result" else "manual-series-plan-v1"
+                ),
                 producing_job_id=None,
                 base_plan_version_id=base_plan_version_id,
                 materialization_idempotency_key=idempotency_key,
@@ -1725,34 +1776,42 @@ class PostgresStudioRepository:
                 )
             )
             if prior is not None:
-                prior_series = (
-                    session.get(StorySeriesRecord, prior.series_id)
-                    if prior.series_id is not None
-                    else None
-                )
-                if (
-                    prior.suggestion_id != command.suggestion_id
-                    or prior.target_type != command.target
-                    or prior.target_series_id != command.target_series_id
-                    or prior.target_project_id != command.target_project_id
-                    or (
-                        command.target == "new_series"
-                        and (
-                            prior_series is None
-                            or prior_series.length_mode != command.series_length_mode
-                            or prior_series.planned_episode_count != command.planned_episode_count
-                            or prior_series.default_episode_duration_seconds
-                            != command.default_episode_duration_seconds
-                            or prior_series.adaptation_policy != command.adaptation_policy
-                            or (
-                                command.narrative_mode is not None
-                                and prior_series.narrative_mode != command.narrative_mode
+                if prior.confirmation_request_snapshot_json is not None:
+                    input_conflicts = (
+                        prior.confirmation_request_snapshot_json
+                        != story_import_confirmation_request_snapshot(command)
+                    )
+                else:
+                    prior_series = (
+                        session.get(StorySeriesRecord, prior.series_id)
+                        if prior.series_id is not None
+                        else None
+                    )
+                    input_conflicts = (
+                        prior.suggestion_id != command.suggestion_id
+                        or prior.target_type != command.target
+                        or prior.target_series_id != command.target_series_id
+                        or prior.target_project_id != command.target_project_id
+                        or (
+                            command.target == "new_series"
+                            and (
+                                prior_series is None
+                                or prior_series.length_mode != command.series_length_mode
+                                or prior_series.planned_episode_count
+                                != command.planned_episode_count
+                                or prior_series.default_episode_duration_seconds
+                                != command.default_episode_duration_seconds
+                                or prior_series.adaptation_policy != command.adaptation_policy
+                                or (
+                                    command.narrative_mode is not None
+                                    and prior_series.narrative_mode != command.narrative_mode
+                                )
+                                or prior_series.must_keep_json
+                                != (command.must_keep or ["保留来源文本中的核心事件"])
                             )
-                            or prior_series.must_keep_json
-                            != (command.must_keep or ["保留来源文本中的核心事件"])
                         )
                     )
-                ):
+                if input_conflicts:
                     raise StudioIdempotencyInputConflictError(
                         "idempotency key already belongs to different input"
                     )
@@ -1794,7 +1853,7 @@ class PostgresStudioRepository:
                     world_setting="由已导入原文中的地点、时间和环境归纳",
                     emotional_direction="保持原文的情绪变化",
                     recurring_elements_json=[],
-                    must_keep_json=command.must_keep or ["保留来源文本中的核心事件"],
+                    must_keep_json=command.must_keep,
                     must_avoid_json=["不得无依据改写来源事实"],
                     additional_notes=f"来源文档 {document.id}",
                     canon_profile_id=ensure_canon_v4(session).id,
@@ -1840,6 +1899,9 @@ class PostgresStudioRepository:
                 suggestion_id=suggestion.id,
                 target_type=command.target,
                 idempotency_key=command.idempotency_key,
+                confirmation_request_snapshot_json=story_import_confirmation_request_snapshot(
+                    command
+                ),
                 series_id=series_record.id if series_record is not None else None,
                 project_id=projects[0].id if len(projects) == 1 else None,
                 target_series_id=command.target_series_id,
@@ -2771,6 +2833,99 @@ class PostgresStudioRepository:
             )
             return _job_dto(session, record) if record is not None else None
 
+    def get_recovery_result(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto | None:
+        with self._sessions() as session:
+            event = session.scalar(
+                select(JobEventRecord)
+                .where(
+                    JobEventRecord.job_id == job_id,
+                    JobEventRecord.payload_json["recoveryKey"].astext == command.idempotency_key,
+                )
+                .limit(1)
+            )
+            if event is None:
+                return None
+            if (
+                event.payload_json.get("action") != command.action
+                or event.payload_json.get("providerTaskId") != command.provider_task_id
+            ):
+                raise StudioIdempotencyInputConflictError("恢复幂等键已用于不同操作。")
+            return _job_dto(session, session.get(JobRecord, job_id))
+
+    def associate_provider_task(
+        self, job_id: uuid.UUID, command: JobRecoveryCommand, evidence: dict[str, Any]
+    ) -> JobDto:
+        from sqlalchemy import text
+
+        with self._sessions.begin() as session:
+            # Serialize all manual associations before checking either job; row locks
+            # alone cannot protect a provider identifier absent from both rows.
+            session.execute(text("SELECT pg_advisory_xact_lock(731940285)"))
+            record = session.scalar(
+                select(JobRecord).where(JobRecord.id == job_id).with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("job not found")
+            previous = session.scalar(
+                select(JobEventRecord)
+                .where(
+                    JobEventRecord.job_id == job_id,
+                    JobEventRecord.payload_json["recoveryKey"].astext == command.idempotency_key,
+                )
+                .limit(1)
+            )
+            if previous is not None:
+                if (
+                    previous.payload_json.get("action") != command.action
+                    or previous.payload_json.get("providerTaskId") != command.provider_task_id
+                ):
+                    raise StudioIdempotencyInputConflictError("恢复幂等键已用于不同操作。")
+                return _job_dto(session, record)
+            if record.revision != command.expected_revision:
+                raise StudioConflictError("任务状态已变化，请刷新后操作。")
+            summary = _job_dto(session, record)
+            if (
+                "lookup_provider_tasks" not in summary.execution.available_actions
+                or record.provider_task_id
+            ):
+                raise StudioConflictError("当前任务不支持关联。")
+            if record.leased_until is not None and record.leased_until > datetime.now(UTC):
+                raise StudioConflictError("后台仍持有任务租约，请稍后重试。")
+            duplicate = session.scalar(
+                select(JobRecord.id)
+                .where(
+                    JobRecord.provider == "ark",
+                    JobRecord.provider_task_id == command.provider_task_id,
+                    JobRecord.id != job_id,
+                )
+                .limit(1)
+            )
+            if duplicate is not None:
+                raise StudioConflictError("云端任务已关联其他本地任务。")
+            record.provider_task_id = command.provider_task_id
+            record.execution_json = {
+                **(record.execution_json or {}),
+                "providerStatus": evidence["status"],
+                "associationEvidence": evidence,
+                "associationConfirmedAt": datetime.now(UTC).isoformat(),
+                "unverifiedParametersAttested": True,
+            }
+            schedule_recovery(record, "query_provider")
+            record_job_event(
+                session,
+                record,
+                "job.provider_task_associated",
+                {
+                    "recoveryKey": command.idempotency_key,
+                    "action": command.action,
+                    "providerTaskId": command.provider_task_id,
+                    "evidence": evidence,
+                    "unverifiedParametersAttested": True,
+                },
+            )
+            session.flush()
+            return _job_dto(session, record)
+
     def recover_job(self, job_id: uuid.UUID, command: JobRecoveryCommand) -> JobDto:
         with self._sessions.begin() as session:
             record = session.scalar(
@@ -2940,6 +3095,24 @@ class PostgresStudioRepository:
             )
             session.flush()
             record.head_edit_version_id = edit.id
+            session.flush()
+            return _edit_draft_dto(record)
+
+    def update_video_edit_draft_input(
+        self, draft_id: uuid.UUID, expected_revision: int, editing_input: dict[str, Any]
+    ) -> VideoEditDraftDto:
+        with self._sessions.begin() as session:
+            record = session.scalar(
+                select(VideoEditDraftRecord)
+                .where(VideoEditDraftRecord.id == draft_id)
+                .with_for_update()
+            )
+            if record is None:
+                raise StudioNotFoundError("video edit draft not found")
+            if record.input_revision != expected_revision:
+                raise StudioConflictError("编辑输入已在其他页面变化，请重新加载后再保存。")
+            record.editing_input_json = editing_input
+            record.input_revision += 1
             session.flush()
             return _edit_draft_dto(record)
 
@@ -3154,17 +3327,28 @@ class PostgresStudioRepository:
             if existing is not None:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
-            running = session.scalar(
-                select(JobRecord.id).where(
+            if job.supersedes_job_id is not None:
+                original = session.scalar(
+                    select(JobRecord).where(JobRecord.id == job.supersedes_job_id).with_for_update()
+                )
+                validate_video_edit_replacement(
+                    job, _job_dto(session, original) if original else None
+                )
+            records = session.scalars(
+                select(JobRecord).where(
                     JobRecord.project_id == repair.project_id,
                     JobRecord.kind == "regenerate_video_segment",
-                    JobRecord.status.not_in(("succeeded", "failed", "cancelled")),
-                )
+                ).with_for_update()
+            ).all()
+            require_video_edit_available(
+                [_job_dto(session, item) for item in records], job.supersedes_job_id
             )
-            if running is not None:
-                raise StudioConflictError("已有局部修改任务正在处理，请勿重复提交。")
             if repair.preview.edit_draft_id is not None:
-                draft = session.get(VideoEditDraftRecord, repair.preview.edit_draft_id)
+                draft = session.scalar(
+                    select(VideoEditDraftRecord)
+                    .where(VideoEditDraftRecord.id == repair.preview.edit_draft_id)
+                    .with_for_update()
+                )
                 base = session.get(EditVersionRecord, repair.base_edit_version_id)
                 if (
                     draft is None
@@ -3887,6 +4071,8 @@ def _edit_dto(record: EditVersionRecord) -> EditVersionDto:
 
 def _edit_draft_dto(record: VideoEditDraftRecord) -> VideoEditDraftDto:
     return VideoEditDraftDto(
+        editingInput=record.editing_input_json,
+        inputRevision=record.input_revision,
         id=record.id,
         projectId=record.project_id,
         sourceVideoAssetId=record.source_video_asset_id,

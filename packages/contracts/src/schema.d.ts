@@ -108,6 +108,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/canon/profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Canon */
+        get: operations["get_canon_api_v1_canon_profiles__profile_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/canon/assets/upload": {
         parameters: {
             query?: never;
@@ -1515,6 +1532,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Video Edit Draft Input */
+        patch: operations["update_video_edit_draft_input_api_v1_projects__project_id__video_edit_drafts__draft_id__input_patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/video-edits/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Video Edit Plan */
+        post: operations["create_video_edit_plan_api_v1_projects__project_id__video_edits_plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}": {
         parameters: {
             query?: never;
@@ -1712,6 +1763,23 @@ export interface paths {
         };
         /** Job Result */
         get: operations["job_result_api_v1_jobs__job_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/provider-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lookup Provider Tasks */
+        get: operations["lookup_provider_tasks_api_v1_jobs__job_id__provider_tasks_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1997,6 +2065,8 @@ export interface components {
             capabilityRevision: string;
             /** Prompt */
             prompt: string;
+            /** Compiledproviderprompt */
+            compiledProviderPrompt?: string | null;
             /** Negativeprompt */
             negativePrompt: string;
             /** References */
@@ -2054,6 +2124,13 @@ export interface components {
              */
             fadeOutMs: number;
         };
+        /** CanonCatIdentity */
+        CanonCatIdentity: {
+            /** Identity */
+            identity: string;
+            /** Lockedtraits */
+            lockedTraits: string[];
+        };
         /** CanonProfileDto */
         CanonProfileDto: {
             /**
@@ -2093,6 +2170,14 @@ export interface components {
             fixedAssets: {
                 [key: string]: string;
             };
+            /** Baseprofileid */
+            baseProfileId?: string | null;
+            /**
+             * Activate
+             * @default true
+             */
+            activate: boolean;
+            cat?: components["schemas"]["CanonCatIdentity"] | null;
         };
         /** CompiledReference */
         CompiledReference: {
@@ -2841,7 +2926,7 @@ export interface components {
              * Schemaversion
              * @enum {integer}
              */
-            schemaVersion: 1 | 2;
+            schemaVersion: 1 | 2 | 3;
             /**
              * Kind
              * @enum {string}
@@ -2862,6 +2947,8 @@ export interface components {
             inputHash: string;
             /** Prompt */
             prompt: string;
+            /** Compiledproviderprompt */
+            compiledProviderPrompt?: string | null;
             /** Negativeprompt */
             negativePrompt: string;
             /** Promptsummary */
@@ -2885,6 +2972,10 @@ export interface components {
         };
         /** GenerationInputSourceDto */
         GenerationInputSourceDto: {
+            /** Canonprofileid */
+            canonProfileId?: string | null;
+            /** Canonprofilehash */
+            canonProfileHash?: string | null;
             /** Editdraftid */
             editDraftId?: string | null;
             /** Baseeditversionid */
@@ -2929,6 +3020,10 @@ export interface components {
         };
         /** GenerationPreviewDto */
         GenerationPreviewDto: {
+            /** Canonprofileid */
+            canonProfileId?: string | null;
+            /** Canonprofilehash */
+            canonProfileHash?: string | null;
             /**
              * Generateaudio
              * @default false
@@ -2950,6 +3045,8 @@ export interface components {
             capabilityRevision: string;
             /** Prompt */
             prompt: string;
+            /** Compiledproviderprompt */
+            compiledProviderPrompt?: string | null;
             /** Negativeprompt */
             negativePrompt: string;
             /** Promptsummary */
@@ -3065,7 +3162,7 @@ export interface components {
              * Schemaversion
              * @enum {integer}
              */
-            schemaVersion: 1 | 2;
+            schemaVersion: 1 | 2 | 3;
             /**
              * State
              * @enum {string}
@@ -3096,6 +3193,8 @@ export interface components {
             capabilityRevision: string;
             /** Prompt */
             prompt: string;
+            /** Compiledproviderprompt */
+            compiledProviderPrompt?: string | null;
             /** Negativeprompt */
             negativePrompt: string;
             /** References */
@@ -3112,6 +3211,7 @@ export interface components {
         };
         /** JobDto */
         JobDto: {
+            editPlan?: components["schemas"]["VideoEditPlanSuggestion"] | null;
             execution?: components["schemas"]["JobExecutionDto"] | null;
             /** Providerresponseid */
             providerResponseId?: string | null;
@@ -3139,7 +3239,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "plan_story" | "plan_shots" | "plan_series" | "plan_series_segment" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export" | "render_edit_preview";
+            kind: "plan_story" | "plan_shots" | "plan_video_edit" | "plan_series" | "plan_series_segment" | "plan_series_episode" | "analyze_story_source" | "extract_continuity_frames" | "generate_image" | "diagnose_image" | "generate_video" | "diagnose_video" | "regenerate_video_segment" | "render_export" | "render_edit_preview";
             /**
              * Status
              * @enum {string}
@@ -3331,7 +3431,19 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "query_provider" | "process_result";
+            action: "query_provider" | "process_result" | "associate_provider_task";
+            /** Providertaskid */
+            providerTaskId?: string | null;
+            /**
+             * Confirmassociation
+             * @default false
+             */
+            confirmAssociation: boolean;
+            /**
+             * Acknowledgeunverifiedparameters
+             * @default false
+             */
+            acknowledgeUnverifiedParameters: boolean;
             /** Expectedrevision */
             expectedRevision: number;
             /** Idempotencykey */
@@ -3931,6 +4043,59 @@ export interface components {
             /** Changedstate */
             changedState: string;
         };
+        /** ProviderTaskCandidate */
+        ProviderTaskCandidate: {
+            /** Providertaskid */
+            providerTaskId: string;
+            /** Model */
+            model?: string | null;
+            /** Status */
+            status: string;
+            /** Createdat */
+            createdAt?: string | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Mismatches */
+            mismatches: string[];
+            /** Canassociate */
+            canAssociate: boolean;
+        };
+        /** ProviderTaskLookupDto */
+        ProviderTaskLookupDto: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "query_failed" | "not_found" | "candidates";
+            /** Model */
+            model: string | null;
+            /**
+             * Windowstart
+             * Format: date-time
+             */
+            windowStart: string;
+            /**
+             * Windowend
+             * Format: date-time
+             */
+            windowEnd: string;
+            /** Candidates */
+            candidates?: components["schemas"]["ProviderTaskCandidate"][];
+            /** Message */
+            message: string;
+            /**
+             * Queriedat
+             * Format: date-time
+             */
+            queriedAt: string;
+            /**
+             * Coveragecomplete
+             * @default false
+             */
+            coverageComplete: boolean;
+        };
         /** RateCardItem */
         RateCardItem: {
             /**
@@ -4049,6 +4214,59 @@ export interface components {
         };
         /** SegmentEditInputDto */
         SegmentEditInputDto: {
+            /**
+             * Editcontractversion
+             * @default 1
+             * @enum {integer}
+             */
+            editContractVersion: 1 | 2;
+            /**
+             * Preservecontent
+             * @default
+             */
+            preserveContent: string;
+            /**
+             * Startstate
+             * @default
+             */
+            startState: string;
+            /**
+             * Actionprocess
+             * @default
+             */
+            actionProcess: string;
+            /**
+             * Avoidproblems
+             * @default
+             */
+            avoidProblems: string;
+            /** Plansourcejobid */
+            planSourceJobId?: string | null;
+            /**
+             * Includeinanchor
+             * @default true
+             */
+            includeInAnchor: boolean;
+            /** Referenceroles */
+            referenceRoles?: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[] | null;
+            /**
+             * Contextmode
+             * @default auto
+             * @enum {string}
+             */
+            contextMode: "auto" | "selection" | "custom";
+            contextRange?: components["schemas"]["FrameRange"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "follow_instruction" | "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
             /** Sourceresultjobid */
             sourceResultJobId?: string | null;
             /** Referencepreparationjobid */
@@ -4077,17 +4295,6 @@ export interface components {
             anchorEndFrame?: number | null;
             /** Baseedl */
             baseEdl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
-            /**
-             * Endstatepolicy
-             * @default match_original
-             * @enum {string}
-             */
-            endStatePolicy: "match_original" | "replace";
-            /**
-             * Desiredendstate
-             * @default
-             */
-            desiredEndState: string;
             /** Instruction */
             instruction: string;
             issueRange: components["schemas"]["FrameRange"];
@@ -4096,6 +4303,59 @@ export interface components {
         };
         /** SegmentReferencePreparationCommand */
         SegmentReferencePreparationCommand: {
+            /**
+             * Editcontractversion
+             * @default 1
+             * @enum {integer}
+             */
+            editContractVersion: 1 | 2;
+            /**
+             * Preservecontent
+             * @default
+             */
+            preserveContent: string;
+            /**
+             * Startstate
+             * @default
+             */
+            startState: string;
+            /**
+             * Actionprocess
+             * @default
+             */
+            actionProcess: string;
+            /**
+             * Avoidproblems
+             * @default
+             */
+            avoidProblems: string;
+            /** Plansourcejobid */
+            planSourceJobId?: string | null;
+            /**
+             * Includeinanchor
+             * @default true
+             */
+            includeInAnchor: boolean;
+            /** Referenceroles */
+            referenceRoles?: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[] | null;
+            /**
+             * Contextmode
+             * @default auto
+             * @enum {string}
+             */
+            contextMode: "auto" | "selection" | "custom";
+            contextRange?: components["schemas"]["FrameRange"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "follow_instruction" | "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
             /** Sourceresultjobid */
             sourceResultJobId?: string | null;
             /** Expectedsourcetimelinehash */
@@ -4131,17 +4391,6 @@ export interface components {
             instruction: string;
             /** Editdraftid */
             editDraftId?: string | null;
-            /**
-             * Endstatepolicy
-             * @default match_original
-             * @enum {string}
-             */
-            endStatePolicy: "match_original" | "replace";
-            /**
-             * Desiredendstate
-             * @default
-             */
-            desiredEndState: string;
             /** Retryafterjobid */
             retryAfterJobId?: string | null;
         };
@@ -4177,6 +4426,59 @@ export interface components {
             prepareOnly: boolean;
             /** Replacementjobid */
             replacementJobId?: string | null;
+            /**
+             * Editcontractversion
+             * @default 1
+             * @enum {integer}
+             */
+            editContractVersion: 1 | 2;
+            /**
+             * Preservecontent
+             * @default
+             */
+            preserveContent: string;
+            /**
+             * Startstate
+             * @default
+             */
+            startState: string;
+            /**
+             * Actionprocess
+             * @default
+             */
+            actionProcess: string;
+            /**
+             * Avoidproblems
+             * @default
+             */
+            avoidProblems: string;
+            /** Plansourcejobid */
+            planSourceJobId?: string | null;
+            /**
+             * Includeinanchor
+             * @default true
+             */
+            includeInAnchor: boolean;
+            /** Referenceroles */
+            referenceRoles?: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[] | null;
+            /**
+             * Contextmode
+             * @default auto
+             * @enum {string}
+             */
+            contextMode: "auto" | "selection" | "custom";
+            contextRange?: components["schemas"]["FrameRange"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "follow_instruction" | "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
             /** Sourceresultjobid */
             sourceResultJobId?: string | null;
             /** Expectedsourcetimelinehash */
@@ -4212,17 +4514,6 @@ export interface components {
             instruction: string;
             /** Editdraftid */
             editDraftId?: string | null;
-            /**
-             * Endstatepolicy
-             * @default match_original
-             * @enum {string}
-             */
-            endStatePolicy: "match_original" | "replace";
-            /**
-             * Desiredendstate
-             * @default
-             */
-            desiredEndState: string;
             /** Expectedinputhash */
             expectedInputHash: string;
             /** Idempotencykey */
@@ -4249,6 +4540,59 @@ export interface components {
         };
         /** SegmentRepairPreviewCommand */
         SegmentRepairPreviewCommand: {
+            /**
+             * Editcontractversion
+             * @default 1
+             * @enum {integer}
+             */
+            editContractVersion: 1 | 2;
+            /**
+             * Preservecontent
+             * @default
+             */
+            preserveContent: string;
+            /**
+             * Startstate
+             * @default
+             */
+            startState: string;
+            /**
+             * Actionprocess
+             * @default
+             */
+            actionProcess: string;
+            /**
+             * Avoidproblems
+             * @default
+             */
+            avoidProblems: string;
+            /** Plansourcejobid */
+            planSourceJobId?: string | null;
+            /**
+             * Includeinanchor
+             * @default true
+             */
+            includeInAnchor: boolean;
+            /** Referenceroles */
+            referenceRoles?: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[] | null;
+            /**
+             * Contextmode
+             * @default auto
+             * @enum {string}
+             */
+            contextMode: "auto" | "selection" | "custom";
+            contextRange?: components["schemas"]["FrameRange"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "follow_instruction" | "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
             /** Sourceresultjobid */
             sourceResultJobId?: string | null;
             /** Expectedsourcetimelinehash */
@@ -4284,20 +4628,64 @@ export interface components {
             instruction: string;
             /** Editdraftid */
             editDraftId?: string | null;
+        };
+        /** SegmentRepairPreviewDto */
+        SegmentRepairPreviewDto: {
+            /**
+             * Editcontractversion
+             * @default 1
+             * @enum {integer}
+             */
+            editContractVersion: 1 | 2;
+            /**
+             * Preservecontent
+             * @default
+             */
+            preserveContent: string;
+            /**
+             * Startstate
+             * @default
+             */
+            startState: string;
+            /**
+             * Actionprocess
+             * @default
+             */
+            actionProcess: string;
+            /**
+             * Avoidproblems
+             * @default
+             */
+            avoidProblems: string;
+            /** Plansourcejobid */
+            planSourceJobId?: string | null;
+            /**
+             * Includeinanchor
+             * @default true
+             */
+            includeInAnchor: boolean;
+            /** Referenceroles */
+            referenceRoles?: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[] | null;
+            /**
+             * Contextmode
+             * @default auto
+             * @enum {string}
+             */
+            contextMode: "auto" | "selection" | "custom";
+            contextRange?: components["schemas"]["FrameRange"] | null;
             /**
              * Endstatepolicy
              * @default match_original
              * @enum {string}
              */
-            endStatePolicy: "match_original" | "replace";
+            endStatePolicy: "follow_instruction" | "match_original" | "replace";
             /**
              * Desiredendstate
              * @default
              */
             desiredEndState: string;
-        };
-        /** SegmentRepairPreviewDto */
-        SegmentRepairPreviewDto: {
+            /** Mediainputhash */
+            mediaInputHash?: string | null;
             /** Sourceresultjobid */
             sourceResultJobId?: string | null;
             /** Expectedsourcetimelinehash */
@@ -4354,8 +4742,14 @@ export interface components {
             capabilityRevision: string;
             /** Instruction */
             instruction: string;
+            /** Warnings */
+            warnings?: {
+                [key: string]: string;
+            }[];
             /** Prompt */
             prompt: string;
+            /** Compiledproviderprompt */
+            compiledProviderPrompt?: string | null;
             /** Negativeprompt */
             negativePrompt: string;
             /** Imagereferences */
@@ -4375,17 +4769,6 @@ export interface components {
             editDraftId?: string | null;
             /** Baseedl */
             baseEdl?: components["schemas"]["EditDecisionListV2"] | components["schemas"]["EditDecisionListV3"] | null;
-            /**
-             * Endstatepolicy
-             * @default match_original
-             * @enum {string}
-             */
-            endStatePolicy: "match_original" | "replace";
-            /**
-             * Desiredendstate
-             * @default
-             */
-            desiredEndState: string;
         };
         /** SegmentRepairTransitionCommand */
         SegmentRepairTransitionCommand: {
@@ -4510,6 +4893,8 @@ export interface components {
         };
         /** SeriesCreateCommand */
         SeriesCreateCommand: {
+            /** Canonprofileid */
+            canonProfileId?: string | null;
             /**
              * Adaptationpolicy
              * @default preserve_all
@@ -4818,7 +5203,15 @@ export interface components {
              * Format: uuid
              */
             basePlanVersionId: string;
-            plan: components["schemas"]["SeriesPlanDraft"];
+            /**
+             * Source
+             * @default edited
+             * @enum {string}
+             */
+            source: "edited" | "saved_result";
+            plan?: components["schemas"]["SeriesPlanDraft"] | null;
+            /** Expectedsettingshash */
+            expectedSettingsHash?: string | null;
             /** Idempotencykey */
             idempotencyKey: string;
         };
@@ -4837,6 +5230,8 @@ export interface components {
             capabilityRevision: string;
             /** Inputhash */
             inputHash: string;
+            /** Settingsinputhash */
+            settingsInputHash: string;
             /** Prompt */
             prompt: string;
             /** Outputschema */
@@ -5100,6 +5495,12 @@ export interface components {
             message: string;
             /** Suggestedaction */
             suggestedAction?: string | null;
+            /** Normalizationrevision */
+            normalizationRevision?: string | null;
+            /** Beforevalue */
+            beforeValue?: string | null;
+            /** Aftervalue */
+            afterValue?: string | null;
         };
         /** ShotAssemblyCommand */
         ShotAssemblyCommand: {
@@ -5469,6 +5870,12 @@ export interface components {
             directorIntent?: string | null;
             /** Generationrisks */
             generationRisks?: components["schemas"]["GenerationRisk"][];
+            /** Cameraspatialrelation */
+            cameraSpatialRelation?: string | null;
+            /** Interactionconstraints */
+            interactionConstraints?: string[];
+            /** Visualexclusions */
+            visualExclusions?: string[];
             /** Sceneassetid */
             sceneAssetId?: string | null;
             /**
@@ -5789,6 +6196,11 @@ export interface components {
         /** StorySeriesDto */
         StorySeriesDto: {
             /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /**
              * Adaptationpolicy
              * @default preserve_all
              * @enum {string}
@@ -5832,11 +6244,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Canonprofileid
-             * Format: uuid
-             */
-            canonProfileId: string;
             /** Activeplanversionid */
             activePlanVersionId?: string | null;
             /**
@@ -6217,6 +6624,17 @@ export interface components {
             /** Previewjobid */
             previewJobId?: string | null;
         };
+        /** VideoEditConflictResponse */
+        VideoEditConflictResponse: {
+            /** Detail */
+            detail: components["schemas"]["VideoEditInProgressDetail"] | string | {
+                [key: string]: unknown;
+            };
+            /** Latestpreview */
+            latestPreview?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** VideoEditDraftCreateCommand */
         VideoEditDraftCreateCommand: {
             /** Sourceresultjobid */
@@ -6240,6 +6658,15 @@ export interface components {
         };
         /** VideoEditDraftDto */
         VideoEditDraftDto: {
+            /** Editinginput */
+            editingInput?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Inputrevision
+             * @default 0
+             */
+            inputRevision: number;
             /** Sourceresultjobid */
             sourceResultJobId?: string | null;
             /** Expectedsourcetimelinehash */
@@ -6282,6 +6709,165 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** VideoEditDraftInputCommand */
+        VideoEditDraftInputCommand: {
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Editinginput */
+            editingInput: {
+                [key: string]: unknown;
+            };
+        };
+        /** VideoEditInProgressDetail */
+        VideoEditInProgressDetail: {
+            /**
+             * Code
+             * @default video_edit_in_progress
+             * @constant
+             */
+            code: "video_edit_in_progress";
+            /** Message */
+            message: string;
+            /**
+             * Blockingjobid
+             * Format: uuid
+             */
+            blockingJobId: string;
+            /** Editdraftid */
+            editDraftId: string | null;
+            /** Videorepairid */
+            videoRepairId: string | null;
+        };
+        /** VideoEditPlanCommand */
+        VideoEditPlanCommand: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
+            /**
+             * Editcontractversion
+             * @default 1
+             * @enum {integer}
+             */
+            editContractVersion: 1 | 2;
+            /**
+             * Preservecontent
+             * @default
+             */
+            preserveContent: string;
+            /**
+             * Startstate
+             * @default
+             */
+            startState: string;
+            /**
+             * Actionprocess
+             * @default
+             */
+            actionProcess: string;
+            /**
+             * Avoidproblems
+             * @default
+             */
+            avoidProblems: string;
+            /** Plansourcejobid */
+            planSourceJobId?: string | null;
+            /**
+             * Includeinanchor
+             * @default true
+             */
+            includeInAnchor: boolean;
+            /** Referenceroles */
+            referenceRoles?: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[] | null;
+            /**
+             * Contextmode
+             * @default auto
+             * @enum {string}
+             */
+            contextMode: "auto" | "selection" | "custom";
+            contextRange?: components["schemas"]["FrameRange"] | null;
+            /**
+             * Endstatepolicy
+             * @default match_original
+             * @enum {string}
+             */
+            endStatePolicy: "follow_instruction" | "match_original" | "replace";
+            /**
+             * Desiredendstate
+             * @default
+             */
+            desiredEndState: string;
+            /** Sourceresultjobid */
+            sourceResultJobId?: string | null;
+            /** Expectedsourcetimelinehash */
+            expectedSourceTimelineHash?: string | null;
+            /** Referencepreparationjobid */
+            referencePreparationJobId?: string | null;
+            /**
+             * Generationmode
+             * @default edit_existing
+             * @enum {string}
+             */
+            generationMode: "edit_existing" | "from_frame";
+            /** Audiomode */
+            audioMode?: ("preserve_current" | "generate_candidate") | null;
+            /**
+             * Sounddescription
+             * @default
+             */
+            soundDescription: string;
+            /** Anchorstartframe */
+            anchorStartFrame?: number | null;
+            /** Anchorendframe */
+            anchorEndFrame?: number | null;
+            /**
+             * Basevideoassetid
+             * Format: uuid
+             */
+            baseVideoAssetId: string;
+            /** Baseeditversionid */
+            baseEditVersionId?: string | null;
+            issueRange: components["schemas"]["FrameRange"];
+            /** Instruction */
+            instruction: string;
+            /** Editdraftid */
+            editDraftId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** VideoEditPlanSuggestion */
+        VideoEditPlanSuggestion: {
+            /** Instruction */
+            instruction: string;
+            /** Preservecontent */
+            preserveContent: string;
+            /** Startstate */
+            startState: string;
+            /** Actionprocess */
+            actionProcess: string;
+            /** Desiredendstate */
+            desiredEndState: string;
+            /** Avoidproblems */
+            avoidProblems: string;
+            /**
+             * Recommendedgenerationmode
+             * @enum {string}
+             */
+            recommendedGenerationMode: "edit_existing" | "from_frame";
+            /**
+             * Recommendedendstatepolicy
+             * @enum {string}
+             */
+            recommendedEndStatePolicy: "follow_instruction" | "match_original" | "replace";
+            /** Recommendedreferenceroles */
+            recommendedReferenceRoles: ("episode_child" | "episode_cat" | "pair_scale" | "environment" | "style_board")[];
+            /** Notes */
+            notes: string[];
         };
         /** VideoIssueDto */
         VideoIssueDto: {
@@ -6648,6 +7234,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CanonProfileDto"];
+                };
+            };
+        };
+    };
+    get_canon_api_v1_canon_profiles__profile_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CanonProfileDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9563,6 +10180,15 @@ export interface operations {
                     "application/json": components["schemas"]["SegmentRepairPreviewDto"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditConflictResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -9662,6 +10288,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditConflictResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9834,6 +10469,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VideoEditDraftDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_video_edit_draft_input_api_v1_projects__project_id__video_edit_drafts__draft_id__input_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoEditDraftInputCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditDraftDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_video_edit_plan_api_v1_projects__project_id__video_edits_plans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoEditPlanCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
                 };
             };
             /** @description Validation Error */
@@ -10207,6 +10913,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditConflictResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -10242,6 +10957,15 @@ export interface operations {
                     "application/json": components["schemas"]["JobDto"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditConflictResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -10271,6 +10995,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lookup_provider_tasks_api_v1_jobs__job_id__provider_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderTaskLookupDto"];
                 };
             };
             /** @description Validation Error */

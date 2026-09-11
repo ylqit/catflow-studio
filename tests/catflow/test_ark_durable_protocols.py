@@ -115,6 +115,15 @@ def test_sdk_video_raw_receipt_is_registered_before_return(receiving):
     assert requests[0].headers["x-client-request-id"]
     assert any(r["document"].get("taskId") == "accepted-task" for r in documents)
     assert json.loads(requests[0].content)["duration"] == 8
+    evidence = next(
+        r["document"]["result"]["submissionDiagnostics"]
+        for r in reversed(call.journal.read(call.job_id))
+        if r["document"].get("taskId") == "accepted-task"
+    )
+    assert evidence["requestBytesSource"] == "http_request_body"
+    assert evidence["requestBytes"] == len(requests[0].content)
+    assert evidence["submitElapsedMs"] >= 0
+    assert evidence["serverRequestId"] == "server"
     client.close()
 
 

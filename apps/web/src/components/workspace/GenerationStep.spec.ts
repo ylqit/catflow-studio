@@ -30,6 +30,7 @@ describe("GenerationStep", () => {
   const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
     vi.clearAllMocks();
+    client.job.mockReset();
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
     client.assets.mockResolvedValue([]);
@@ -51,6 +52,33 @@ describe("GenerationStep", () => {
       selectionHash: "a".repeat(64), durationSeconds: 12, references: [], videoReferences: [], warnings: [],
     });
     client.createVideoJob.mockResolvedValue({ id: "job-1", status: "queued" });
+  });
+
+  it("copies the final preview text and a selected candidate's frozen final text independently", async () => {
+    const previewFinal = "当前预览\n避免项：额外角色\n参考图 1：画风\n";
+    const candidateFinal = "历史候选\n避免项：多余道具\n参考图 1：身份\n";
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const originalPreview = await client.previewVideo();
+    client.previewVideo.mockResolvedValue({ ...originalPreview, compiledProviderPrompt: previewFinal });
+    client.assets.mockResolvedValue([{ id: "candidate", role: "video", mediaType: "video", sha256: "b".repeat(64), metadata: {}, producingJobId: "frozen-job" }]);
+    client.job.mockResolvedValue({
+      id: "frozen-job", kind: "generate_video", status: "succeeded", inputHash: "old-hash", frozenInput: {}, resultAssetIds: ["candidate"],
+      inputSnapshot: { schemaVersion: 3, prompt: "旧正文摘要", negativePrompt: "旧避免项摘要", compiledProviderPrompt: candidateFinal, source: {} },
+    });
+    const wrapper = mount(GenerationStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()] } });
+    await flushPromises();
+    expect(wrapper.get(".compiled-provider-prompt").element.textContent).toBe(previewFinal);
+    await wrapper.findAll("button").find(button => button.text() === "复制最终模型指令")!.trigger("click");
+    expect(writeText).toHaveBeenLastCalledWith(previewFinal);
+    await wrapper.findAll("button").find(button => button.text() === "检查视频")!.trigger("click");
+    await flushPromises();
+    const submitted = wrapper.get(".submitted-prompt");
+    expect(submitted.get(".compiled-provider-prompt").element.textContent).toBe(candidateFinal);
+    await submitted.findAll("button").find(button => button.text() === "复制最终模型指令")!.trigger("click");
+    expect(writeText).toHaveBeenLastCalledWith(candidateFinal);
+    expect(submitted.text()).not.toContain(previewFinal);
+    wrapper.unmount();
   });
 
   it("submits one paid video job directly and shows no custom quota", async () => {
@@ -222,7 +250,7 @@ describe("GenerationStep", () => {
     expect(client.previewVideo).toHaveBeenCalledWith("project-1", false);
     expect(wrapper.text()).toContain("本次画面内容");
     expect(wrapper.text()).toContain("画面描述");
-    expect(wrapper.text()).toContain("查看完整生成指令");
+    expect(wrapper.text()).toContain("查看生成指令记录");
     expect(wrapper.get(".prompt-summary").text()).toContain("孩子把食物放进野餐篮");
     expect(wrapper.get(".prompt-summary").text()).not.toContain("专业镜头提示词");
     expect(wrapper.findAll(".prompt-section")).toHaveLength(4);
@@ -402,7 +430,7 @@ describe("GenerationStep", () => {
     await wrapper.findAll("button").find((button) => button.text() === "检查视频")!.trigger("click");
     await flushPromises();
     expect(wrapper.get(".submitted-prompt").text()).toContain("旧版生成指令");
-    expect(wrapper.get(".submitted-prompt").text()).toContain("旧任务未记录分段展示");
+    expect(wrapper.get(".submitted-prompt").text()).toContain("旧任务未记录最终模型指令");
     wrapper.unmount();
   });
 
@@ -445,7 +473,7 @@ describe("GenerationStep", () => {
     await flushPromises();
     expect(wrapper.get(".submitted-prompt").findAll(".prompt-section")).toHaveLength(4);
     expect(wrapper.get(".submitted-prompt").text()).toContain("冻结的逐镜动作");
-    expect(wrapper.get(".submitted-prompt").text()).not.toContain("旧任务未记录分段展示");
+    expect(wrapper.get(".submitted-prompt").text()).toContain("旧任务未记录最终模型指令");
     wrapper.unmount();
   });
 

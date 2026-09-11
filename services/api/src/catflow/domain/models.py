@@ -145,6 +145,11 @@ class ShotSpec(ContractModel):
     sound: ShotSoundDesign | None = None
     director_intent: str | None = Field(alias="directorIntent", default=None, max_length=500)
     generation_risks: list[GenerationRisk] = Field(alias="generationRisks", default_factory=list)
+    camera_spatial_relation: str | None = Field(
+        alias="cameraSpatialRelation", default=None, min_length=1, max_length=1000
+    )
+    interaction_constraints: list[str] = Field(alias="interactionConstraints", default_factory=list)
+    visual_exclusions: list[str] = Field(alias="visualExclusions", default_factory=list)
     scene_asset_id: uuid.UUID | None = Field(alias="sceneAssetId", default=None)
     environment_use: Literal["recompose", "preserve_layout"] = Field(
         alias="environmentUse", default="recompose"
@@ -190,33 +195,9 @@ def _validate_professional_semantics(shots: list[ShotSpec]) -> None:
                 f"{previous.order} and {current.order}"
             )
 
-    assert shots[-1].continuity is not None
-    final_frame = shots[-1].continuity.final_frame
-    static_markers = ("原地互看", "画面静止", "完全静止", "停帧", "循环动作")
-    active_markers = (
-        "迈",
-        "走",
-        "折",
-        "放",
-        "收",
-        "摆",
-        "落",
-        "抬",
-        "推",
-        "盖",
-        "转",
-        "移",
-        "擦",
-        "浇",
-        "滚",
-        "提",
-        "拿",
-        "起身",
-    )
-    if any(marker in final_frame for marker in static_markers) or not any(
-        marker in final_frame for marker in active_markers
-    ):
-        raise ValueError("professional shot plan requires an observable active ending")
+    # Ending quality needs the full shot design and visual review; substrings in a
+    # final-frame description cannot establish motion or understand its negation.
+    # Keep that uncertainty in director-result advice, not the acceptance boundary.
 
 
 class ShotPlanDraft(ContractModel):
@@ -307,6 +288,11 @@ class ProfessionalShotOutput(ShotSpec):
     lighting: LightingDesign
     sound: ShotSoundDesign
     director_intent: str = Field(alias="directorIntent", min_length=1, max_length=500)
+    camera_spatial_relation: str = Field(
+        alias="cameraSpatialRelation", min_length=1, max_length=1000
+    )
+    interaction_constraints: list[str] = Field(alias="interactionConstraints")
+    visual_exclusions: list[str] = Field(alias="visualExclusions")
 
 
 class DirectorPlanPayload(ContractModel):
@@ -382,6 +368,7 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
         for shot in safety_content.get("shots", []):
             if isinstance(shot, dict):
                 shot.pop("generationRisks", None)
+                shot.pop("visualExclusions", None)
         serialized = str(safety_content)
         prohibited = ("8–9岁", "8-9岁", "青少年脸型", "成人化身体", "成人化表情")
         if any(term in serialized for term in prohibited):

@@ -117,3 +117,16 @@ def test_legacy_generation_snapshot_remains_readable_without_display_sections() 
     assert snapshot.prompt_summary is None
     assert snapshot.prompt_sections == []
     assert snapshot.prompt == "当时实际提交的完整生成指令"
+
+
+def test_review_advice_is_not_a_media_instruction_and_transitions_are_readable() -> None:
+    compiled = compile_video_generation_prompt(
+        project_title="准备野餐", target_duration_seconds=12,
+        shots=[_legacy_shot(generationRisks=[
+            {"code": "return_to_director", "message": "需退回调整，检查承托位置"}
+        ])], director_treatment=None,
+    )
+    assert "需退回调整" not in compiled.negative_prompt
+    assert "return_to_director" not in compiled.negative_prompt
+    assert "continuous" not in compiled.prompt
+    assert "0–12秒" in compiled.prompt

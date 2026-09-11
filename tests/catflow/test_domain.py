@@ -16,6 +16,7 @@ from catflow.domain.models import (
     LifeStoryProposalDraft,
     LightingDesign,
     PhysicalChangeDesign,
+    ProfessionalShotPlanDraft,
     ShotPlanDraft,
     ShotSoundDesign,
     ShotSpec,
@@ -317,7 +318,7 @@ def _professional_director_payload() -> dict[str, object]:
     }
 
 
-def test_director_plan_rejects_direction_conflicts_static_endings_and_no_state_change() -> None:
+def test_director_plan_rejects_direction_conflicts_and_no_state_change() -> None:
     valid = _professional_director_payload()
     DirectorPlanPayload.model_validate(valid)
 
@@ -326,16 +327,60 @@ def test_director_plan_rejects_direction_conflicts_static_endings_and_no_state_c
     with pytest.raises(ValidationError, match="screen direction conflict"):
         DirectorPlanPayload.model_validate(conflicting)
 
-    static = _professional_director_payload()
-    static["shots"][1]["continuity"]["finalFrame"] = "孩子和猫咪原地互看，画面静止"  # type: ignore[index]
-    with pytest.raises(ValidationError, match="active ending"):
-        DirectorPlanPayload.model_validate(static)
-
     unchanged = _professional_director_payload()
     before = unchanged["shots"][0]["physicalChange"]["before"]  # type: ignore[index]
     unchanged["shots"][0]["physicalChange"]["after"] = before  # type: ignore[index]
     with pytest.raises(ValidationError, match="visible physical state change"):
         DirectorPlanPayload.model_validate(unchanged)
+
+
+@pytest.mark.parametrize("final_frame", [
+    "猫耳轻颤，胡须舒展，水面泛起涟漪",
+    "不做停帧，不让角色原地互看，猫耳轻颤",
+    "孩子和猫咪原地互看，画面静止",
+    "The cat's whiskers quiver as ripples spread across the water.",
+    "孩子折好毛巾，猫咪继续向右迈步",
+])
+def test_director_plan_preserves_ending_wording_without_lexical_judgment(final_frame: str) -> None:
+    payload = _professional_director_payload()
+    payload["shots"][-1]["continuity"]["finalFrame"] = final_frame  # type: ignore[index]
+    plan = DirectorPlanPayload.model_validate(payload)
+    assert plan.shots[-1].continuity.final_frame == final_frame
+
+
+@pytest.mark.parametrize("phrase", ["8–9岁", "8-9岁", "青少年脸型", "成人化身体", "成人化表情"])
+def test_professional_draft_distinguishes_visual_exclusions_from_positive_descriptions(
+    phrase: str,
+) -> None:
+    payload = _professional_director_payload()
+    payload["shots"][0]["visualExclusions"] = [f"不出现{phrase}"]
+    draft_data = {
+        "sourceStoryVersionId": uuid.uuid4(),
+        "sourceSelectionHash": "a" * 64,
+        "directorPromptRevision": "test-director-v3",
+        "directorModel": "fake",
+        "directorInputHash": "b" * 64,
+        "directorTreatment": payload["directorTreatment"],
+        "shots": payload["shots"],
+        "clip": {
+            "durationSeconds": 12,
+            "aspectRatio": "9:16",
+            "microEvent": "雨天擦爪",
+            "childAction": "孩子擦干猫爪",
+            "catActionOrObservation": "猫咪抬爪配合",
+            "visibleCauseAndEffect": "湿脚印减少",
+            "warmEnding": "猫咪继续走进室内",
+            "dialoguePolicy": "none",
+            "environmentIntent": "雨天玄关",
+        },
+    }
+    draft = ProfessionalShotPlanDraft.model_validate(draft_data)
+    assert draft.shots[0].visual_exclusions == [f"不出现{phrase}"]
+    assert payload["shots"][0]["visualExclusions"] == [f"不出现{phrase}"]
+
+    payload["shots"][0]["childAction"] = f"孩子呈现{phrase}"
+    with pytest.raises(ValidationError, match="adult or older-child description"):
+        ProfessionalShotPlanDraft.model_validate(draft_data)
 
 
 def test_reference_compiler_excludes_style_source_and_preserves_priority() -> None:

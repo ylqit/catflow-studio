@@ -108,6 +108,10 @@ def _director_payload() -> DirectorPlanPayload:
                     "catAction": "猫咪抬爪配合后向室内迈步",
                     "environmentChange": "湿爪印逐渐减少",
                     "transition": "continuous",
+                    "cameraSpatialRelation": "摄影机位于玄关内侧，同时看清孩子肩部、"
+                    "双手与猫咪落脚点",
+                    "interactionConstraints": ["毛巾由孩子双手握持，猫爪保持连接到同一只猫"],
+                    "visualExclusions": [],
                     "lens": {
                         "focalLengthEquivalent": "35mm",
                         "cameraHeight": "儿童腰部",
@@ -370,14 +374,15 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert first_video_job.input_snapshot is not None
     assert first_video_job.input_snapshot.state == "submitted"
     assert first_video_job.input_snapshot.prompt == preview.prompt
-    assert first_video_job.input_snapshot.schema_version == 2
+    assert first_video_job.input_snapshot.schema_version == 3
     assert (
-        first_video_job.input_snapshot.prompt_compiler_revision == "seedance-professional-v6-scene"
+        first_video_job.input_snapshot.prompt_compiler_revision
+        == "seedance-professional-v7-spatial"
     )
     assert first_video_job.input_snapshot.prompt_summary == preview.prompt_summary
     assert first_video_job.input_snapshot.prompt_sections == preview.prompt_sections
     assert first_video_job.frozen_input["compiledProviderPrompt"] == (
-        f"【生成目标】\n{preview.prompt}\n\n【必须避免】\n{preview.negative_prompt}"
+        preview.compiled_provider_prompt
     )
     workspace = service.workspace(project.id)
     assert workspace["latestVideoJob"]["id"] == str(first_video_job.id)
@@ -443,9 +448,9 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert job.kind == "plan_shots"
     assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
     assert job.frozen_input["storyVersionId"] == str(story.id)
-    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v5-contract"
-    assert job.frozen_input["outputContractRevision"] == "professional-director-v2"
-    assert job.frozen_input["normalizationRevision"] == "director-normalizer-v2"
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v6-spatial"
+    assert job.frozen_input["outputContractRevision"] == "professional-director-v3"
+    assert job.frozen_input["normalizationRevision"] == "director-normalizer-v3"
     assert "规划分镜" in job.frozen_input["inputInstruction"]
     assert "不得输出空占位镜头、备用镜头或修订镜头" in job.frozen_input["prompt"]
     assert job.frozen_input["referenceRoles"] == [
@@ -622,6 +627,7 @@ def test_paid_director_result_can_be_recovered_without_another_provider_job() ->
     payload = _director_payload().model_dump(mode="json", by_alias=True)
     payload["shots"][0]["sound"]["objectEffects"] = ["一", "二", "三", "四"]
     payload["shots"][0]["blocking_note"] = "内嵌角色调度符合要求"
+    payload["shots"][-1]["continuity"]["finalFrame"] = "猫耳轻颤，胡须舒展"
     repository._jobs[job.id] = job.model_copy(  # noqa: SLF001 - fixture controls persistence.
         update={
             "status": "failed",
@@ -639,11 +645,34 @@ def test_paid_director_result_can_be_recovered_without_another_provider_job() ->
     assert {issue.code for issue in attempt.result.issues} == {
         "sound_detail_dense",
         "unknown_provider_field",
+        "ending_review",
     }
 
     command = ShotPlanGenerationRecoveryCommand(idempotencyKey="recover-existing-result")
     candidate = service.recover_shot_plan_generation_result(project.id, job.id, command)
+    completed = service.get_job(job.id)
+    previous_validation = {
+        **completed.provider_result["validation"],
+        "normalizationRevision": "director-normalizer-v2",
+    }
+    repository._jobs[job.id] = completed.model_copy(update={
+        "provider_result": {**completed.provider_result, "validation": previous_validation},
+        "frozen_input": {**completed.frozen_input, "normalizationRevision": "director-normalizer-v2"},
+    })
+    before_recovery = service.get_job(job.id).model_dump(mode="json")
+    plans_before = service.list_shot_plans(project.id)
     repeated = service.recover_shot_plan_generation_result(project.id, job.id, command)
+    after_recovery = service.get_job(job.id).model_dump(mode="json")
+    validation = after_recovery["provider_result"]["validation"]
+    assert validation["normalizationRevision"] == "director-normalizer-v3"
+    assert after_recovery["provider_result"]["validationHistory"][-1] == previous_validation
+    for field in ("frozen_input", "status", "error", "provider_task_id"):
+        assert after_recovery[field] == before_recovery[field]
+    assert service.list_shot_plans(project.id) == plans_before
+    assert repeated == candidate
+    # Repeating an up-to-date audit is also idempotent, including its history.
+    service.recover_shot_plan_generation_result(project.id, job.id, command)
+    assert service.get_job(job.id).model_dump(mode="json") == after_recovery
 
     assert repeated.id == candidate.id
     assert candidate.review_status == "candidate"
@@ -651,6 +680,9 @@ def test_paid_director_result_can_be_recovered_without_another_provider_job() ->
     assert candidate.producing_job_id == job.id
     assert candidate.shots[0].sound is not None
     assert candidate.shots[0].sound.object_effects == ["一", "二", "三", "四"]
+    assert candidate.shots[-1].continuity.final_frame == "猫耳轻颤，胡须舒展"
+    assert service.get_job(job.id).provider_result["payload"] == payload
+    assert service.get_job(job.id).provider_result["responseId"] == "response-paid-once"
     assert next(plan for plan in service.list_shot_plans(project.id) if plan.active).id == base.id
     assert len(repository.list_project_jobs(project.id)) == 2
 
@@ -729,6 +761,17 @@ def test_incomplete_director_draft_can_be_corrected_without_another_provider_job
     assert resolved.result.disposition == "needs_input"  # original validation remains evidence
     assert resolved.result.resolution == "candidate"
     assert resolved.result.result_revision == candidate.revision
+    # Even an older audit belongs to this manual resolution, not to raw recovery.
+    resolved_job = service.get_job(job.id)
+    repository._jobs[job.id] = resolved_job.model_copy(update={
+        "provider_result": {
+            **resolved_job.provider_result,
+            "validation": {
+                **resolved_job.provider_result["validation"],
+                "normalizationRevision": "director-normalizer-v2",
+            },
+        },
+    })
     saved = service.get_job(job.id).provider_result
     assert all(saved[key] == value for key, value in original_result.items())
     assert saved["validation"]["manualResolution"]["resultShotPlanVersionId"] == str(candidate.id)
@@ -861,6 +904,9 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         ),
         directorIntent="用动作和物理变化呈现照顾感",
         generationRisks=[{"code": "paw_occlusion", "message": "避免手与猫爪融合。"}],
+        cameraSpatialRelation="摄影机侧拍，孩子双肩、握持毛巾的双手与猫咪前爪同时可见",
+        interactionConstraints=["孩子双手握持同一毛巾，接触猫爪时猫爪仍连接猫咪身体"],
+        visualExclusions=["手与猫爪融合"],
     )
     payload = DirectorPlanPayload(
         targetDurationSeconds=12,
@@ -945,13 +991,14 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
     assert shot.environment_change not in prompt
     assert prompt.count("孩子折好毛巾，猫咪仍在向前迈步") == 1
     assert "paw_occlusion" not in prompt
-    assert "镜头1：paw_occlusion：避免手与猫爪融合" in preview.negative_prompt
+    assert "paw_occlusion" not in preview.negative_prompt
+    assert "镜头1：手与猫爪融合" in preview.negative_prompt
     assert proposal_draft.child_action not in prompt
     assert proposal_draft.trigger not in prompt
     assert proposal_draft.warm_ending not in prompt
     assert payload.director_treatment.logline not in prompt
     assert payload.director_treatment.ending_image not in prompt
-    assert preview.warnings == [{"code": "paw_occlusion", "message": "避免手与猫爪融合。"}]
+    assert {"code": "paw_occlusion", "message": "避免手与猫爪融合。"} in preview.warnings
 
 
 def test_selected_environment_is_scoped_to_its_project() -> None:
@@ -1089,7 +1136,7 @@ def test_environment_generation_uses_story_intent_and_only_the_style_reference()
     assert job.image_input_snapshot.state == "submitted"
     assert job.frozen_input["referenceRoles"] == ["style_board"]
     assert job.frozen_input["compiledProviderPrompt"] == (
-        f"【生成目标】\n{preview.prompt}\n\n【必须避免】\n{preview.negative_prompt}"
+        preview.compiled_provider_prompt
     )
 
 
@@ -1143,7 +1190,7 @@ def test_environment_draft_preview_submission_and_history_are_bound(mode: str) -
     job = service.create_asset_generation_job(project.id, command)
     assert job.image_input_snapshot.environment_draft.revision == 1
     assert job.image_input_snapshot.environment_intent == value.description
-    assert job.image_input_snapshot.schema_version == 2
+    assert job.image_input_snapshot.schema_version == 3
     assert job.frozen_input["prompt"] == preview.prompt
     assert old_job.model_dump_json() == old_snapshot
     assert service.create_asset_generation_job(project.id, command).id == job.id

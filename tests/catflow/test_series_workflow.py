@@ -1034,7 +1034,7 @@ def test_previous_episode_video_is_previewed_off_and_frozen_only_after_opt_in() 
     assert "用户已明确启用上一集完整成片" in next(
         section.content
         for section in opted_in_preview.prompt_sections
-        if section.key == "ending_constraints"
+        if section.key == "shot_execution"
     )
     assert opted_in_preview.prompt == "\n\n".join(
         f"【{section.title}】\n{section.content}"

@@ -266,6 +266,18 @@ class StoryImportConfirmCommand(ContractModel):
         return self
 
 
+def story_import_confirmation_request_snapshot(
+    command: StoryImportConfirmCommand,
+) -> dict[str, Any]:
+    """Return the versioned immutable request used for idempotency comparison."""
+    return {
+        "version": 1,
+        "request": command.model_dump(
+            mode="json", by_alias=True, exclude={"idempotency_key"}
+        ),
+    }
+
+
 class StoryImportMaterializationDto(ContractModel):
     id: uuid.UUID
     suggestion_id: uuid.UUID = Field(alias="suggestionId")

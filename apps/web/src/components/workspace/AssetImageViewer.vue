@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ProviderPrompt from "../ProviderPrompt.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import type { AssetDto } from "../../api/types";
@@ -9,9 +10,11 @@ const props = defineProps<{
   assets: AssetDto[];
   activeAssetId?: string | null;
   comparisons: Array<{ label: string; asset: AssetDto }>;
+  compiledProviderPrompt?: string | null;
   prompt?: string | null;
   negativePrompt?: string | null;
   promptUnavailable?: boolean;
+  promptLoadError?: string;
   qualityReport?: Record<string, unknown> | null;
   allowPromptReuse?: boolean;
 }>();
@@ -284,12 +287,11 @@ onBeforeUnmount(() => stopPan());
         <button aria-label="放大图片" @click="changeZoom(25)">放大</button>
       </footer>
 
-      <details v-if="prompt" class="viewer-prompt">
-        <summary>查看该候选实际使用的生成指令</summary>
-        <p>{{ prompt }}</p>
-        <p v-if="negativePrompt"><b>需要避免的问题</b><br />{{ negativePrompt }}</p>
+      <details v-if="prompt != null || compiledProviderPrompt != null || promptUnavailable || promptLoadError" class="viewer-prompt">
+        <summary>查看该候选的生成指令记录</summary>
+        <p v-if="promptLoadError" role="alert">{{ promptLoadError }}</p>
+        <ProviderPrompt v-else historical :compiled-provider-prompt="compiledProviderPrompt" :prompt="prompt" :negative-prompt="negativePrompt" />
       </details>
-      <p v-else-if="promptUnavailable" class="viewer-history-note">旧任务未记录完整生成指令。</p>
 
       <section v-if="qualityChecks.length || qualityWarnings.length" class="viewer-quality" aria-label="画面检查建议">
         <h3>画面检查建议</h3>

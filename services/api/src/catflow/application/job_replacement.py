@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import uuid
 
-from .job_execution import ReplacementGenerationCommand, UnknownJobReplacement
+from .job_execution import (
+    PaidJobCommand,
+    ReplacementGenerationCommand,
+    UnknownJobReplacement,
+    generation_command,
+)
 from .series import (
     SeriesEpisodeStoryGenerationCommand,
     SeriesPlanGenerationCommand,
@@ -24,6 +29,7 @@ from .service import (
     StudioConflictError,
     StudioService,
     VideoDiagnosisCommand,
+    VideoEditPlanCommand,
 )
 from .shot_production import ShotMediaCommand, ShotMediaPreviewCommand
 from .story_imports import StoryImportPreviewCommand, StoryImportReanalyzeCommand
@@ -42,6 +48,7 @@ def replace_unknown_job(
                 return successor
     if (
         old.status != "submission_unknown"
+        or old.successor_job_ids
         or "prepare_replacement" not in old.execution.available_actions
     ):
         raise StudioConflictError("此任务不满足结果未知的重新准备条件。")
@@ -73,6 +80,8 @@ def replace_unknown_job(
                 **target.model_dump(), expectedInputHash=preview["inputHash"], **common
             ),
         )
+    if old.kind == "plan_video_edit":
+        return service.create_video_edit_plan_job(project, VideoEditPlanCommand(**frozen["command"], **common))
     if old.kind == "plan_shots":
         return service.create_shot_plan_generation_job(project, ShotPlanGenerationCommand(**common))
     if old.kind == "plan_story":
@@ -171,9 +180,17 @@ def replace_unknown_job(
             for key, value in repair.preview.model_dump(mode="json", by_alias=True).items()
             if key in aliases
         }
-        preview = service.preview_video_repair(
-            project, SegmentRepairPreviewCommand.model_validate(target)
-        )
+        token = generation_command.set(PaidJobCommand(
+            prepareOnly=common["prepareOnly"],
+            replacementJobId=old.id,
+            replacement=common["replacement"],
+        ))
+        try:
+            preview = service.preview_video_repair(
+                project, SegmentRepairPreviewCommand.model_validate(target)
+            )
+        finally:
+            generation_command.reset(token)
         return service.create_video_repair_job(
             project,
             SegmentRepairCreateCommand(**target, expectedInputHash=preview.input_hash, **common),

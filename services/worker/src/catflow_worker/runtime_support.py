@@ -86,6 +86,35 @@ class AssetMediaResolver:
             frames.append(destination)
         return tuple(frames)
 
+    def prepare_edit_plan_frames(
+        self, job_id: uuid.UUID, frozen: dict[str, object]
+    ) -> tuple[Path, ...]:
+        if self._timeline_renderer is None:
+            raise ValueError("edit planning requires the actual composed timeline renderer")
+        with self._sessions() as session:
+            job = session.get(JobRecord, job_id)
+            if (
+                job is None
+                or job.kind != "plan_video_edit"
+                or job.frozen_input_json.get("inputTimelineHash") != frozen.get("inputTimelineHash")
+            ):
+                raise ValueError("edit plan frozen timeline does not match its job")
+        directory = self._media_store.resolve(f"work/video-edit-plan/{job_id}")
+        directory.mkdir(parents=True, exist_ok=True)
+        source = directory / "timeline.mp4"
+        if not source.is_file():
+            self._timeline_renderer.render_timeline(
+                job_id, frozen["inputEdl"], source, allow_draft=True
+            )
+        frames = []
+        for index, sample in enumerate(frozen["frameSamples"]):
+            frame = int(sample["frameNumber"])
+            destination = directory / f"{index:02d}-{frame}.png"
+            if not destination.is_file():
+                self._extract_exact_frame(source, frame, destination)
+            frames.append(destination)
+        return tuple(frames)
+
     def store_reference_preparation(self, job_id: uuid.UUID) -> None:
         with self._sessions() as session:
             job = session.get(JobRecord, job_id)
@@ -151,6 +180,12 @@ class AssetMediaResolver:
             anchor_end = (
                 job.frozen_input_json.get("anchorEndFrame") if from_frame else issue_end_frame - 1
             )
+            if job.frozen_input_json.get("editContractVersion") == 2:
+                roles = {item["role"] for item in job.frozen_input_json["imageReferences"]}
+                if not roles.intersection({"anchor_in", "first_frame"}):
+                    anchor_start = None
+                if not roles.intersection({"anchor_out", "last_frame"}):
+                    anchor_end = None
             if exact_reference and job.frozen_input_json.get("endStatePolicy") == "replace":
                 anchor_end = None
             if from_frame and not isinstance(anchor_start, int):
@@ -215,7 +250,8 @@ class AssetMediaResolver:
                     "+faststart",
                 ],
             )
-        self._extract_exact_frame(source, anchor_start, anchor_in)
+        if anchor_start is not None:
+            self._extract_exact_frame(source, anchor_start, anchor_in)
         if anchor_end is not None:
             self._extract_exact_frame(source, anchor_end, anchor_out)
 
@@ -249,14 +285,15 @@ class AssetMediaResolver:
                     **facts,
                 },
             )
-        self._persist_prepared_asset(
-            job_id,
-            project_id,
-            role="repair_anchor_in",
-            storage_key=anchor_in_key,
-            path=anchor_in,
-            metadata={"sourceFrame": anchor_start},
-        )
+        if anchor_start is not None:
+            self._persist_prepared_asset(
+                job_id,
+                project_id,
+                role="repair_anchor_in",
+                storage_key=anchor_in_key,
+                path=anchor_in,
+                metadata={"sourceFrame": anchor_start},
+            )
         if anchor_end is not None:
             self._persist_prepared_asset(
                 job_id,

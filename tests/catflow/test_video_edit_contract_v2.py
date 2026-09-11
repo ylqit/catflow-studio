@@ -14,6 +14,7 @@ from catflow.application.service import (
     StudioService,
 )
 from catflow.infrastructure.memory_repository import MemoryStudioRepository
+from test_video_edit_v2 import edit_fixture, ready_preparation
 
 
 def _prepared_project() -> tuple[StudioService, uuid.UUID, uuid.UUID]:
@@ -90,30 +91,36 @@ def test_preview_is_untyped_and_does_not_persist_a_repair() -> None:
 
 
 def test_preview_accepts_one_frame_and_expands_only_provider_context() -> None:
-    service, project_id, video_id = _prepared_project()
+    service, _, project, _, _, command = edit_fixture()
 
     preview = service.preview_video_repair(
-        project_id,
+        project.id,
         SegmentRepairPreviewCommand(
-            baseVideoAssetId=video_id,
-            issueRange={"startFrame": 80, "endFrame": 81},
-            instruction="修正动作。",
+            **{
+                **command.model_dump(by_alias=True),
+                "issueRange": {"startFrame": 80, "endFrame": 81},
+            }
         ),
     )
     assert preview.issue_range.duration_frames == 1
     assert preview.candidate_core_range.duration_frames == 1
     assert preview.provider_duration_seconds == 4
 
-    assert service.list_video_repairs(project_id) == []
+    assert service.list_video_repairs(project.id) == []
 
 
 def test_create_recompiles_the_preview_and_freezes_one_untyped_job() -> None:
-    service, project_id, video_id = _prepared_project()
-    request = {
-        "baseVideoAssetId": video_id,
-        "issueRange": {"startFrame": 96, "endFrame": 192},
-        "instruction": "同时修正抬爪、毛巾受力和地面水印变化。",
-    }
+    service, repo, project, _, _, source_command = edit_fixture()
+    project_id = project.id
+    command_input = SegmentRepairPreviewCommand(
+        **{
+            **source_command.model_dump(by_alias=True),
+            "issueRange": {"startFrame": 96, "endFrame": 192},
+            "instruction": "同时修正抬爪、毛巾受力和地面水印变化。",
+        }
+    )
+    prepared = ready_preparation(service, repo, project, command_input)
+    request = {**command_input.model_dump(by_alias=True), "referencePreparationJobId": prepared.id}
     preview = service.preview_video_repair(project_id, SegmentRepairPreviewCommand(**request))
     command = SegmentRepairCreateCommand(
         **request,
@@ -137,18 +144,20 @@ def test_create_recompiles_the_preview_and_freezes_one_untyped_job() -> None:
 
 
 def test_create_rejects_a_stale_preview_hash_without_persisting() -> None:
-    service, project_id, video_id = _prepared_project()
+    service, repo, project, _, _, source_command = edit_fixture()
+    prepared = ready_preparation(service, repo, project, source_command)
 
     with pytest.raises(StudioConflictError, match="input hash changed"):
         service.create_video_repair_job(
-            project_id,
+            project.id,
             SegmentRepairCreateCommand(
-                baseVideoAssetId=video_id,
-                issueRange={"startFrame": 96, "endFrame": 192},
-                instruction="修正动作。",
+                **{
+                    **source_command.model_dump(by_alias=True),
+                    "referencePreparationJobId": prepared.id,
+                },
                 expectedInputHash="0" * 64,
                 idempotencyKey="stale-edit-preview",
             ),
         )
 
-    assert service.list_video_repairs(project_id) == []
+    assert service.list_video_repairs(project.id) == []

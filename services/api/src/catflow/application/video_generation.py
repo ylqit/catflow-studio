@@ -6,12 +6,13 @@ from typing import Literal
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import BlockingDesign, DirectorStoryTreatment, ShotSpec
 
-VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v6-scene"
+from .media_prompt import validate_system_prompt
+
+VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v8-canon-identity"
 
 _BASE_VIDEO_EXCLUSIONS = (
     "真实摄影",
     "3D塑料质感",
-    "叶片微距摄影污染",
     "儿童年龄、发型、脸型漂移",
     "猫咪毛色和虎斑分区漂移",
     "额外肢体",
@@ -100,13 +101,13 @@ def synchronize_professional_shot_summaries(shot: ShotSpec) -> ShotSpec:
     return shot.model_copy(update=updates) if updates else shot
 
 
-def _identity_style_section(project_title: str, target_duration_seconds: int) -> str:
+def _identity_style_section(project_title: str, target_duration_seconds: int, cat_identity: str) -> str:
     return compile_prompt_sentence(
         f"原创一人一猫生活短片《{_clean_fragment(project_title)}》，9:16，"
         f"{target_duration_seconds}秒",
         "固定同一位6至7岁儿童，身高约1.2米，齐下颌短发，保持圆润儿童脸型和"
         "约4.5至5头身的低龄儿童比例",
-        "固定同一只灰白虎斑猫，保持毛色分区、眼睛、鼻口、环纹尾巴和正常四足结构",
+        cat_identity,
         "二维柔和数字插画，暖灰细轮廓线，哑光材质，轻微纸感颗粒，柔和漫射暖光",
     )
 
@@ -114,13 +115,24 @@ def _identity_style_section(project_title: str, target_duration_seconds: int) ->
 def _creative_treatment_section(treatment: DirectorStoryTreatment | None) -> str:
     clauses: list[str] = []
     if treatment is not None:
+        validate_system_prompt(
+            treatment.model_dump(
+                by_alias=True,
+                include={
+                    "theme",
+                    "emotional_tone",
+                    "visual_motif",
+                    "spatial_setting",
+                },
+            ),
+            source="directorTreatment",
+        )
         clauses.extend(
             (
                 f"主题：{treatment.theme}",
                 f"情绪气质：{_items(treatment.emotional_tone)}",
                 f"视觉母题：{treatment.visual_motif}",
                 f"空间：{treatment.spatial_setting}",
-                f"声音方向：{treatment.sound_intent}",
             )
         )
     clauses.extend(
@@ -132,12 +144,13 @@ def _creative_treatment_section(treatment: DirectorStoryTreatment | None) -> str
     return compile_prompt_sentence(*clauses)
 
 
-def _shot_execution(shot: ShotSpec) -> str:
+def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bool = False) -> str:
+    transition = {"continuous": "连续衔接", "soft_cut": "柔和切换", "hard_cut": "直接切换"}
     paragraphs = [
         compile_prompt_sentence(
-            f"镜头设置：{shot.duration_seconds}秒，{shot.framing}",
-            f"运镜：{shot.camera_movement}",
-            f"转场：{shot.transition}",
+            f"景别：{shot.framing}",
+            "" if initial_frame else f"运镜：{shot.camera_movement}",
+            "" if initial_frame else f"转场：{transition[shot.transition]}",
         )
     ]
     if shot.lens is not None:
@@ -159,17 +172,13 @@ def _shot_execution(shot: ShotSpec) -> str:
             )
         )
     )
-    if shot.scene_asset_id:
+    if shot.camera_spatial_relation:
         paragraphs.append(
-            compile_prompt_sentence(
-                f"本镜头场景参考：shot_scene_{shot.order}（未另附时使用environment）"
-            )
+            compile_prompt_sentence(f"机位与空间关系：{shot.camera_spatial_relation}")
         )
-    if shot.confirmed_frame:
+    if shot.interaction_constraints and not initial_frame:
         paragraphs.append(
-            compile_prompt_sentence(
-                f"shot_frame_{shot.order}为此镜头构图与起点的普通参考，不是多个严格首帧约束"
-            )
+            compile_prompt_sentence("交互约束：" + _items(shot.interaction_constraints))
         )
     if shot.composition is not None:
         paragraphs.append(
@@ -178,43 +187,53 @@ def _shot_execution(shot: ShotSpec) -> str:
                 f"前景：{shot.composition.foreground}",
                 f"中景：{shot.composition.middle_ground}",
                 f"背景：{shot.composition.background}",
-                f"运动方向：{shot.composition.screen_direction}",
+                "" if initial_frame else f"画面运动方向：{shot.composition.screen_direction}",
                 f"视线：{shot.composition.eye_line}",
             )
         )
     if shot.child_blocking is not None:
         paragraphs.append(
             compile_prompt_sentence(
-                f"人物走位：{_blocking_summary(shot.child_blocking)}",
-                f"人物微动作：{_items(shot.child_blocking.micro_motions)}",
+                f"人物起始状态：{shot.child_blocking.initial_state}"
+                if initial_frame
+                else f"人物走位：{_blocking_summary(shot.child_blocking)}",
+                ""
+                if initial_frame or not shot.child_blocking.micro_motions
+                else f"人物微动作：{_items(shot.child_blocking.micro_motions)}",
             )
         )
-    else:
+    elif not initial_frame:
         paragraphs.append(compile_prompt_sentence(f"人物动作：{shot.child_action}"))
     if shot.cat_blocking is not None:
         paragraphs.append(
             compile_prompt_sentence(
-                f"猫咪走位：{_blocking_summary(shot.cat_blocking)}",
-                f"猫咪微动作：{_items(shot.cat_blocking.micro_motions)}",
+                f"猫咪起始状态：{shot.cat_blocking.initial_state}"
+                if initial_frame
+                else f"猫咪走位：{_blocking_summary(shot.cat_blocking)}",
+                ""
+                if initial_frame or not shot.cat_blocking.micro_motions
+                else f"猫咪微动作：{_items(shot.cat_blocking.micro_motions)}",
             )
         )
-    else:
+    elif not initial_frame:
         paragraphs.append(compile_prompt_sentence(f"猫咪动作：{shot.cat_action}"))
     if shot.physical_change is not None:
         paragraphs.append(
             compile_prompt_sentence(
-                f"物理变化：{shot.physical_change.subject}从"
+                f"物体起始状态：{shot.physical_change.subject}，{shot.physical_change.before}"
+                if initial_frame
+                else f"物理变化：{shot.physical_change.subject}从"
                 f"{_clean_fragment(shot.physical_change.before)} → "
                 f"{_clean_fragment(shot.physical_change.after)}"
             )
         )
-    else:
+    elif not initial_frame:
         paragraphs.append(compile_prompt_sentence(f"画面变化：{shot.environment_change}"))
     if shot.continuity is not None:
         paragraphs.append(
             compile_prompt_sentence(
                 f"镜头承接：{shot.continuity.incoming}",
-                f"离开状态：{shot.continuity.outgoing}",
+                "" if initial_frame else f"离开状态：{shot.continuity.outgoing}",
                 f"共享视觉元素：{shot.continuity.shared_visual_element}",
             )
         )
@@ -226,21 +245,24 @@ def _shot_execution(shot: ShotSpec) -> str:
                 f"色彩意图：{shot.lighting.color_intent}",
             )
         )
-    if shot.sound is not None:
+    if shot.sound is not None and not initial_frame:
         sound_clauses = [
-            f"环境声：{_items(shot.sound.ambience)}",
-            f"物件声：{_items(shot.sound.object_effects)}",
-            f"动作声：{_items(shot.sound.movement_effects)}",
+            f"环境声：{_items(shot.sound.ambience)}" if shot.sound.ambience else "",
+            f"物件声：{_items(shot.sound.object_effects)}" if shot.sound.object_effects else "",
+            f"动作声：{_items(shot.sound.movement_effects)}" if shot.sound.movement_effects else "",
             f"音乐：{shot.sound.music_intent}",
         ]
         if shot.sound.dialogue:
             sound_clauses.append(f"对白：{shot.sound.dialogue}")
         paragraphs.append(compile_prompt_sentence(*sound_clauses))
-    else:
+    elif not initial_frame:
         paragraphs.append("声音：生成与可见动作同步的自然环境声、物件声和动作声。")
-    if shot.director_intent:
-        paragraphs.append(compile_prompt_sentence(f"导演意图：{shot.director_intent}"))
-    return f"镜头 {shot.order}\n" + "\n".join(paragraph for paragraph in paragraphs if paragraph)
+    title = (
+        f"镜头 {shot.order} 起始画面"
+        if initial_frame
+        else (f"镜头 {shot.order}（{start_seconds}–{start_seconds + shot.duration_seconds}秒）")
+    )
+    return title + "\n" + "\n".join(paragraph for paragraph in paragraphs if paragraph)
 
 
 def _active_ending(shots: list[ShotSpec]) -> str:
@@ -285,16 +307,27 @@ def _prompt_summary(project_title: str, shots: list[ShotSpec], active_ending: st
     )
 
 
-def _negative_prompt(shots: list[ShotSpec]) -> str:
-    items = list(_BASE_VIDEO_EXCLUSIONS)
+def _negative_prompt(shots: list[ShotSpec], *, initial_frame: bool = False) -> str:
+    items = [
+        item
+        for item in _BASE_VIDEO_EXCLUSIONS
+        if not initial_frame
+        or item
+        not in {
+            "背景严重跳变",
+            "原地互看",
+            "静止停帧",
+            "循环动作填充时长",
+        }
+    ]
     seen_meanings = {_clean_fragment(item).casefold() for item in items}
     for shot in shots:
-        for risk in shot.generation_risks:
-            message = _clean_fragment(risk.message)
+        for exclusion in shot.visual_exclusions:
+            message = _clean_fragment(exclusion)
             if not message or message.casefold() in seen_meanings:
                 continue
             seen_meanings.add(message.casefold())
-            items.append(f"镜头{shot.order}：{_clean_fragment(risk.code)}：{message}")
+            items.append(f"镜头{shot.order}：{message}")
     unique: list[str] = []
     seen: set[str] = set()
     for item in items:
@@ -313,15 +346,42 @@ def compile_video_generation_prompt(
     shots: list[ShotSpec],
     director_treatment: DirectorStoryTreatment | None,
     continuity_constraints: tuple[str, ...] = (),
+    cat_identity: str = "固定同一只灰白虎斑猫，保持毛色分区、眼睛、鼻口、环纹尾巴和正常四足结构",
 ) -> CompiledVideoGenerationPrompt:
     if not shots:
         raise ValueError("video generation requires at least one shot")
+    for shot in shots:
+        validate_system_prompt(
+            shot.model_dump(
+                by_alias=True,
+                exclude={
+                    "generation_risks",
+                    "director_intent",
+                    "confirmed_frame",
+                },
+            ),
+            source=f"shots[{shot.order - 1}]",
+        )
+    validate_system_prompt(continuity_constraints, source="continuity")
+    validate_system_prompt(cat_identity, source="catIdentity")
+    executions = []
+    if continuity_constraints:
+        executions.append(
+            "本集进入状态：\n"
+            + "\n".join(
+                compile_prompt_sentence(constraint) for constraint in continuity_constraints
+            )
+        )
+    elapsed = 0
+    for shot in shots:
+        executions.append(_shot_execution(shot, start_seconds=elapsed))
+        elapsed += shot.duration_seconds
     active_ending = _active_ending(shots)
     sections = (
         GenerationPromptSectionDto(
             key="identity_style",
             title="角色与画风",
-            content=_identity_style_section(project_title, target_duration_seconds),
+            content=_identity_style_section(project_title, target_duration_seconds, cat_identity),
         ),
         GenerationPromptSectionDto(
             key="creative_treatment",
@@ -331,7 +391,7 @@ def compile_video_generation_prompt(
         GenerationPromptSectionDto(
             key="shot_execution",
             title="逐镜执行",
-            content="\n\n".join(_shot_execution(shot) for shot in shots),
+            content="\n\n".join(executions),
         ),
         GenerationPromptSectionDto(
             key="ending_constraints",
@@ -347,9 +407,8 @@ def compile_video_generation_prompt(
                     ),
                     compile_prompt_sentence(
                         "无文字、无Logo、无水印",
-                        "不复制任何画风来源中的叶片、露珠或摄影构图",
+                        "参考图只用于已指定职责，不从中添加未设计的角色或道具",
                     ),
-                    *(compile_prompt_sentence(constraint) for constraint in continuity_constraints),
                 ]
             ),
         ),
@@ -360,6 +419,34 @@ def compile_video_generation_prompt(
         negative_prompt=_negative_prompt(shots),
         prompt_summary=_prompt_summary(project_title, shots, active_ending),
         prompt_sections=sections,
+    )
+
+
+def compile_shot_media_prompt(
+    *, shot: ShotSpec, initial_frame: bool
+) -> CompiledVideoGenerationPrompt:
+    """Select only this shot, and only pre-action state for an image."""
+    if initial_frame and (shot.child_blocking is None or shot.cat_blocking is None):
+        raise ValueError(f"镜头{shot.order}缺少明确的人物或猫咪起始状态，请补充分镜后生成起始图")
+    validate_system_prompt(
+        shot.model_dump(
+            by_alias=True,
+            exclude={
+                "generation_risks",
+                "director_intent",
+                "confirmed_frame",
+            },
+        ),
+        source=f"shots[{shot.order - 1}]",
+    )
+    content = _shot_execution(shot, initial_frame=initial_frame)
+    if initial_frame:
+        content = "生成动作尚未开始的一张画面，保持起始状态，不提前表现动作结果。\n" + content
+    return CompiledVideoGenerationPrompt(
+        prompt=content,
+        negative_prompt=_negative_prompt([shot], initial_frame=initial_frame),
+        prompt_summary=content,
+        prompt_sections=(),
     )
 
 

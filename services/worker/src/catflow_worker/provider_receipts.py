@@ -8,7 +8,7 @@ import logging
 import os
 import uuid
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -100,6 +100,7 @@ class ProviderCall:
     contract: dict[str, Any]
     journal: ReceiptJournal
     register: Callable[[dict[str, Any]], None]
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def receive(self, document: dict[str, Any]) -> None:
         receipt = self.journal.append(self.job_id, document)

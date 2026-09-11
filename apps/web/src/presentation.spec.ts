@@ -11,7 +11,7 @@ describe("creator-facing presentation", () => {
     ["storing", "正在保存"],
     ["succeeded", "已完成"],
     ["failed", "生成失败"],
-    ["submission_unknown", "提交状态待确认"],
+    ["submission_unknown", "提交结果待核实"],
     ["cancel_requested", "正在取消"],
     ["cancelled", "已取消"],
   ] as const)("presents %s as %s", (status, label) => {

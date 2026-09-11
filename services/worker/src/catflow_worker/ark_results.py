@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from catflow.application.series import normalize_series_plan_result
 from catflow.application.service import StudioService
 from catflow.application.story_imports import StoryImportAnalysisDraft
+from catflow.application.video_edit import VideoEditPlanSuggestion
 from catflow.domain.director_results import normalize_director_result
 from catflow.domain.models import LifeStoryProposalDraft
 from catflow.infrastructure.media import LocalMediaStore
@@ -50,6 +51,15 @@ class ArkResultLandingService:
             kind = job.kind
         if kind in {"plan_story", "plan_series_episode"}:
             self._store_planner(job_id)
+        elif kind == "plan_video_edit":
+            result = self._provider_result(job_id)
+            plan = VideoEditPlanSuggestion.model_validate(result.get("payload"))
+            with self._sessions.begin() as session:
+                record = session.get(JobRecord, job_id)
+                record.provider_result_json = {
+                    **record.provider_result_json,
+                    "editPlan": plan.model_dump(mode="json", by_alias=True),
+                }
         elif kind == "plan_shots":
             self._store_shot_plan(job_id)
         elif kind in {"plan_series", "plan_series_segment"}:
@@ -90,7 +100,10 @@ class ArkResultLandingService:
         payload = result.get("payload")
         job = self._studio_service.get_job(job_id)
         normalized = normalize_director_result(
-            payload, legacy=not job.frozen_input.get("normalizationRevision")
+            payload, legacy=not job.frozen_input.get("normalizationRevision"),
+            output_contract_revision=job.frozen_input.get(
+                "outputContractRevision", "professional-director-v2"
+            ),
         )
         self._studio_service.record_shot_plan_generation_validation(job_id, normalized)
 
@@ -131,6 +144,7 @@ class ArkResultLandingService:
             adaptation_policy=job.frozen_input.get("adaptationPolicy", "preserve_all"),
             expected_duration_seconds=job.frozen_input.get("defaultEpisodeDurationSeconds"),
             must_keep=job.frozen_input.get("mustKeep", []),
+            normalization_revision=job.frozen_input.get("normalizationRevision"),
             source_unit_ordinals=(
                 {int(beat["bindingOrder"]) for beat in job.frozen_input["sourceBeats"]}
                 if "sourceBeats" in job.frozen_input

@@ -32,6 +32,7 @@ from catflow.application.job_execution import (
     public_result,
 )
 from catflow.application.job_replacement import replace_unknown_job
+from catflow.application.media_prompt import MediaPromptError
 from catflow.application.project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -46,6 +47,7 @@ from catflow.application.project_library import (
     ProjectStage,
     ProjectSystemView,
 )
+from catflow.application.provider_recovery import ProviderTaskLookupDto
 from catflow.application.series import (
     ProjectSeriesContextDto,
     SeriesCreateCommand,
@@ -73,12 +75,12 @@ from catflow.application.service import (
     AssetGenerationCommand,
     AssetGenerationPreviewCommand,
     AssetGenerationPreviewDto,
-    EnvironmentGenerationDraft,
-    EnvironmentDraftSaveCommand,
     CanonProfileDto,
     CanonRevisionCreateCommand,
     EditCreateCommand,
     EditVersionDto,
+    EnvironmentDraftSaveCommand,
+    EnvironmentGenerationDraft,
     EpisodeContinuityFramesDto,
     ExportCommand,
     FinalSelectionCommand,
@@ -117,12 +119,16 @@ from catflow.application.service import (
     StudioNotFoundError,
     StudioService,
     StudioValidationError,
+    StudioVideoEditInProgressError,
     ValidationRunDto,
     VideoDiagnosisCommand,
     VideoDraftPreviewCommand,
     VideoDraftSaveCommand,
+    VideoEditConflictResponse,
     VideoEditDraftCreateCommand,
     VideoEditDraftDto,
+    VideoEditDraftInputCommand,
+    VideoEditPlanCommand,
     VideoRepairDto,
     VideoRepairResultCommand,
     VideoReviewCreateCommand,
@@ -250,6 +256,12 @@ def create_app(
             },
         )
 
+    @app.exception_handler(StudioVideoEditInProgressError)
+    async def handle_video_edit_in_progress(
+        _request: Request, exc: StudioVideoEditInProgressError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": exc.detail})
+
     @app.exception_handler(StudioConflictError)
     async def handle_conflict(_request: Request, exc: StudioConflictError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
@@ -258,6 +270,7 @@ def create_app(
     async def handle_not_found(_request: Request, exc: StudioNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
+    @app.exception_handler(MediaPromptError)
     @app.exception_handler(StudioValidationError)
     async def handle_validation(_request: Request, exc: StudioValidationError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
@@ -326,6 +339,8 @@ def create_app(
                     "blockedReason": segment_repair_blocked_reason,
                     "maximumImageReferences": provider.maximum_segment_image_references,
                     "maximumVideoReferences": provider.maximum_segment_video_references,
+                    "minimumReferenceDurationSeconds": provider.minimum_segment_reference_seconds,
+                    "maximumReferenceDurationSeconds": provider.maximum_segment_reference_seconds,
                 },
             },
         }
@@ -373,6 +388,10 @@ def create_app(
     @app.get("/api/v1/canon/current")
     def current_canon() -> CanonProfileDto:
         return service.current_canon()
+
+    @app.get("/api/v1/canon/profiles/{profile_id}")
+    def get_canon(profile_id: uuid.UUID) -> CanonProfileDto:
+        return service.get_canon(profile_id)
 
     @app.post(
         "/api/v1/canon/assets/upload",
@@ -1131,6 +1150,7 @@ def create_app(
 
     @app.post(
         "/api/v1/projects/{project_id}/video-edits/preview",
+        responses={409: {"model": VideoEditConflictResponse}},
         response_model=SegmentRepairPreviewDto,
     )
     def preview_video_edit(
@@ -1151,6 +1171,7 @@ def create_app(
 
     @app.post(
         "/api/v1/projects/{project_id}/video-edits",
+        responses={409: {"model": VideoEditConflictResponse}},
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
         dependencies=[Depends(require_worker_available)],
@@ -1207,6 +1228,24 @@ def create_app(
         project_id: uuid.UUID, command: VideoEditDraftCreateCommand
     ) -> VideoEditDraftDto:
         return service.create_video_edit_draft(project_id, command)
+
+    @app.patch(
+        "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/input",
+        response_model=VideoEditDraftDto,
+    )
+    def update_video_edit_draft_input(
+        project_id: uuid.UUID, draft_id: uuid.UUID, command: VideoEditDraftInputCommand
+    ) -> VideoEditDraftDto:
+        return service.update_video_edit_draft_input(project_id, draft_id, command)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/video-edits/plans",
+        response_model=JobDto,
+        status_code=202,
+        dependencies=[Depends(require_worker_available)],
+    )
+    def create_video_edit_plan(project_id: uuid.UUID, command: VideoEditPlanCommand) -> JobDto:
+        return service.create_video_edit_plan_job(project_id, command)
 
     @app.get(
         "/api/v1/projects/{project_id}/video-edit-drafts", response_model=list[VideoEditDraftDto]
@@ -1304,12 +1343,16 @@ def create_app(
             "hasMore": len(items) == limit,
         }
 
-    @app.post("/api/v1/jobs/{job_id}/replacement-preview")
+    @app.post(
+        "/api/v1/jobs/{job_id}/replacement-preview",
+        responses={409: {"model": VideoEditConflictResponse}},
+    )
     def replacement_preview(job_id: uuid.UUID):
         return replace_unknown_job(service, job_id)
 
     @app.post(
         "/api/v1/jobs/{job_id}/replacement",
+        responses={409: {"model": VideoEditConflictResponse}},
         response_model=JobDto,
         status_code=202,
         dependencies=[Depends(require_worker_available)],
@@ -1330,6 +1373,10 @@ def create_app(
             "historical": job.execution.historical_result,
             "message": "尚未收到正文。" if job.execution.result_state == "missing" else None,
         }
+
+    @app.get("/api/v1/jobs/{job_id}/provider-tasks", response_model=ProviderTaskLookupDto)
+    def lookup_provider_tasks(job_id: uuid.UUID) -> ProviderTaskLookupDto:
+        return service.lookup_provider_tasks(job_id)
 
     @app.post(
         "/api/v1/jobs/{job_id}/recovery",

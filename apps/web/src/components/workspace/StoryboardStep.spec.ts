@@ -65,6 +65,74 @@ describe("StoryboardStep", () => {
     client.shotPlanGenerationAttempts.mockResolvedValue([]);
   });
 
+  it.each(["professional", "historical"])("edits and saves spatial and relational fields on %s shots without mutating the source", async mode => {
+    const shot: ShotSpecDto = mode === "professional" ? {
+      ...professionalShot, cameraSpatialRelation: "摄影机正对门口", interactionConstraints: ["手接触毛巾"], visualExclusions: ["第二只猫"],
+    } : {
+      id: "shot-1", order: 1, durationSeconds: 12, framing: "中景", cameraMovement: "固定",
+      childAction: "历史人物摘要", catAction: "历史猫咪摘要", environmentChange: "历史变化", transition: "continuous",
+    };
+    const original = JSON.stringify(shot);
+    const plan = {
+      id: "relational-plan", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {}, shots: [shot], totalDurationSeconds: 12, reviewStatus: "accepted" as const,
+      active: true, outdated: false, createdAt: "2026-09-01T00:00:00Z",
+    };
+    client.shotPlans.mockResolvedValue([plan]);
+    client.createShotPlan.mockResolvedValue({ ...plan, id: "new-plan", revision: 2 });
+    const wrapper = mountStoryboard(plan);
+    await flushPromises();
+    if (mode === "historical") {
+      expect(wrapper.get('[aria-label="空间与交互设计"]').text()).toContain("历史分镜未记录交互约束");
+      expect((wrapper.get('textarea[aria-label="机位与空间关系"]').element as HTMLTextAreaElement).value).toBe("");
+      expect(wrapper.find('textarea[aria-label="交互约束 1"]').exists()).toBe(false);
+      await wrapper.findAll("button").find(button => button.text() === "添加交互约束")!.trigger("click");
+      await wrapper.findAll("button").find(button => button.text() === "添加画面排除项")!.trigger("click");
+    }
+    await wrapper.get('textarea[aria-label="机位与空间关系"]').setValue("摄影机位于左侧，角色沿门口轴线排列");
+    await wrapper.get('textarea[aria-label="交互约束 1"]').setValue("毛巾接触猫爪，手始终握住毛巾边缘");
+    await wrapper.get('textarea[aria-label="画面排除项 1"]').setValue("画面中不出现额外毛巾");
+    await wrapper.findAll("button").find(button => button.text() === "添加交互约束")!.trigger("click");
+    await wrapper.get('textarea[aria-label="交互约束 2"]').setValue("临时约束");
+    await wrapper.get('button[aria-label="移除交互约束 2"]').trigger("click");
+    await wrapper.get(".head-actions .primary").trigger("click");
+    await flushPromises();
+    expect(client.createShotPlan).toHaveBeenCalledWith("project-1", expect.objectContaining({
+      shots: [expect.objectContaining({ cameraSpatialRelation: "摄影机位于左侧，角色沿门口轴线排列", interactionConstraints: ["毛巾接触猫爪，手始终握住毛巾边缘"], visualExclusions: ["画面中不出现额外毛巾"] })],
+    }));
+    expect(JSON.stringify(shot)).toBe(original);
+    expect(client.generateShotPlan).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("shows all three relational differences against historical missing fields in version comparison", async () => {
+    const accepted = {
+      id: "historical-plan", projectId: "project-1", revision: 1, sourceStoryVersionId: "story-1", sourceSelectionHash: "a".repeat(64),
+      clip: {}, shots: [professionalShot], totalDurationSeconds: 12, reviewStatus: "accepted" as const,
+      active: true, outdated: false, createdAt: "2026-09-01T00:00:00Z",
+    };
+    const candidate = { ...accepted, id: "relational-candidate", revision: 2, active: false, reviewStatus: "candidate" as const,
+      shots: [{ ...professionalShot, cameraSpatialRelation: "机位在门左侧", interactionConstraints: ["手握毛巾边缘"], visualExclusions: ["额外角色"] }],
+    };
+    client.shotPlans.mockResolvedValue([candidate, accepted]);
+    const wrapper = mountStoryboard(accepted);
+    await flushPromises();
+    await wrapper.findAll(".version-bar button").find(button => button.text().includes("版本 2"))!.trigger("click");
+    await wrapper.findAll("button").find(button => button.text().includes("对比当前"))!.trigger("click");
+    const drawer = wrapper.get('[data-testid="shot-plan-compare-drawer"]');
+    expect(drawer.get(".compare-summary").text()).toContain("修改字段 3");
+    const rows = drawer.findAll(".professional-diff-list article");
+    expect(rows).toHaveLength(3);
+    for (const [index, label] of ["机位与空间关系", "交互约束", "画面排除项"].entries()) {
+      expect(rows[index].text()).toContain(label);
+      expect(rows[index].findAll("p")[0].text()).toContain("未记录");
+    }
+    expect(rows[0].text()).toContain("机位在门左侧");
+    expect(rows[1].text()).toContain("手握毛巾边缘");
+    expect(rows[2].text()).toContain("额外角色");
+    wrapper.unmount();
+  });
+
   it.each([
     ["soundIntent", "整体声音方向", "无配乐；仅林间环境声、塑料接触和脚步声，无对白。"],
     ["spatialSetting", "整体空间与道具", "唯一杯子由手中放到右前方地面，小桌仅放夜灯。"],

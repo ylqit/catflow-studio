@@ -229,7 +229,7 @@ class JobRecord(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('plan_story','plan_shots','plan_series','plan_series_segment',"
+            "kind IN ('plan_video_edit','plan_story','plan_shots','plan_series','plan_series_segment',"
             "'plan_series_episode',"
             "'analyze_story_source','generate_image','diagnose_image','generate_video',"
             "'diagnose_video','regenerate_video_segment','render_export','render_edit_preview',"
@@ -418,6 +418,7 @@ class StorySourceMaterializationRecord(Base):
     )
     target_type: Mapped[str] = mapped_column(String(24), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(96), nullable=False, unique=True)
+    confirmation_request_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     series_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.story_series.id", ondelete="RESTRICT")
     )
@@ -1226,6 +1227,8 @@ class VideoEditDraftRecord(Base):
             ondelete="RESTRICT",
         ),
     )
+    editing_input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    input_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     references_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     references_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)

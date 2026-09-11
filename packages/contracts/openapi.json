@@ -203,6 +203,46 @@
         }
       }
     },
+    "/api/v1/canon/profiles/{profile_id}": {
+      "get": {
+        "summary": "Get Canon",
+        "operationId": "get_canon_api_v1_canon_profiles__profile_id__get",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanonProfileDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/canon/assets/upload": {
       "post": {
         "summary": "Upload Canon Asset",
@@ -4558,6 +4598,16 @@
               }
             }
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -4657,6 +4707,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "description": "Validation Error",
@@ -4960,6 +5020,116 @@
                     "$ref": "#/components/schemas/VideoEditDraftDto"
                   },
                   "title": "Response Video Edit Drafts Api V1 Projects  Project Id  Video Edit Drafts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-edit-drafts/{draft_id}/input": {
+      "patch": {
+        "summary": "Update Video Edit Draft Input",
+        "operationId": "update_video_edit_draft_input_api_v1_projects__project_id__video_edit_drafts__draft_id__input_patch",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoEditDraftInputCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditDraftDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/video-edits/plans": {
+      "post": {
+        "summary": "Create Video Edit Plan",
+        "operationId": "create_video_edit_plan_api_v1_projects__project_id__video_edits_plans_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoEditPlanCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
                 }
               }
             }
@@ -5539,6 +5709,16 @@
               }
             }
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -5589,6 +5769,16 @@
               }
             }
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -5624,6 +5814,46 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/provider-tasks": {
+      "get": {
+        "summary": "Lookup Provider Tasks",
+        "operationId": "lookup_provider_tasks_api_v1_jobs__job_id__provider_tasks_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderTaskLookupDto"
+                }
               }
             }
           },
@@ -6428,6 +6658,17 @@
             "type": "string",
             "title": "Prompt"
           },
+          "compiledProviderPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiledproviderprompt"
+          },
           "negativePrompt": {
             "type": "string",
             "title": "Negativeprompt"
@@ -6593,6 +6834,32 @@
         ],
         "title": "CandidatePlacement"
       },
+      "CanonCatIdentity": {
+        "properties": {
+          "identity": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Identity"
+          },
+          "lockedTraits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Lockedtraits"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "identity",
+          "lockedTraits"
+        ],
+        "title": "CanonCatIdentity"
+      },
       "CanonProfileDto": {
         "properties": {
           "id": {
@@ -6674,6 +6941,33 @@
             },
             "type": "object",
             "title": "Fixedassets"
+          },
+          "baseProfileId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseprofileid"
+          },
+          "activate": {
+            "type": "boolean",
+            "title": "Activate",
+            "default": true
+          },
+          "cat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CanonCatIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -8704,7 +8998,8 @@
             "type": "integer",
             "enum": [
               1,
-              2
+              2,
+              3
             ],
             "title": "Schemaversion"
           },
@@ -8744,6 +9039,17 @@
           "prompt": {
             "type": "string",
             "title": "Prompt"
+          },
+          "compiledProviderPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiledproviderprompt"
           },
           "negativePrompt": {
             "type": "string",
@@ -8835,6 +9141,29 @@
       },
       "GenerationInputSourceDto": {
         "properties": {
+          "canonProfileId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonprofileid"
+          },
+          "canonProfileHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonprofilehash"
+          },
           "editDraftId": {
             "anyOf": [
               {
@@ -8983,6 +9312,29 @@
       },
       "GenerationPreviewDto": {
         "properties": {
+          "canonProfileId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonprofileid"
+          },
+          "canonProfileHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonprofilehash"
+          },
           "generateAudio": {
             "type": "boolean",
             "title": "Generateaudio",
@@ -9013,6 +9365,17 @@
           "prompt": {
             "type": "string",
             "title": "Prompt"
+          },
+          "compiledProviderPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiledproviderprompt"
           },
           "negativePrompt": {
             "type": "string",
@@ -9317,7 +9680,8 @@
             "type": "integer",
             "enum": [
               1,
-              2
+              2,
+              3
             ],
             "title": "Schemaversion"
           },
@@ -9363,6 +9727,17 @@
           "prompt": {
             "type": "string",
             "title": "Prompt"
+          },
+          "compiledProviderPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiledproviderprompt"
           },
           "negativePrompt": {
             "type": "string",
@@ -9413,6 +9788,16 @@
       },
       "JobDto": {
         "properties": {
+          "editPlan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoEditPlanSuggestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "execution": {
             "anyOf": [
               {
@@ -9508,6 +9893,7 @@
             "enum": [
               "plan_story",
               "plan_shots",
+              "plan_video_edit",
               "plan_series",
               "plan_series_segment",
               "plan_series_episode",
@@ -10092,9 +10478,32 @@
             "type": "string",
             "enum": [
               "query_provider",
-              "process_result"
+              "process_result",
+              "associate_provider_task"
             ],
             "title": "Action"
+          },
+          "providerTaskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,200}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providertaskid"
+          },
+          "confirmAssociation": {
+            "type": "boolean",
+            "title": "Confirmassociation",
+            "default": false
+          },
+          "acknowledgeUnverifiedParameters": {
+            "type": "boolean",
+            "title": "Acknowledgeunverifiedparameters",
+            "default": false
           },
           "expectedRevision": {
             "type": "integer",
@@ -11724,6 +12133,133 @@
         ],
         "title": "PropStateChange"
       },
+      "ProviderTaskCandidate": {
+        "properties": {
+          "providerTaskId": {
+            "type": "string",
+            "title": "Providertaskid"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          },
+          "mismatches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mismatches"
+          },
+          "canAssociate": {
+            "type": "boolean",
+            "title": "Canassociate"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "providerTaskId",
+          "status",
+          "parameters",
+          "mismatches",
+          "canAssociate"
+        ],
+        "title": "ProviderTaskCandidate"
+      },
+      "ProviderTaskLookupDto": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "query_failed",
+              "not_found",
+              "candidates"
+            ],
+            "title": "Status"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "windowStart": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Windowstart"
+          },
+          "windowEnd": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Windowend"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderTaskCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "queriedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queriedat"
+          },
+          "coverageComplete": {
+            "type": "boolean",
+            "title": "Coveragecomplete",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "model",
+          "windowStart",
+          "windowEnd",
+          "message",
+          "queriedAt"
+        ],
+        "title": "ProviderTaskLookupDto"
+      },
       "RateCardItem": {
         "properties": {
           "metric": {
@@ -11988,6 +12524,112 @@
       },
       "SegmentEditInputDto": {
         "properties": {
+          "editContractVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Editcontractversion",
+            "default": 1
+          },
+          "preserveContent": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preservecontent",
+            "default": ""
+          },
+          "startState": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Startstate",
+            "default": ""
+          },
+          "actionProcess": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Actionprocess",
+            "default": ""
+          },
+          "avoidProblems": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Avoidproblems",
+            "default": ""
+          },
+          "planSourceJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plansourcejobid"
+          },
+          "includeInAnchor": {
+            "type": "boolean",
+            "title": "Includeinanchor",
+            "default": true
+          },
+          "referenceRoles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceroles"
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "selection",
+              "custom"
+            ],
+            "title": "Contextmode",
+            "default": "auto"
+          },
+          "contextRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "title": "Desiredendstate",
+            "default": ""
+          },
           "sourceResultJobId": {
             "anyOf": [
               {
@@ -12112,20 +12754,6 @@
             ],
             "title": "Baseedl"
           },
-          "endStatePolicy": {
-            "type": "string",
-            "enum": [
-              "match_original",
-              "replace"
-            ],
-            "title": "Endstatepolicy",
-            "default": "match_original"
-          },
-          "desiredEndState": {
-            "type": "string",
-            "title": "Desiredendstate",
-            "default": ""
-          },
           "instruction": {
             "type": "string",
             "title": "Instruction"
@@ -12152,6 +12780,113 @@
       },
       "SegmentReferencePreparationCommand": {
         "properties": {
+          "editContractVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Editcontractversion",
+            "default": 1
+          },
+          "preserveContent": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preservecontent",
+            "default": ""
+          },
+          "startState": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Startstate",
+            "default": ""
+          },
+          "actionProcess": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Actionprocess",
+            "default": ""
+          },
+          "avoidProblems": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Avoidproblems",
+            "default": ""
+          },
+          "planSourceJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plansourcejobid"
+          },
+          "includeInAnchor": {
+            "type": "boolean",
+            "title": "Includeinanchor",
+            "default": true
+          },
+          "referenceRoles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceroles"
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "selection",
+              "custom"
+            ],
+            "title": "Contextmode",
+            "default": "auto"
+          },
+          "contextRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Desiredendstate",
+            "default": ""
+          },
           "sourceResultJobId": {
             "anyOf": [
               {
@@ -12279,21 +13014,6 @@
               }
             ],
             "title": "Editdraftid"
-          },
-          "endStatePolicy": {
-            "type": "string",
-            "enum": [
-              "match_original",
-              "replace"
-            ],
-            "title": "Endstatepolicy",
-            "default": "match_original"
-          },
-          "desiredEndState": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Desiredendstate",
-            "default": ""
           },
           "retryAfterJobId": {
             "anyOf": [
@@ -12408,6 +13128,113 @@
             ],
             "title": "Replacementjobid"
           },
+          "editContractVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Editcontractversion",
+            "default": 1
+          },
+          "preserveContent": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preservecontent",
+            "default": ""
+          },
+          "startState": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Startstate",
+            "default": ""
+          },
+          "actionProcess": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Actionprocess",
+            "default": ""
+          },
+          "avoidProblems": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Avoidproblems",
+            "default": ""
+          },
+          "planSourceJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plansourcejobid"
+          },
+          "includeInAnchor": {
+            "type": "boolean",
+            "title": "Includeinanchor",
+            "default": true
+          },
+          "referenceRoles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceroles"
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "selection",
+              "custom"
+            ],
+            "title": "Contextmode",
+            "default": "auto"
+          },
+          "contextRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Desiredendstate",
+            "default": ""
+          },
           "sourceResultJobId": {
             "anyOf": [
               {
@@ -12535,21 +13362,6 @@
               }
             ],
             "title": "Editdraftid"
-          },
-          "endStatePolicy": {
-            "type": "string",
-            "enum": [
-              "match_original",
-              "replace"
-            ],
-            "title": "Endstatepolicy",
-            "default": "match_original"
-          },
-          "desiredEndState": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Desiredendstate",
-            "default": ""
           },
           "expectedInputHash": {
             "type": "string",
@@ -12636,6 +13448,113 @@
       },
       "SegmentRepairPreviewCommand": {
         "properties": {
+          "editContractVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Editcontractversion",
+            "default": 1
+          },
+          "preserveContent": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preservecontent",
+            "default": ""
+          },
+          "startState": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Startstate",
+            "default": ""
+          },
+          "actionProcess": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Actionprocess",
+            "default": ""
+          },
+          "avoidProblems": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Avoidproblems",
+            "default": ""
+          },
+          "planSourceJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plansourcejobid"
+          },
+          "includeInAnchor": {
+            "type": "boolean",
+            "title": "Includeinanchor",
+            "default": true
+          },
+          "referenceRoles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceroles"
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "selection",
+              "custom"
+            ],
+            "title": "Contextmode",
+            "default": "auto"
+          },
+          "contextRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Desiredendstate",
+            "default": ""
+          },
           "sourceResultJobId": {
             "anyOf": [
               {
@@ -12763,21 +13682,6 @@
               }
             ],
             "title": "Editdraftid"
-          },
-          "endStatePolicy": {
-            "type": "string",
-            "enum": [
-              "match_original",
-              "replace"
-            ],
-            "title": "Endstatepolicy",
-            "default": "match_original"
-          },
-          "desiredEndState": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Desiredendstate",
-            "default": ""
           }
         },
         "additionalProperties": false,
@@ -12791,6 +13695,123 @@
       },
       "SegmentRepairPreviewDto": {
         "properties": {
+          "editContractVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Editcontractversion",
+            "default": 1
+          },
+          "preserveContent": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preservecontent",
+            "default": ""
+          },
+          "startState": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Startstate",
+            "default": ""
+          },
+          "actionProcess": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Actionprocess",
+            "default": ""
+          },
+          "avoidProblems": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Avoidproblems",
+            "default": ""
+          },
+          "planSourceJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plansourcejobid"
+          },
+          "includeInAnchor": {
+            "type": "boolean",
+            "title": "Includeinanchor",
+            "default": true
+          },
+          "referenceRoles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceroles"
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "selection",
+              "custom"
+            ],
+            "title": "Contextmode",
+            "default": "auto"
+          },
+          "contextRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "title": "Desiredendstate",
+            "default": ""
+          },
+          "mediaInputHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mediainputhash"
+          },
           "sourceResultJobId": {
             "anyOf": [
               {
@@ -12977,9 +13998,30 @@
             "type": "string",
             "title": "Instruction"
           },
+          "warnings": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
           "prompt": {
             "type": "string",
             "title": "Prompt"
+          },
+          "compiledProviderPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiledproviderprompt"
           },
           "negativePrompt": {
             "type": "string",
@@ -13061,20 +14103,6 @@
               }
             ],
             "title": "Baseedl"
-          },
-          "endStatePolicy": {
-            "type": "string",
-            "enum": [
-              "match_original",
-              "replace"
-            ],
-            "title": "Endstatepolicy",
-            "default": "match_original"
-          },
-          "desiredEndState": {
-            "type": "string",
-            "title": "Desiredendstate",
-            "default": ""
           }
         },
         "additionalProperties": false,
@@ -13391,6 +14419,18 @@
       },
       "SeriesCreateCommand": {
         "properties": {
+          "canonProfileId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonprofileid"
+          },
           "adaptationPolicy": {
             "type": "string",
             "enum": [
@@ -14176,8 +15216,36 @@
             "format": "uuid",
             "title": "Baseplanversionid"
           },
+          "source": {
+            "type": "string",
+            "enum": [
+              "edited",
+              "saved_result"
+            ],
+            "title": "Source",
+            "default": "edited"
+          },
           "plan": {
-            "$ref": "#/components/schemas/SeriesPlanDraft"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesPlanDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedSettingsHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsettingshash"
           },
           "idempotencyKey": {
             "type": "string",
@@ -14190,7 +15258,6 @@
         "type": "object",
         "required": [
           "basePlanVersionId",
-          "plan",
           "idempotencyKey"
         ],
         "title": "SeriesPlanMaterializeCommand"
@@ -14218,6 +15285,11 @@
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
             "title": "Inputhash"
+          },
+          "settingsInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Settingsinputhash"
           },
           "prompt": {
             "type": "string",
@@ -14279,6 +15351,7 @@
           "model",
           "capabilityRevision",
           "inputHash",
+          "settingsInputHash",
           "prompt",
           "outputSchema",
           "plannedEpisodeCount",
@@ -14884,6 +15957,39 @@
               }
             ],
             "title": "Suggestedaction"
+          },
+          "normalizationRevision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalizationrevision"
+          },
+          "beforeValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beforevalue"
+          },
+          "afterValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aftervalue"
           }
         },
         "additionalProperties": false,
@@ -16043,6 +17149,33 @@
             "type": "array",
             "title": "Generationrisks"
           },
+          "cameraSpatialRelation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cameraspatialrelation"
+          },
+          "interactionConstraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Interactionconstraints"
+          },
+          "visualExclusions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Visualexclusions"
+          },
           "sceneAssetId": {
             "anyOf": [
               {
@@ -16918,6 +18051,11 @@
       },
       "StorySeriesDto": {
         "properties": {
+          "canonProfileId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Canonprofileid"
+          },
           "adaptationPolicy": {
             "type": "string",
             "enum": [
@@ -17039,11 +18177,6 @@
             "format": "uuid",
             "title": "Id"
           },
-          "canonProfileId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Canonprofileid"
-          },
           "activePlanVersionId": {
             "anyOf": [
               {
@@ -17085,6 +18218,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "canonProfileId",
           "title",
           "premise",
           "narrativeMode",
@@ -17092,7 +18226,6 @@
           "worldSetting",
           "emotionalDirection",
           "id",
-          "canonProfileId",
           "createdAt",
           "updatedAt"
         ],
@@ -17964,6 +19097,43 @@
         ],
         "title": "VideoDraftSaveCommand"
       },
+      "VideoEditConflictResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoEditInProgressDetail"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Detail"
+          },
+          "latestPreview": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestpreview"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "VideoEditConflictResponse"
+      },
       "VideoEditDraftCreateCommand": {
         "properties": {
           "sourceResultJobId": {
@@ -18029,6 +19199,17 @@
       },
       "VideoEditDraftDto": {
         "properties": {
+          "editingInput": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Editinginput"
+          },
+          "inputRevision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inputrevision",
+            "default": 0
+          },
           "sourceResultJobId": {
             "anyOf": [
               {
@@ -18112,6 +19293,441 @@
           "createdAt"
         ],
         "title": "VideoEditDraftDto"
+      },
+      "VideoEditDraftInputCommand": {
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expectedrevision"
+          },
+          "editingInput": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Editinginput"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedRevision",
+          "editingInput"
+        ],
+        "title": "VideoEditDraftInputCommand"
+      },
+      "VideoEditInProgressDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "video_edit_in_progress",
+            "title": "Code",
+            "default": "video_edit_in_progress"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "blockingJobId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Blockingjobid"
+          },
+          "editDraftId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editdraftid"
+          },
+          "videoRepairId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Videorepairid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message",
+          "blockingJobId",
+          "editDraftId",
+          "videoRepairId"
+        ],
+        "title": "VideoEditInProgressDetail"
+      },
+      "VideoEditPlanCommand": {
+        "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
+          "editContractVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Editcontractversion",
+            "default": 1
+          },
+          "preserveContent": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preservecontent",
+            "default": ""
+          },
+          "startState": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Startstate",
+            "default": ""
+          },
+          "actionProcess": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Actionprocess",
+            "default": ""
+          },
+          "avoidProblems": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Avoidproblems",
+            "default": ""
+          },
+          "planSourceJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plansourcejobid"
+          },
+          "includeInAnchor": {
+            "type": "boolean",
+            "title": "Includeinanchor",
+            "default": true
+          },
+          "referenceRoles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "episode_child",
+                    "episode_cat",
+                    "pair_scale",
+                    "environment",
+                    "style_board"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenceroles"
+          },
+          "contextMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "selection",
+              "custom"
+            ],
+            "title": "Contextmode",
+            "default": "auto"
+          },
+          "contextRange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrameRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Endstatepolicy",
+            "default": "match_original"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Desiredendstate",
+            "default": ""
+          },
+          "sourceResultJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceresultjobid"
+          },
+          "expectedSourceTimelineHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedsourcetimelinehash"
+          },
+          "referencePreparationJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referencepreparationjobid"
+          },
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "edit_existing"
+          },
+          "audioMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_current",
+                  "generate_candidate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audiomode"
+          },
+          "soundDescription": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Sounddescription",
+            "default": ""
+          },
+          "anchorStartFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorstartframe"
+          },
+          "anchorEndFrame": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchorendframe"
+          },
+          "baseVideoAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Basevideoassetid"
+          },
+          "baseEditVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseeditversionid"
+          },
+          "issueRange": {
+            "$ref": "#/components/schemas/FrameRange"
+          },
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Instruction"
+          },
+          "editDraftId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editdraftid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "baseVideoAssetId",
+          "issueRange",
+          "instruction",
+          "idempotencyKey"
+        ],
+        "title": "VideoEditPlanCommand"
+      },
+      "VideoEditPlanSuggestion": {
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "title": "Instruction"
+          },
+          "preserveContent": {
+            "type": "string",
+            "title": "Preservecontent"
+          },
+          "startState": {
+            "type": "string",
+            "title": "Startstate"
+          },
+          "actionProcess": {
+            "type": "string",
+            "title": "Actionprocess"
+          },
+          "desiredEndState": {
+            "type": "string",
+            "title": "Desiredendstate"
+          },
+          "avoidProblems": {
+            "type": "string",
+            "title": "Avoidproblems"
+          },
+          "recommendedGenerationMode": {
+            "type": "string",
+            "enum": [
+              "edit_existing",
+              "from_frame"
+            ],
+            "title": "Recommendedgenerationmode"
+          },
+          "recommendedEndStatePolicy": {
+            "type": "string",
+            "enum": [
+              "follow_instruction",
+              "match_original",
+              "replace"
+            ],
+            "title": "Recommendedendstatepolicy"
+          },
+          "recommendedReferenceRoles": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "episode_child",
+                "episode_cat",
+                "pair_scale",
+                "environment",
+                "style_board"
+              ]
+            },
+            "type": "array",
+            "title": "Recommendedreferenceroles"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instruction",
+          "preserveContent",
+          "startState",
+          "actionProcess",
+          "desiredEndState",
+          "avoidProblems",
+          "recommendedGenerationMode",
+          "recommendedEndStatePolicy",
+          "recommendedReferenceRoles",
+          "notes"
+        ],
+        "title": "VideoEditPlanSuggestion"
       },
       "VideoIssueDto": {
         "properties": {

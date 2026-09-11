@@ -169,6 +169,7 @@ describe("SeriesWorkspaceView", () => {
       model: "planning",
       capabilityRevision: "v1",
       inputHash: "b".repeat(64),
+      settingsInputHash: "settings-hash-1",
       prompt: "只规划整季路线。",
       outputSchema: {},
       plannedEpisodeCount: 30,
@@ -254,6 +255,107 @@ describe("SeriesWorkspaceView", () => {
 
     await wrapper.get(".episode-list .load-more").trigger("click");
     expect(wrapper.findAll(".episode-list article")).toHaveLength(24);
+  });
+
+  it("normalizes a saved blocked candidate without a planning job or automatic adoption", async () => {
+    const candidateId = "123e4567-e89b-12d3-a456-426614174002";
+    const settingsHash = "0123456789abcdef".repeat(4);
+    const blocked = {
+      ...candidatePlan,
+      id: candidateId,
+      disposition: "needs_input",
+      issues: [{ code: "source_beat_not_covered", severity: "blocking", path: "episodes", message: "仍有来源未覆盖。" }],
+    };
+    const normalized = {
+      ...candidatePlan,
+      id: "plan-3",
+      revision: 3,
+      disposition: "candidate_ready",
+      promptRevision: "normalized-series-plan-v1",
+      basePlanVersionId: candidateId,
+      issues: [{
+        code: "normalized_source_coverage",
+        severity: "warning",
+        path: "episodes[0].sourceCoverage",
+        message: "移除了无法匹配的来源覆盖。",
+        normalizationRevision: "normalized-series-plan-v1",
+        beforeValue: "来源 99",
+        afterValue: "（已移除）",
+      }],
+    };
+    client.seriesPlans
+      .mockResolvedValueOnce([blocked, acceptedPlan])
+      .mockResolvedValue([normalized, blocked, acceptedPlan]);
+    client.previewSeriesPlan.mockResolvedValue({
+      seriesId: "series-1",
+      provider: "ark",
+      model: "planning",
+      capabilityRevision: "v1",
+      inputHash: "b".repeat(64),
+      settingsInputHash: settingsHash,
+      prompt: "只规划整季路线。",
+      outputSchema: {},
+      plannedEpisodeCount: 30,
+      defaultEpisodeDurationSeconds: 12,
+      promptRevision: "series-v1",
+    });
+    client.materializeSeriesPlan.mockResolvedValue(normalized);
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get("button.normalize-plan").trigger("click");
+    await flushPromises();
+
+    const command = client.materializeSeriesPlan.mock.calls[0][2];
+    expect(client.materializeSeriesPlan).toHaveBeenCalledWith("series-1", candidateId, {
+      source: "saved_result",
+      basePlanVersionId: candidateId,
+      expectedSettingsHash: settingsHash,
+      idempotencyKey: `series-normalize:${candidateId}:${settingsHash.slice(0, 32)}`,
+    });
+    expect(command).not.toHaveProperty("plan");
+    expect(command.idempotencyKey).toHaveLength(86);
+    expect(command.idempotencyKey.length).toBeLessThanOrEqual(96);
+    expect(client.previewSeriesPlan).toHaveBeenCalledTimes(3);
+    expect(client.previewSeriesPlan.mock.invocationCallOrder[1]).toBeLessThan(client.materializeSeriesPlan.mock.invocationCallOrder[0]);
+    expect(client.generateSeriesPlan).not.toHaveBeenCalled();
+    expect(client.activateSeriesPlan).not.toHaveBeenCalled();
+    expect(wrapper.get(".plan-version.active").text()).toContain("方案 3");
+    expect(wrapper.get(".plan-version.active").text()).toContain("规范化版本");
+    expect(wrapper.get(".plan-version.active").text()).toContain("来源方案 2");
+    expect(wrapper.text()).toContain("episodes[0].sourceCoverage：来源 99 → （已移除）；移除了无法匹配的来源覆盖。");
+    expect(wrapper.text()).toContain("方案 2");
+  });
+
+  it("keeps normalization errors visible and leaves the blocked candidate selected", async () => {
+    client.materializeSeriesPlan.mockRejectedValue(new Error("设置已经变化，请重新预览。"));
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get("button.normalize-plan").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".notice.error").text()).toContain("设置已经变化，请重新预览。");
+    expect(wrapper.get(".plan-version.active").text()).toContain("方案 2");
+    expect(client.generateSeriesPlan).not.toHaveBeenCalled();
+    expect(client.activateSeriesPlan).not.toHaveBeenCalled();
+  });
+
+  it("shows normalized rejected and superseded versions as history rather than pending candidates", async () => {
+    client.seriesPlans.mockResolvedValue([
+      { ...candidatePlan, id: "plan-4", revision: 4, status: "rejected", promptRevision: "normalized-series-plan-v1", basePlanVersionId: "plan-2" },
+      { ...candidatePlan, id: "plan-3", revision: 3, status: "superseded", promptRevision: "normalized-series-plan-v1", basePlanVersionId: "plan-2" },
+      candidatePlan,
+      acceptedPlan,
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const labels = wrapper.findAll(".plan-version").map((item) => item.text());
+    expect(labels[0]).toContain("未采用");
+    expect(labels[1]).toContain("已被新方案取代");
+    expect(labels[0]).not.toMatch(/待确认|待补充/);
+    expect(labels[1]).not.toMatch(/待确认|待补充/);
   });
 
   it("creates one explicit planning job and keeps the action disabled while queued", async () => {

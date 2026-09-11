@@ -24,6 +24,8 @@ docs/LibTV
 !/docs/VIDEO_EDIT_DRAFTS.md
 !/docs/VIDEO_CANDIDATE_TRIALS.md
 !/docs/DUAL_PLAYER_SCENE_PRODUCTION.md
+!/docs/PROMPT_GOVERNANCE.md
+!/docs/LOCAL_VIDEO_EDIT.md
 !/docs/checklists/
 /docs/checklists/*
 !/docs/checklists/shot-queue-production-core.md
@@ -54,3 +56,4 @@ apps/web/dist/
 # Docker persistent media
 docker-data/
 .work
+.tmp

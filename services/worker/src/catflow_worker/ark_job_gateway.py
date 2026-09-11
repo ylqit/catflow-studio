@@ -14,6 +14,7 @@ from catflow.application.gateways import (
     StructuredProviderResult,
     VideoGenerationGateway,
 )
+from catflow.application.video_edit import CANON_ROLES
 from catflow.application.video_generation import compile_provider_video_prompt
 from catflow.infrastructure.object_storage import ObjectPublisherError
 
@@ -46,15 +47,20 @@ class ArkProviderJobGateway:
         ]
         | None = None,
         publish_segment_reference: SegmentReferencePublisher | None = None,
+        prepare_edit_plan_frames: Callable[[uuid.UUID, dict[str, object]], tuple[Path, ...]]
+        | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolve_asset_paths = resolve_asset_paths
         self._extract_video_frames = extract_video_frames
         self._prepare_segment_media = prepare_segment_media
+        self._prepare_edit_plan_frames = prepare_edit_plan_frames
         self._video_reference_publisher = publish_segment_reference
+        self._prepared_edit_plan_frames: dict[uuid.UUID, tuple[Path, ...]] = {}
         self._prepared_video_references: dict[uuid.UUID, PublishedSegmentReference] = {}
         self._prepared_segment_media: dict[
-            uuid.UUID, tuple[Path, Path, Path, PublishedSegmentReference | None]
+            uuid.UUID,
+            tuple[Path | None, Path | None, Path | None, PublishedSegmentReference | None],
         ] = {}
 
     def prepare_submission(
@@ -63,6 +69,13 @@ class ArkProviderJobGateway:
         contract = frozen_input.get("executionContract", {})
         if contract.get("apiBaseUrl"):
             self._gateway.validate_execution_contract(contract, kind)
+        if kind == "plan_video_edit":
+            if self._prepare_edit_plan_frames is None:
+                raise ValueError("edit plan timeline frame extraction is not configured")
+            self._prepared_edit_plan_frames[job_id] = self._prepare_edit_plan_frames(
+                job_id, frozen_input
+            )
+            return
         if kind == "generate_video":
             asset_value = frozen_input.get("previousEpisodeVideoAssetId")
             if asset_value is None:
@@ -92,8 +105,6 @@ class ArkProviderJobGateway:
             return
         if kind != "regenerate_video_segment":
             return
-        if self._prepare_segment_media is None:
-            raise ValueError("segment media preparation is not configured")
         from_frame = frozen_input.get("generationMode") == "from_frame"
         if not from_frame and self._video_reference_publisher is None:
             raise ProviderGatewayError(
@@ -106,7 +117,9 @@ class ArkProviderJobGateway:
             images = frozen_input["imageReferences"]
             derived = [item for item in images if item.get("derived")]
             paths = self._resolve_asset_paths(tuple(uuid.UUID(item["assetId"]) for item in derived))
-            anchor_in, anchor_out = paths[0], paths[-1]
+            role_paths = {item["role"]: path for item, path in zip(derived, paths, strict=True)}
+            anchor_in = role_paths.get("first_frame" if from_frame else "anchor_in")
+            anchor_out = role_paths.get("last_frame" if from_frame else "anchor_out")
             published = None
             context = anchor_in  # Strict frame mode never sends a video.
             if not from_frame:
@@ -125,6 +138,8 @@ class ArkProviderJobGateway:
                         submission_unknown=False,
                     ) from exc
         else:
+            if self._prepare_segment_media is None:
+                raise ValueError("segment media preparation is not configured")
             base_asset_id = uuid.UUID(_required_string(frozen_input, "baseVideoAssetId"))
             generation_range = _required_frame_range(frozen_input, "generationRange")
             issue_range = _required_frame_range(frozen_input, "issueRange")
@@ -163,6 +178,19 @@ class ArkProviderJobGateway:
         kind: str,
         frozen_input: dict[str, object],
     ) -> ProviderSubmission:
+        if kind == "plan_video_edit":
+            if self._prepare_edit_plan_frames is None:
+                raise ValueError("edit plan timeline frame extraction is not configured")
+            frames = self._prepared_edit_plan_frames.pop(job_id, None)
+            if frames is None:
+                frames = self._prepare_edit_plan_frames(job_id, frozen_input)
+            result = self._gateway.plan_shots(
+                prompt=_required_string(frozen_input, "prompt"),
+                output_schema=_required_dict(frozen_input, "outputSchema"),
+                image_paths=frames,
+                input_instruction="图片依次对应冻结的 frameSamples；区分观察事实和不确定建议，按当前文字提出修改建议。",
+            )
+            return _structured_submission(result)
         if kind == "plan_story":
             result = self._gateway.plan_story(
                 prompt=_required_string(frozen_input, "prompt"),
@@ -173,11 +201,14 @@ class ArkProviderJobGateway:
             result = self._gateway.plan_shots(
                 prompt=_required_string(frozen_input, "prompt"),
                 output_schema=_required_dict(frozen_input, "outputSchema"),
-                input_instruction=str(frozen_input.get(
-                    "inputInstruction", "按顺序比较所有图片并返回诊断。"
-                    if frozen_input.get("referenceInputMode") == "vision"
-                    else "只返回符合 Schema 的 JSON 对象。"
-                )),
+                input_instruction=str(
+                    frozen_input.get(
+                        "inputInstruction",
+                        "按顺序比较所有图片并返回诊断。"
+                        if frozen_input.get("referenceInputMode") == "vision"
+                        else "只返回符合 Schema 的 JSON 对象。",
+                    )
+                ),
                 image_paths=(
                     self._resolve_asset_paths(
                         _uuid_tuple(frozen_input.get("referenceAssetIds", []))
@@ -213,9 +244,20 @@ class ArkProviderJobGateway:
             )
             result = self._gateway.generate_image(
                 prompt=_required_string(frozen_input, "prompt"),
-                negative_prompt=_required_string(frozen_input, "negativePrompt"),
+                negative_prompt=str(frozen_input.get("negativePrompt", ""))
+                if frozen_input.get("providerPromptVersion") == 1
+                else _required_string(frozen_input, "negativePrompt"),
                 reference_paths=self._resolve_asset_paths(reference_ids),
                 reference_roles=reference_roles,
+                **(
+                    {
+                        "compiled_provider_prompt": _required_string(
+                            frozen_input, "compiledProviderPrompt"
+                        )
+                    }
+                    if frozen_input.get("providerPromptVersion") == 1
+                    else {}
+                ),
             )
             return ProviderSubmission(
                 result={
@@ -248,13 +290,20 @@ class ArkProviderJobGateway:
                 for item in frozen_input.get("referenceRoles", [])  # type: ignore[union-attr]
             )
             compiled_prompt = frozen_input.get("compiledProviderPrompt")
-            if not isinstance(compiled_prompt, str) or not compiled_prompt.strip():
+            if frozen_input.get("providerPromptVersion") == 1:
+                compiled_prompt = _required_string(frozen_input, "compiledProviderPrompt")
+            elif not isinstance(compiled_prompt, str) or not compiled_prompt.strip():
                 compiled_prompt = compile_provider_video_prompt(
                     prompt=_required_string(frozen_input, "prompt"),
                     negative_prompt=_required_string(frozen_input, "negativePrompt"),
                 )
             result = self._gateway.submit_video(
                 prompt=compiled_prompt,
+                **(
+                    {"provider_prompt_version": 1}
+                    if frozen_input.get("providerPromptVersion") == 1
+                    else {}
+                ),
                 generation_mode=str(frozen_input.get("generationMode", "references")),
                 reference_paths=self._resolve_asset_paths(reference_ids),
                 reference_roles=reference_roles,
@@ -300,36 +349,71 @@ class ArkProviderJobGateway:
                 for item in frozen_input.get("referenceRoles", [])  # type: ignore[union-attr]
             )
             from_frame = frozen_input.get("generationMode") == "from_frame"
-            expected_roles = (
-                "anchor_in",
-                *(("anchor_out",) if frozen_input.get("endStatePolicy") != "replace" else ()),
-                "episode_child",
-                "episode_cat",
-                "pair_scale",
-                "environment",
-                "style_board",
-            )
+            v2 = frozen_input.get("editContractVersion") == 2
             if from_frame:
-                expected_roles = (
-                    "first_frame",
-                    *(("last_frame",) if frozen_input.get("anchorEndFrame") is not None else ()),
+                issue = _required_frame_range(frozen_input, "issueRange")
+                strict_last = frozen_input.get("anchorEndFrame") is not None and (
+                    not v2 or issue[1] - issue[0] == duration_seconds * 24
                 )
+                expected_roles = ("first_frame", *(("last_frame",) if strict_last else ()))
+            elif v2:
+                expected_roles = (
+                    *(("anchor_in",) if frozen_input.get("includeInAnchor", True) else ()),
+                    *(
+                        ("anchor_out",)
+                        if frozen_input.get("endStatePolicy") == "match_original"
+                        else ()
+                    ),
+                    *(role for role in CANON_ROLES if role in reference_roles),
+                )
+            else:
+                expected_roles = (
+                    "anchor_in",
+                    *(("anchor_out",) if frozen_input.get("endStatePolicy") != "replace" else ()),
+                    *CANON_ROLES,
+                )
+            if (
+                v2
+                and tuple(item["role"] for item in frozen_input["imageReferences"])
+                != expected_roles
+            ):
+                raise ValueError("frozen images do not match selected reference roles")
             if reference_roles != expected_roles:
                 raise ValueError("segment reference roles are incomplete or out of order")
             canon_ids = _uuid_tuple(frozen_input.get("referenceAssetIds", []))
-            if len(canon_ids) != (0 if from_frame else 5):
-                raise ValueError("segment repair requires exactly five stored references")
+            canon_roles = (
+                tuple(
+                    item["role"]
+                    for item in frozen_input["imageReferences"]
+                    if not item.get("derived")
+                )
+                if v2
+                else (() if from_frame else reference_roles[-5:])
+            )
+            if len(canon_ids) != len(canon_roles):
+                raise ValueError("stored reference count does not match ordered Canon roles")
             compiler_revision = str(frozen_input.get("promptCompilerRevision", "segment-edit-v2"))
             time_origin = (
                 _required_frame_range(frozen_input, "generationRange")[0]
-                if compiler_revision in {"segment-edit-v3", "segment-edit-v4", "segment-edit-v5"}
+                if compiler_revision
+                in {
+                    "segment-edit-v3",
+                    "segment-edit-v4",
+                    "segment-edit-v5",
+                    "segment-edit-v6",
+                    "segment-edit-v7",
+                }
                 else 0
             )
             result = self._gateway.submit_segment_video(
                 SegmentVideoGenerationRequest(
-                    instruction=_required_string(frozen_input, "instruction"),
-                    prompt=_required_string(frozen_input, "prompt"),
-                    negative_prompt=_required_string(frozen_input, "negativePrompt"),
+                    instruction=_required_string(
+                        frozen_input, "instruction", preserve_whitespace=v2
+                    ),
+                    prompt=_required_string(frozen_input, "prompt", preserve_whitespace=v2),
+                    negative_prompt=str(frozen_input.get("negativePrompt", ""))
+                    if v2
+                    else _required_string(frozen_input, "negativePrompt"),
                     context_video_url=published.url if published else None,
                     generation_mode="from_frame" if from_frame else "edit_existing",
                     generate_audio=bool(frozen_input.get("generateAudio", False)),
@@ -346,11 +430,18 @@ class ArkProviderJobGateway:
                     if any(role in reference_roles for role in ("anchor_out", "last_frame"))
                     else None,
                     canon_reference_paths=self._resolve_asset_paths(canon_ids),
-                    canon_reference_roles=() if from_frame else reference_roles[-5:],
+                    canon_reference_roles=canon_roles,
                     duration_seconds=duration_seconds,
                     resolution="480p",
                     ratio="9:16",
                     prompt_compiler_revision=compiler_revision,
+                    compiled_provider_prompt=(
+                        _required_string(
+                            frozen_input, "compiledProviderPrompt", preserve_whitespace=v2
+                        )
+                        if frozen_input.get("providerPromptVersion") == 1
+                        else None
+                    ),
                 )
             )
             metadata = {"publicationId": str(published.publication_id)} if published else {}
@@ -450,11 +541,16 @@ def _structured_submission(result: StructuredProviderResult) -> ProviderSubmissi
     )
 
 
-def _required_string(document: dict[str, object], key: str) -> str:
-    value = str(document.get(key, "")).strip()
-    if not value:
+def _required_string(
+    document: dict[str, object], key: str, *, preserve_whitespace: bool = False
+) -> str:
+    value = document.get(key, "")
+    if preserve_whitespace and not isinstance(value, str):
+        raise ValueError(f"frozen Ark input requires string {key}")
+    value = str(value)
+    if not value.strip():
         raise ValueError(f"frozen Ark input requires {key}")
-    return value
+    return value if preserve_whitespace else value.strip()
 
 
 def _required_dict(document: dict[str, object], key: str) -> dict[str, object]:

@@ -86,3 +86,11 @@ def test_repeat_source_materializations_keep_each_explicit_creation_independent(
     assert "DROP CONSTRAINT uq_story_source_materialization_suggestion" in sql
     assert "CREATE INDEX ix_story_source_materializations_suggestion_id" in sql
     assert "CREATE UNIQUE INDEX ix_story_source_materializations_suggestion_id" not in sql
+
+
+def test_story_import_confirmation_snapshot_is_nullable_for_legacy_rows() -> None:
+    migration, sql = _render_migration("0033_story_import_confirmation_snapshot.py")
+
+    assert migration.down_revision == "0032_environment_draft"
+    assert "ADD COLUMN confirmation_request_snapshot_json JSONB" in sql
+    assert "NOT NULL" not in sql

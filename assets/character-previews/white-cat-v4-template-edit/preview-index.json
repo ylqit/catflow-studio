@@ -1,0 +1,160 @@
+{
+  "version": 4,
+  "status": "template-edit-preview",
+  "createdDate": "2026-09-10",
+  "generator": "built-in-imagegen",
+  "generationCallCount": 5,
+  "runtimeIntegrated": false,
+  "identityMaster": {
+    "file": "identity-source.png",
+    "source": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png",
+    "byteIdentical": true,
+    "sha256": "4eb638ad80effb9410abab5045c84e69abf5bda8a2080b8277183c888bdbefd1"
+  },
+  "method": "Original finalized cat views are edit targets and pose/layout authorities. User-specified white-cat adaptation is the sole identity master. Current side edit additionally supports rear coat continuity and pair insertion.",
+  "rejectedPreviewsUsedAsInputs": false,
+  "hiddenBack": "Design completion of coat markings on the original finalized rear anatomy; not observed or recovered ground truth.",
+  "images": [
+    {
+      "file": "identity-source.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "mode": "RGB",
+      "bytes": 1899358,
+      "sha256": "4eb638ad80effb9410abab5045c84e69abf5bda8a2080b8277183c888bdbefd1",
+      "decodeVerified": true,
+      "role": "unchanged-identity-reference",
+      "editTemplate": null,
+      "references": [],
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png"
+    },
+    {
+      "file": "front-standing.png",
+      "size": [
+        969,
+        1623
+      ],
+      "mode": "RGB",
+      "bytes": 1543430,
+      "sha256": "6b534f4b72445b5c53115c6b00214f977bbaf172c5fe2d107f4c5622df86672f",
+      "decodeVerified": true,
+      "role": "preview-deliverable",
+      "editTemplate": "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪-正面.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪-正面.png",
+        "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png"
+      ],
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-997d1816-0d1c-4a44-8d8a-7a602d7ea142.png"
+    },
+    {
+      "file": "side-standing.png",
+      "size": [
+        1137,
+        1383
+      ],
+      "mode": "RGB",
+      "bytes": 1618454,
+      "sha256": "abbde4dc194ffe4e24e3999a73fe2881edf038e2f01657a40b998e79a382b356",
+      "decodeVerified": true,
+      "role": "preview-deliverable",
+      "editTemplate": "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪-侧面.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪-侧面.png",
+        "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png"
+      ],
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-fedc82f8-1ff2-4ac1-ac5a-66c87c8726b6.png"
+    },
+    {
+      "file": "rear-standing.png",
+      "size": [
+        982,
+        1602
+      ],
+      "mode": "RGB",
+      "bytes": 1511011,
+      "sha256": "4a9c84d224a7e1488b48094a4276b042c1f4973a56ccdc8e8c13c351ac813c7b",
+      "decodeVerified": true,
+      "role": "preview-deliverable",
+      "editTemplate": "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪-背面.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪-背面.png",
+        "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-fedc82f8-1ff2-4ac1-ac5a-66c87c8726b6.png"
+      ],
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-58f62ac2-b523-4245-bd2e-e48056fa20ac.png"
+    },
+    {
+      "file": "three-view-board.png",
+      "size": [
+        1774,
+        887
+      ],
+      "mode": "RGB",
+      "bytes": 1598685,
+      "sha256": "46b7e4627906c6b28313f9827bd54ce2e9f1413c71c187a9093d270d2d5fd4fe",
+      "decodeVerified": true,
+      "role": "preview-deliverable",
+      "editTemplate": "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪三视图.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/风格定稿/Canon-v1/猫咪三视图.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-997d1816-0d1c-4a44-8d8a-7a602d7ea142.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-fedc82f8-1ff2-4ac1-ac5a-66c87c8726b6.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-58f62ac2-b523-4245-bd2e-e48056fa20ac.png",
+        "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png"
+      ],
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cd94b87d-85bc-46ab-9770-899d26c9ed9d.png"
+    },
+    {
+      "file": "pair-scale.png",
+      "size": [
+        941,
+        1672
+      ],
+      "mode": "RGB",
+      "bytes": 1458363,
+      "sha256": "25c041cca6762b39bc4bd3ab81b64d7b31c7ff5f0027a96c9d5f038b7214f4ef",
+      "decodeVerified": true,
+      "role": "preview-deliverable",
+      "editTemplate": "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/pair-scale.png",
+      "references": [
+        "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/pair-scale.png",
+        "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png",
+        "C:\\Users\\wwwab\\.codex\\generated_images\\01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa\\exec-fedc82f8-1ff2-4ac1-ac5a-66c87c8726b6.png"
+      ],
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-f756bf2c-7505-4e56-bb7c-1dd49536b947.png"
+    }
+  ],
+  "validation": {
+    "pngDecode": true,
+    "visualReview": true,
+    "geometricallyCalibrated": false,
+    "videoTested": false,
+    "canonFilesMatchOriginalManifest": [
+      {
+        "file": "episode-child.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "episode-cat.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "pair-scale.png",
+        "matchesManifest": true
+      },
+      {
+        "file": "style-board.png",
+        "matchesManifest": true
+      }
+    ],
+    "pairComparison": {
+      "sameCanvasSize": true,
+      "childRegionMeanAbsoluteRgbDifference": 4.411450908455625,
+      "note": "Read-only comparison, no image files modified. Nonzero means imagegen did not preserve the child region pixel-exactly."
+    }
+  },
+  "prompts": "generation-prompts.md"
+}
+

@@ -95,6 +95,7 @@ def _run_worker(*, once: bool, poll_interval: float) -> None:
         resolve_asset_paths=resolver.resolve_paths,
         extract_video_frames=resolver.extract_video_frames,
         prepare_segment_media=resolver.prepare_segment_media,
+        prepare_edit_plan_frames=resolver.prepare_edit_plan_frames,
         publish_segment_reference=segment_publisher,
     )
     ark_results = ArkResultLandingService(
@@ -119,13 +120,13 @@ def _run_worker(*, once: bool, poll_interval: float) -> None:
             receipt_root=paths.work_root / "provider-receipts",
             lane=None if once else lane,
         )
-        for lane in (["once"] if once else ["submit", "query", "local"])
+        for lane in (["once"] if once else ["submit", "query", "local", "reconcile"])
     ]
     ready_file = paths.work_root / "worker-ready.json"
     try:
         with (
             WorkerHeartbeat(ready_file, worker_id=worker_id),
-            ThreadPoolExecutor(max_workers=3) as executor,
+            ThreadPoolExecutor(max_workers=len(workers)) as executor,
         ):
             next_publication_cleanup = time.monotonic()
             database_failures = 0

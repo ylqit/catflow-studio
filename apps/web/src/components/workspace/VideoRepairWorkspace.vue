@@ -1,15 +1,20 @@
 <script setup lang="ts">
+import ProviderPrompt from "../ProviderPrompt.vue";
+import VideoEditPlanner from './VideoEditPlanner.vue';
+import VideoEditTaskDetails from './VideoEditTaskDetails.vue';
+import { blocksVideoEditing, frozenVideoEdit, videoEditReuseInput } from '../../videoEditTask';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import JobStatusCard from "../JobStatusCard.vue";
 import { subscribeJobs } from "../../jobUpdates";
 import { api, ApiError } from "../../api/client";
 import type { AssetDto, FrameEditTimelineDto, CandidatePlacementDto, EditVersionDto, FrameRangeDto, JobDto, RuntimeBootstrapDto, SegmentRepairPreviewDto, VideoEditDraftDto, VideoRepairDto, VideoReviewDto, WorkspaceDto } from "../../api/types";
-import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
-import { billingPresentation, errorPresentation, jobPresentation, paidModelBlockedReason } from "../../presentation";
+import { pendingIdempotencyKey, readPendingIdempotency, settleIdempotencyKey } from "../../idempotency";
+import { billingPresentation, errorPresentation, jobPresentation, jobExecutionPresentation, paidModelBlockedReason } from "../../presentation";
 import { isValidIssueRange, mediaTimeToFrame } from "../../videoRepair";
 import FrameTimeline from "./FrameTimeline.vue";
 import LinkedVideoComparison from "./LinkedVideoComparison.vue";
+import type { SegmentRepairPreviewCommand, VideoEditPlanSuggestion } from '../../api/types';
 const comparisonPlayer = ref<InstanceType<typeof LinkedVideoComparison> | null>(null);
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto }>();
@@ -19,9 +24,38 @@ const draftId = computed(() => typeof route?.query.draftId === "string" ? route.
 const drafts = ref<VideoEditDraftDto[]>([]); const draft = ref<VideoEditDraftDto | null>(null);
 const edits = ref<EditVersionDto[]>([]); const assets = ref<AssetDto[]>([]);
 const repairs = ref<VideoRepairDto[]>([]); const jobs = ref<JobDto[]>([]); const reviews = ref<VideoReviewDto[]>([]);
+const acceptedJob = ref<JobDto | null>(null);
+const acceptedRepair = ref<VideoRepairDto | null>(null);
+const submissionProgress = ref<HTMLElement | null>(null);
+const acceptedNotice = ref('');
+let submissionContext = 0;
 const runtime = ref<RuntimeBootstrapDto | null>(null); const preview = ref<SegmentRepairPreviewDto | null>(null);
 const issue = ref<FrameRangeDto>({ startFrame: 0, endFrame: 96 });
-const instruction = ref(""); const endStatePolicy = ref<"match_original" | "replace">("match_original"); const desiredEndState = ref("");
+const instruction = ref(""); const endStatePolicy = ref<"follow_instruction" | "match_original" | "replace">("follow_instruction"); const desiredEndState = ref("");
+const editContractVersion = ref<1 | 2>(2);
+const preserveContent = ref(''); const startState = ref(''); const actionProcess = ref(''); const avoidProblems = ref('');
+const planSourceJobId = ref<string | null>(null); const plannerJobId = ref('');
+const includeInAnchor = ref(true);
+type ReferenceRole = 'episode_child' | 'episode_cat' | 'pair_scale' | 'environment' | 'style_board';
+const referenceRoles = ref<ReferenceRole[]>([]);
+const referenceLabels: Record<string, string> = { episode_child: '角色外观', episode_cat: '搭档外观', pair_scale: '相对比例', environment: '环境', style_board: '画风' };
+const contextMode = ref<'auto' | 'selection' | 'custom'>('auto');
+const contextRange = ref<FrameRangeDto>({ startFrame: 0, endFrame: 96 });
+const saveState = ref(''); const saveConflict = ref(false); const savingInput = ref(false);
+let savedInputRevision = 0; let restoredInputDraft = ''; let inputDirty = false;
+const hydratingInput = ref(true);
+let loadRequest = 0; let loadingIdentity = ''; let inputRecoveryRequest = 0;
+let continuedInput: { draftId: string; resultId: string; range: FrameRangeDto } | null = null;
+type EditingInput = Partial<SegmentRepairPreviewCommand> & { plannerJobId?: string };
+type PendingInputSave = {
+  key: string; projectId: string; draftId: string; headId: string;
+  expectedRevision: number; document: EditingInput; dirty: boolean; conflict: boolean; error: string;
+  saving?: Promise<void>;
+};
+const pendingInputSaves = new Map<string, PendingInputSave>();
+const navigationSaveErrors = ref<Record<string, string>>({});
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+const rawCandidatePlayer = ref<HTMLVideoElement | null>(null);
 const currentFrame = ref(0); const player = ref<HTMLVideoElement | null>(null);
 const view = ref<"base" | "result" | "comparison" | "after">("base");
 const selectedRepairId = ref(typeof route.query.candidateId === 'string' ? route.query.candidateId : '');
@@ -35,14 +69,13 @@ const resultBusy = ref(false);
 const inputResult = ref<JobDto | null>(null);
 const referenceJob = ref<JobDto | null>(null);
 const compareOriginal = ref(false);
-let restoredReference = '';
 let restoringInputs = false; let inputRevision = 0;
 const sourceResultId = computed(() => typeof route.query.sourceResultId === 'string' ? route.query.sourceResultId : '');
 const sourceRange = computed(() => (inputResult.value?.frozenInput?.resultRange ?? inputResult.value?.frozenInput?.issueRange) as FrameRangeDto | undefined);
 const sourceVideo = computed(() => assets.value.find(asset => asset.role === 'edit_preview' && asset.producingJobId === inputResult.value?.id));
 const referenceVideo = computed(() => assets.value.find(asset => asset.role === 'repair_context' && asset.producingJobId === referenceJob.value?.id));
 const resultRange = computed(() => (trial.value?.frozenInput?.resultRange as FrameRangeDto | undefined) ?? repair.value?.preview.resultRange ?? repair.value?.issueRange ?? issue.value);
-const canContinue = computed(() => !locked.value && !trialStale.value && trial.value?.status === 'succeeded' && !!trialVideo.value && resultRange.value.endFrame - resultRange.value.startFrame >= 96);
+const canContinue = computed(() => !locked.value && !trialStale.value && trial.value?.status === 'succeeded' && !!trialVideo.value && resultRange.value.endFrame > resultRange.value.startFrame);
 const startingLabel = computed(() => inputResult.value ? '候选结果 ' + String(inputResult.value.frozenInput?.repairId).slice(0, 8) : '当前草稿 v' + head.value?.revision);
 const beforeLabel = computed(() => !compareOriginal.value && repair.value?.preview.sourceResultJobId ? '上一结果 · ' + sourceCandidateName(repair.value) : '开始修改前 · 父草稿 v' + parentVersion.value?.revision);
 
@@ -73,9 +106,16 @@ const candidateGroups = computed(() => {
 const repair = computed(() => draftRepairs.value.find(item => item.id === selectedRepairId.value) ?? draftRepairs.value[0] ?? null);
 const candidate = computed(() => assets.value.find(asset => asset.id === repair.value?.candidateAssetId));
 const repairJob = computed(() => jobs.value.find(job => job.videoRepairId === repair.value?.id && job.kind === "regenerate_video_segment"));
+const selectedSnapshot = computed(() => frozenVideoEdit(repairJob.value, repair.value?.preview));
+const reusingParameters = ref(false);
+const reuseDisabled = computed(() => hydratingInput.value || reusingParameters.value || selectedSnapshot.value?.baseEditVersionId !== head.value?.id);
+function candidateStatus(item: VideoRepairDto) {
+  const task = jobs.value.find(job => job.videoRepairId === item.id && job.kind === 'regenerate_video_segment');
+  return task ? jobExecutionPresentation(task).label : item.candidateAssetId ? '候选已返回' : '生成记录待读取';
+}
 const terminal = (status: string) => ["succeeded", "failed", "cancelled"].includes(status);
-const pendingPaidJob = computed(() => jobs.value.find(job => job.kind === 'regenerate_video_segment' && !terminal(job.status)));
-const locked = computed(() => busy.value || unresolvedSubmission.value || !!pendingPaidJob.value);
+const pendingPaidJob = computed(() => jobs.value.find(blocksVideoEditing));
+const locked = computed(() => hydratingInput.value || busy.value || unresolvedSubmission.value || !!pendingPaidJob.value);
 const baseJob = computed(() => jobs.value.find(job => job.kind === "render_edit_preview" && job.frozenInput?.editVersionId === head.value?.id && !job.frozenInput?.repairId));
 const basePreview = computed(() => assets.value.find(asset => asset.role === "edit_preview" && asset.metadata.editVersionId === head.value?.id && !asset.metadata.repairId));
 const trials = computed(() => jobs.value.filter(job => job.kind === 'render_edit_preview' && job.frozenInput?.repairId === repair.value?.id));
@@ -93,7 +133,19 @@ const mediaFrames = computed(() => segmentView.value ? resultRange.value.endFram
 const mediaRate = computed(() => 24);
 const localJob = computed(() => jobs.value.find(job => job.kind === "render_edit_preview" && !terminal(job.status)) ?? trial.value ?? jobs.value.find(job => job.kind === 'render_edit_preview'));
 const localRunning = computed(() => !!localJob.value && !terminal(localJob.value.status));
+const playerStatus = computed(() => {
+  if (resultError.value) return resultError.value;
+  if (view.value !== 'base') {
+    if (repairJob.value && !candidate.value) return jobExecutionPresentation(repairJob.value).description;
+    if (trial.value) return jobExecutionPresentation(trial.value).description;
+    return '正在准备接回预览：合成修改片段、完整时间线与声音。';
+  }
+  if (baseJob.value) return jobExecutionPresentation(baseJob.value).description;
+  return '正在准备完整草稿预览。';
+});
 const takeLength = computed(() => repair.value ? repair.value.issueRange.endFrame - repair.value.issueRange.startFrame : 0);
+const candidateFrames = computed(() => Number(candidate.value?.metadata.durationFrames ?? 0));
+const takeError = computed(() => !Number.isInteger(takeStart.value) || takeStart.value < 0 || takeStart.value + takeLength.value > candidateFrames.value ? '取用区间必须位于完整候选内，且长度等于替换选区。' : '');
 const placement = computed<CandidatePlacementDto>(() => ({ candidateSourceRange: { startFrame: takeStart.value, endFrame: takeStart.value + takeLength.value }, audioPolicy: audioPolicy.value, fadeInMs: audioPolicy.value === 'use_candidate' ? fadeIn.value : 0, fadeOutMs: audioPolicy.value === 'use_candidate' ? fadeOut.value : 0 }));
 const trialStale = computed(() => {
   const frozen = trial.value?.frozenInput?.placement as CandidatePlacementDto | undefined;
@@ -108,13 +160,12 @@ function timelineUsesRepair(timeline: EditVersionDto['edl'] | undefined | null, 
 }
 function inCurrentDraft(item: VideoRepairDto) { return timelineUsesRepair(edl.value, item.id); }
 const blockedReason = computed(() => {
-  if (generationMode.value === "edit_existing" && !draft.value?.referencesConfirmed) return "历史参考不完整，请明确确认新的参考绑定后创建草稿。";
   if (unresolvedSubmission.value) return "请求结果尚不确定。请重新检查任务记录，不要重复提交。";
   if (pendingPaidJob.value?.status === "submission_unknown") return "模型提交状态需要人工确认，请不要再次生成。";
   if (locked.value) return "当前任务仍在处理，已锁定输入。";
   if (!(sourceVideo.value ?? basePreview.value)) return "请先准备完整草稿预览，确认实际编辑画面。";
   if (rangeInputInvalid.value) return "请先修正无效的选区时间输入。";
-  if (!isValidIssueRange(issue.value, totalFrames.value)) return "请选择 4–15 秒（96–360 帧）的生成区间。";
+  if (!isValidIssueRange(issue.value, totalFrames.value)) return "请选择 1–360 帧的替换区间。模型生成长度单独计算。";
   if (sourceRange.value && (issue.value.startFrame < sourceRange.value.startFrame || issue.value.endFrame > sourceRange.value.endFrame)) return "选区必须位于来源结果内。";
   if (!instruction.value.trim()) return "请填写需要改变的动作或状态。";
   if (endStatePolicy.value === "replace" && !desiredEndState.value.trim()) return "请填写期望的结束状态。";
@@ -122,6 +173,7 @@ const blockedReason = computed(() => {
   if (!preview.value?.referencePreparationJobId) return "请先准备并检查本次实际参考。";
   return paidModelBlockedReason(runtime.value) || (generationMode.value === "edit_existing" && !runtime.value?.objectPublisher.ready ? "局部修改的视频发布通道尚未就绪。" : "");
 });
+const plannerCommand = computed(() => source.value && head.value && draft.value && isValidIssueRange(issue.value, totalFrames.value) && instruction.value.trim() ? inputs() : null);
 const allPass = computed(() => Object.keys(labels).every(key => checks[key] === "pass") && (!needsSoundReview.value || Object.keys(audioLabels).every(key => audioChecks[key] === (key !== "soundIntent" && basePreview.value?.metadata.hasAudio === false ? "not_applicable" : "pass"))));
 let unsubscribeJobs: (() => void) | undefined; let callbackId: number | undefined;
 let disposed = false; let seekSequence = 0; let restoredHead = ""; let reviewedAsset = "";
@@ -129,81 +181,135 @@ let initializedCandidate = "";
 let callbackOwner: HTMLVideoElement | null = null; let looping = false;
 function fail(reason: unknown, message: string) { const failure = errorPresentation(reason, message); error.value = failure.message; technicalError.value = failure.technicalMessage; }
 async function load() {
-  if (disposed || loading.value) return;
-  const projectId = props.projectId;
-  const requestedDraftId = draftId.value;
-  loading.value = true;
+  if (disposed) return;
+  const projectId = props.projectId, requestedDraftId = draftId.value;
+  unresolvedSubmission.value = !!readPendingIdempotency(`video-edit:${projectId}:${requestedDraftId}`);
+  const requestedResultId = sourceResultId.value;
+  const requestedReferenceId = typeof route.query.referenceJobId === 'string' ? route.query.referenceJobId : '';
+  const identity = JSON.stringify([projectId, requestedDraftId, requestedResultId, requestedReferenceId]);
+  if (loading.value && loadingIdentity === identity) return;
+  const request = ++loadRequest;
+  const current = () => !disposed && request === loadRequest && props.projectId === projectId && draftId.value === requestedDraftId && sourceResultId.value === requestedResultId && (route.query.referenceJobId ?? '') === requestedReferenceId;
+  loadingIdentity = identity; loading.value = true;
   try {
     const projectState = await Promise.all([api.videoEditDrafts(projectId), api.assets(projectId), api.edits(projectId), api.videoRepairs(projectId), api.runtime()]);
-    if (disposed || props.projectId !== projectId || draftId.value !== requestedDraftId) return;
+    if (!current()) return;
     [drafts.value, assets.value, edits.value, repairs.value, runtime.value] = projectState;
-    if (legacyJob.value && !terminal(legacyJob.value.status)) legacyJob.value = await api.job(legacyJob.value.id);
-    if (disposed || props.projectId !== projectId || draftId.value !== requestedDraftId) return;
-    if (!requestedDraftId) { draft.value = null; return; }
+    if (acceptedRepair.value && !repairs.value.some(item => item.id === acceptedRepair.value!.id)) repairs.value.unshift(acceptedRepair.value);
+    if (legacyJob.value && !terminal(legacyJob.value.status)) {
+      const received = await api.job(legacyJob.value.id);
+      if (!current()) return;
+      legacyJob.value = received;
+    }
+    if (!requestedDraftId) { draft.value = null; hydratingInput.value = false; return; }
+    // Returning to a draft waits for its own queued writes, never a different draft's save.
+    await Promise.all([...pendingInputSaves.values()].filter(entry => entry.projectId === projectId && entry.draftId === requestedDraftId).map(entry => entry.saving));
+    if (!current()) return;
     const [loadedDraft, loadedJobs] = await Promise.all([api.videoEditDraft(projectId, requestedDraftId), api.videoDraftJobs(projectId, requestedDraftId)]);
-    if (disposed || props.projectId !== projectId || draftId.value !== requestedDraftId) return;
+    if (!current()) return;
+    const restoreKey = `${projectId}:${requestedDraftId}:${loadedDraft.headEditVersionId}`;
+    const firstInputLoad = restoredInputDraft !== restoreKey;
+    if (firstInputLoad) {
+      hydratingInput.value = true; clearTimeout(saveTimer);
+      for (const pending of pendingInputSaves.values()) if (pending.key !== restoreKey && pending.dirty) void drainInputSave(pending);
+    }
     draft.value = loadedDraft;
     jobs.value = loadedJobs.sort((a, b) => b.createdAt!.localeCompare(a.createdAt!));
-    inputResult.value = sourceResultId.value ? await api.job(sourceResultId.value) : null;
-    const referenceId = typeof route.query.referenceJobId === 'string' ? route.query.referenceJobId : '';
-    if (referenceId) {
-      const revision = inputRevision; const received = await api.job(referenceId);
-      if (revision === inputRevision && referenceId === route.query.referenceJobId) referenceJob.value = received;
+    if (acceptedJob.value && !jobs.value.some(item => item.id === acceptedJob.value!.id)) jobs.value.unshift(acceptedJob.value);
+    const headId = head.value?.id, sourceId = source.value?.id;
+    const sourceCurrent = () => current() && head.value?.id === headId && source.value?.id === sourceId;
+    const continued = continuedInput?.draftId === requestedDraftId && continuedInput.resultId === requestedResultId ? continuedInput : null;
+    const pending = pendingInputSaves.get(restoreKey);
+    const saved = firstInputLoad && !continued ? (pending?.dirty ? pending.document : loadedDraft.editingInput as EditingInput | undefined) : undefined;
+    const canRestoreSaved = !!saved?.issueRange && saved.baseEditVersionId === headId && saved.baseVideoAssetId === sourceId && (!requestedResultId || saved.sourceResultJobId === requestedResultId);
+    let restoredJobs: { result: JobDto | null; reference: JobDto | null } | undefined;
+    if (firstInputLoad) {
+      restoredJobs = await loadInputJobs(canRestoreSaved ? saved! : { sourceResultJobId: requestedResultId || undefined, referencePreparationJobId: requestedReferenceId || undefined });
+      if (!sourceCurrent()) return;
     }
-    if (referenceJob.value && restoredReference !== referenceJob.value.id) {
-      const command = referenceJob.value.frozenInput?.command as ReturnType<typeof inputs> | undefined;
-      if (command) {
-        restoringInputs = true;
-        issue.value = { ...command.issueRange }; instruction.value = command.instruction;
-        generationMode.value = command.generationMode; audioMode.value = command.audioMode;
-        soundDescription.value = command.soundDescription; endStatePolicy.value = command.endStatePolicy;
-        desiredEndState.value = command.desiredEndState; anchorStart.value = command.anchorStartFrame; anchorEnd.value = command.anchorEndFrame;
-        restoringInputs = false;
+    const refreshingReferenceId = !firstInputLoad ? referenceJob.value?.id : undefined;
+    const referenceIdentity = mediaIdentity.value;
+    const refreshedReference = refreshingReferenceId ? await api.job(refreshingReferenceId) : null;
+    if (!sourceCurrent()) return;
+    const headChanged = !!head.value && restoredHead !== headId;
+    const previewAssetId = basePreview.value?.id;
+    const reviewChanged = !!previewAssetId && reviewedAsset !== previewAssetId;
+    const [sourceReviews, previewReviews] = await Promise.all([
+      headChanged && sourceId ? api.videoReviews(projectId, sourceId) : Promise.resolve(null),
+      reviewChanged ? api.videoReviews(projectId, previewAssetId!) : Promise.resolve(null),
+    ]);
+    if (!sourceCurrent()) return;
+    if (refreshedReference && referenceJob.value?.id === refreshingReferenceId && refreshedReference.id === refreshingReferenceId && referenceIdentity === mediaIdentity.value) referenceJob.value = refreshedReference;
+    if (sourceReviews) {
+      reviews.value = sourceReviews; restoredHead = headId!;
+      notes.value = sourceReviews[0]?.notes ?? '';
+      Object.keys(labels).forEach(key => { checks[key] = sourceReviews[0]?.checks[key] ?? ''; });
+    }
+    if (previewReviews) {
+      reviewedAsset = previewAssetId!;
+      Object.keys(audioLabels).forEach(key => { audioChecks[key] = previewReviews[0]?.audioChecks?.[key as keyof typeof audioLabels] ?? ''; });
+      if (previewReviews[0]) {
+        notes.value = previewReviews[0].notes;
+        Object.keys(labels).forEach(key => { checks[key] = previewReviews[0].checks[key] ?? ''; });
       }
-      restoredReference = referenceJob.value.id;
+      reviews.value = [...previewReviews, ...reviews.value];
     }
+    if (firstInputLoad && restoredJobs) {
+      const range = continued?.range ?? (restoredJobs.result?.frozenInput?.resultRange ?? restoredJobs.result?.frozenInput?.issueRange) as FrameRangeDto | undefined;
+      let initialRange = range ?? { startFrame: 0, endFrame: Math.min(96, totalFrames.value) };
+      const reviewIssue = previewReviews?.[0]?.issues?.[0] ?? (!head.value?.parentEditVersionId ? sourceReviews?.[0]?.issues?.[0] : undefined);
+      if (!range && !restoredJobs.reference && reviewIssue && isValidIssueRange(reviewIssue.range, totalFrames.value)) initialRange = reviewIssue.range;
+      const referenceCommand = restoredJobs.reference?.frozenInput?.command as EditingInput | undefined;
+      restoreInputDocument(canRestoreSaved ? saved! : referenceCommand ?? { editContractVersion: 2, issueRange: initialRange }, restoredJobs);
+      rangeInputInvalid.value = false;
+      savedInputRevision = loadedDraft.inputRevision ?? 0;
+      inputDirty = false; saveConflict.value = false; savingInput.value = false; remoteInput.value = null;
+      saveState.value = canRestoreSaved ? '已恢复上次编辑输入' : '';
+      view.value = !continued && ['result', 'raw', 'comparison', 'after'].includes(String(route.query.view)) ? (route.query.view === 'raw' ? 'result' : route.query.view as typeof view.value) : 'base';
+      restoredInputDraft = restoreKey;
+      if (canRestoreSaved && pending) syncInputSaveState(pending);
+    }
+    hydratingInput.value = false;
+    if (continued) continuedInput = null;
     if (repair.value && initializedCandidate !== repair.value.id) {
-      initializedCandidate = repair.value.id;
-      restorePlacement();
-      if (pendingPaidJob.value) reuseParameters();
+      initializedCandidate = repair.value.id; restorePlacement();
     }
-    if (head.value && restoredHead !== head.value.id && !pendingPaidJob.value && !referenceJob.value) {
-      restoringInputs = true;
-      issue.value = sourceRange.value ? { ...sourceRange.value } : { startFrame: 0, endFrame: Math.min(96, totalFrames.value) };
-      restoringInputs = false; preview.value = null; view.value = !restoredHead && ['result', 'raw', 'comparison', 'after'].includes(String(route.query.view)) ? (route.query.view === 'raw' ? 'result' : route.query.view as typeof view.value) : 'base';
-    }
-    if (head.value && restoredHead !== head.value.id) {
-      restoredHead = head.value.id; reviews.value = source.value ? await api.videoReviews(props.projectId, source.value.id) : [];
-      notes.value = reviews.value[0]?.notes ?? "";
-      Object.keys(labels).forEach(key => { checks[key] = reviews.value[0]?.checks[key] ?? ""; });
-      const sourceIssue = reviews.value[0]?.issues?.[0];
-      // Source-frame notes apply to an unedited root only; edited timelines restore their own review below.
-      if (!sourceResultId.value && !referenceJob.value && !locked.value && !head.value.parentEditVersionId && sourceIssue && isValidIssueRange(sourceIssue.range, totalFrames.value)) { restoringInputs = true; issue.value = { ...sourceIssue.range }; restoringInputs = false; }
-      reviewedAsset = "";
-    }
-    if (basePreview.value && reviewedAsset !== basePreview.value.id) {
-      const saved = await api.videoReviews(props.projectId, basePreview.value.id);
-      reviewedAsset = basePreview.value.id;
-      Object.keys(audioLabels).forEach(key => { audioChecks[key] = saved[0]?.audioChecks?.[key as keyof typeof audioLabels] ?? ''; });
-      if (saved[0]) {
-        notes.value = saved[0].notes;
-        Object.keys(labels).forEach(key => { checks[key] = saved[0].checks[key] ?? ""; });
-        const savedIssue = saved[0].issues?.[0];
-        if (!sourceResultId.value && !referenceJob.value && !locked.value && savedIssue && isValidIssueRange(savedIssue.range, totalFrames.value)) { restoringInputs = true; issue.value = { ...savedIssue.range }; restoringInputs = false; }
-      }
-      reviews.value = [...saved, ...reviews.value];
-    }
-  } catch (reason) { if (!disposed) fail(reason, "编辑记录暂时无法读取"); } finally { loading.value = false; }
-  if (!disposed && referenceJob.value?.status === 'succeeded' && !preview.value && view.value === 'base') {
+  } catch (reason) { if (current()) fail(reason, acceptedJob.value ? `任务 ${acceptedJob.value.id} 已创建，部分记录暂时无法读取，请重新连接查看进度` : '编辑记录暂时无法读取'); }
+  finally { if (request === loadRequest) loading.value = false; }
+  if (!current()) return;
+  const scope = readPendingIdempotency(`video-edit:${projectId}:${requestedDraftId}`) ? `video-edit:${projectId}:${requestedDraftId}` : `video-edit:${projectId}`;
+  const pending = readPendingIdempotency(scope);
+  const recovered = pending && jobs.value.find(job => job.kind === 'regenerate_video_segment' && job.idempotencyKey === pending.key && job.inputHash === pending.fingerprint && job.frozenInput?.editDraftId === requestedDraftId);
+  if (recovered) {
+    settleIdempotencyKey(scope, pending.fingerprint);
+    await acceptCreatedRepair(recovered, false);
+  }
+  if (referenceJob.value?.status === 'succeeded' && !preview.value && view.value === 'base') {
     const revision = inputRevision; const preparedId = referenceJob.value.id;
     try {
-      const received = await api.previewVideoRepair(props.projectId, { ...inputs(), referencePreparationJobId: preparedId });
-      if (revision === inputRevision && referenceJob.value?.id === preparedId) preview.value = received;
-    } catch (reason) { if (revision === inputRevision) fail(reason, '实际参考与当前输入不一致，请重新准备'); }
+      const received = await api.previewVideoRepair(projectId, { ...inputs(), referencePreparationJobId: preparedId });
+      if (current() && revision === inputRevision && referenceJob.value?.id === preparedId) preview.value = received;
+    } catch (reason) { if (current() && revision === inputRevision) fail(reason, '实际参考与当前输入不一致，请重新准备'); }
   }
-  if (!disposed) await ensurePreviews();
+  if (current()) await ensurePreviews();
 }
-async function openDraft(existing: VideoEditDraftDto) { referenceJob.value = null; inputResult.value = null; preview.value = null; await router.replace({ query: { draftId: existing.id, view: 'base' } }); restoredHead = ""; await load(); }
+async function loadInputJobs(saved: EditingInput) {
+  const [result, reference] = await Promise.all([
+    saved.sourceResultJobId ? api.job(saved.sourceResultJobId) : Promise.resolve(null),
+    saved.referencePreparationJobId ? api.job(saved.referencePreparationJobId) : Promise.resolve(null),
+  ]);
+  if ((result && result.id !== saved.sourceResultJobId) || (reference && reference.id !== saved.referencePreparationJobId)) throw new Error('保存输入的任务身份不匹配');
+  return { result, reference };
+}
+function restoreInputDocument(saved: EditingInput, restoredJobs: { result: JobDto | null; reference: JobDto | null }) {
+  restoreInputs(saved);
+  restoringInputs = true;
+  inputResult.value = restoredJobs.result; referenceJob.value = restoredJobs.reference;
+  plannerJobId.value = saved.plannerJobId ?? '';
+  preview.value = null; inputRevision += 1;
+  restoringInputs = false;
+}
+async function openDraft(existing: VideoEditDraftDto) { void saveInput(); await router.replace({ query: { draftId: existing.id, view: 'base' } }); restoredHead = ""; await load(); }
 async function createDraft() {
   if (!source.value || busy.value) return;
   busy.value = true; const scope = `edit-draft:${props.projectId}`; const fingerprint = `${source.value.id}:${sourceEdit.value?.id ?? ''}:${confirmReferences.value}`;
@@ -223,9 +329,9 @@ function restorePlacement() {
   fadeIn.value = frozen?.fadeInMs ?? 0; fadeOut.value = frozen?.fadeOutMs ?? 0;
 }
 async function chooseCandidate(item: VideoRepairDto) {
-  inputResult.value = null; compareOriginal.value = false;
+  compareOriginal.value = false;
   selectedRepairId.value = item.id; selectedTrialId.value = ''; initializedCandidate = item.id; restorePlacement();
-  resultError.value = ''; setView('result'); await router.replace({ query: { ...route.query, candidateId: item.id, trialJobId: undefined, sourceResultId: undefined, referenceJobId: undefined, view: 'result' } });
+  resultError.value = ''; setView('result'); await router.replace({ query: { ...route.query, candidateId: item.id, trialJobId: undefined, view: 'result' } });
   await ensurePreviews();
 }
 async function chooseTrial(id: string) {
@@ -259,7 +365,9 @@ async function continueResult() {
         idempotencyKey: 'fork-result:' + result.id + (previousForks[0] ? ':' + previousForks[0].headEditVersionId : ''),
       });
     }
-    referenceJob.value = null; preview.value = null; restoredReference = ''; instruction.value = '';
+    referenceJob.value = null; preview.value = null;
+    restoreInputs({ editContractVersion: 2, issueRange: range }); plannerJobId.value = '';
+    continuedInput = { draftId: targetDraft.id, resultId: result.id, range };
     await router.replace({ query: { draftId: targetDraft.id, sourceResultId: result.id, view: 'base' } });
     draft.value = targetDraft;
     inputResult.value = result; issue.value = range; rangeInputInvalid.value = false;
@@ -271,15 +379,39 @@ async function changeComparison() {
   comparisonPlayer.value?.pause(); const frame = currentFrame.value;
   compareOriginal.value = !compareOriginal.value; await nextTick(); await comparisonPlayer.value?.seek(frame - mediaOffset.value);
 }
-function reuseParameters() {
-  if (!repair.value) return;
-  const frozen = repair.value.preview;
-  instruction.value = repair.value.instruction; issue.value = { ...repair.value.issueRange };
-  endStatePolicy.value = frozen.endStatePolicy ?? 'match_original'; desiredEndState.value = frozen.desiredEndState ?? '';
-  generationMode.value = frozen.generationMode ?? 'edit_existing'; audioMode.value = frozen.audioMode ?? 'preserve_current';
-  soundDescription.value = frozen.soundDescription ?? ''; anchorStart.value = frozen.anchorStartFrame ?? null; anchorEnd.value = frozen.anchorEndFrame ?? null;
-  preview.value = pendingPaidJob.value ? frozen : null;
-  if (!pendingPaidJob.value) setView('base');
+async function reuseParameters() {
+  if (!selectedSnapshot.value || reuseDisabled.value) return;
+  const snapshot = selectedSnapshot.value, projectId = props.projectId, targetDraftId = draftId.value;
+  const revision = inputRevision, candidateId = repair.value?.id;
+  const document = videoEditReuseInput(snapshot);
+  reusingParameters.value = true;
+  try {
+    const restoredJobs = await loadInputJobs(document);
+    if (disposed || props.projectId !== projectId || draftId.value !== targetDraftId || inputRevision !== revision || repair.value?.id !== candidateId) {
+      error.value = '当前输入或所选任务已变化，未覆盖你的修改。请重新点击复用参数。'; return;
+    }
+    restoreInputDocument(document, restoredJobs);
+    rangeInputInvalid.value = false;
+    await router.replace({ query: { ...route.query, sourceResultId: document.sourceResultJobId ?? undefined, referenceJobId: document.referencePreparationJobId ?? undefined, view: 'base' } });
+    setView('base'); queueInputSave();
+    await load();
+  } catch (reason) { fail(reason, '关联素材未能恢复，当前修改方案已保留'); }
+  finally { reusingParameters.value = false; }
+}
+function restoreInputs(saved: Partial<SegmentRepairPreviewCommand>) {
+  restoringInputs = true;
+  editContractVersion.value = saved.editContractVersion ?? 1;
+  if (saved.issueRange) issue.value = { ...saved.issueRange };
+  instruction.value = saved.instruction ?? '';
+  endStatePolicy.value = saved.endStatePolicy ?? (editContractVersion.value === 2 ? 'follow_instruction' : 'match_original');
+  desiredEndState.value = saved.desiredEndState ?? ''; preserveContent.value = saved.preserveContent ?? '';
+  startState.value = saved.startState ?? ''; actionProcess.value = saved.actionProcess ?? ''; avoidProblems.value = saved.avoidProblems ?? '';
+  generationMode.value = saved.generationMode ?? 'edit_existing'; audioMode.value = saved.audioMode ?? 'preserve_current';
+  soundDescription.value = saved.soundDescription ?? ''; anchorStart.value = saved.anchorStartFrame ?? null; anchorEnd.value = saved.anchorEndFrame ?? null;
+  includeInAnchor.value = saved.includeInAnchor ?? true; referenceRoles.value = saved.referenceRoles ?? (draft.value?.references ?? []).map(item => item.role as ReferenceRole).filter(role => role in referenceLabels);
+  contextMode.value = saved.contextMode ?? 'auto'; contextRange.value = saved.contextRange ? { ...saved.contextRange } : { ...issue.value };
+  planSourceJobId.value = saved.planSourceJobId ?? null;
+  restoringInputs = false;
 }
 async function renderPreview(retry = false) {
   if (!head.value?.timelineHash || !draft.value || busy.value || localRunning.value) return;
@@ -328,14 +460,169 @@ function setView(next: typeof view.value) {
   void router.replace({ query: { ...route.query, view: next } });
 }
 async function startNextEdit() {
-  inputResult.value = null; referenceJob.value = null; restoredReference = '';
+  inputResult.value = null; referenceJob.value = null;
   await router.replace({ query: { ...route.query, sourceResultId: undefined, referenceJobId: undefined, view: 'base' } });
   preview.value = null; resultError.value = ''; rangeInputInvalid.value = false;
   const first = Math.min(Math.max(0, currentFrame.value), Math.max(0, totalFrames.value - 96));
   issue.value = { startFrame: first, endFrame: Math.min(totalFrames.value, first + 96) };
+  restoreInputs({ editContractVersion: 2, issueRange: issue.value }); plannerJobId.value = '';
   setView('base'); void ensurePreviews();
 }
-function inputs() { return { sourceResultJobId: inputResult.value?.id, expectedSourceTimelineHash: inputResult.value ? String(inputResult.value.frozenInput?.timelineHash) : undefined, baseVideoAssetId: source.value!.id, baseEditVersionId: head.value!.id, editDraftId: draft.value!.id, issueRange: { ...issue.value }, instruction: instruction.value.trim(), endStatePolicy: endStatePolicy.value, desiredEndState: desiredEndState.value.trim(), generationMode: generationMode.value, audioMode: audioMode.value, soundDescription: soundDescription.value.trim(), anchorStartFrame: generationMode.value === "from_frame" ? anchorStart.value : null, anchorEndFrame: generationMode.value === "from_frame" && endStatePolicy.value !== "replace" ? anchorEnd.value : null }; }
+function inputs(): SegmentRepairPreviewCommand {
+  return {
+    editContractVersion: editContractVersion.value,
+    sourceResultJobId: inputResult.value?.id,
+    expectedSourceTimelineHash: inputResult.value ? String(inputResult.value.frozenInput?.timelineHash) : undefined,
+    baseVideoAssetId: source.value!.id, baseEditVersionId: head.value!.id, editDraftId: draft.value!.id,
+    issueRange: { ...issue.value }, instruction: instruction.value,
+    preserveContent: preserveContent.value, startState: startState.value, actionProcess: actionProcess.value,
+    endStatePolicy: endStatePolicy.value, desiredEndState: desiredEndState.value, avoidProblems: avoidProblems.value,
+    planSourceJobId: planSourceJobId.value,
+    generationMode: generationMode.value, audioMode: audioMode.value, soundDescription: soundDescription.value,
+    anchorStartFrame: generationMode.value === 'from_frame' ? anchorStart.value : null,
+    anchorEndFrame: generationMode.value === 'from_frame' && endStatePolicy.value === 'match_original' ? anchorEnd.value : null,
+    includeInAnchor: generationMode.value === 'edit_existing' && includeInAnchor.value,
+    referenceRoles: generationMode.value === 'edit_existing' ? [...referenceRoles.value] : [],
+    contextMode: generationMode.value === 'edit_existing' ? contextMode.value : 'auto',
+    contextRange: generationMode.value === 'edit_existing' && contextMode.value === 'custom' ? { ...contextRange.value } : null,
+  };
+}
+function adoptPlan(advice: VideoEditPlanSuggestion, jobId: string) {
+  if (locked.value) return;
+  instruction.value = advice.instruction; preserveContent.value = advice.preserveContent;
+  startState.value = advice.startState; actionProcess.value = advice.actionProcess;
+  desiredEndState.value = advice.desiredEndState; avoidProblems.value = advice.avoidProblems;
+  planSourceJobId.value = jobId;
+}
+function queueInputSave() {
+  if (restoringInputs || hydratingInput.value || restoredInputDraft !== `${props.projectId}:${draft.value?.id}:${head.value?.id}` || !draft.value || !head.value || view.value !== 'base') return;
+  // Each edit replaces an immutable document owned by the original project/draft/head.
+  // Navigation may change every displayed ref while this snapshot is still waiting to save.
+  const document: EditingInput = JSON.parse(JSON.stringify({ ...inputs(), referencePreparationJobId: referenceJob.value?.id ?? null, plannerJobId: plannerJobId.value }));
+  let pending = pendingInputSaves.get(restoredInputDraft);
+  if (!pending) {
+    pending = { key: restoredInputDraft, projectId: props.projectId, draftId: draft.value.id, headId: head.value.id, expectedRevision: savedInputRevision, document, dirty: true, conflict: saveConflict.value, error: '' };
+    pendingInputSaves.set(pending.key, pending);
+  } else {
+    pending.document = document; pending.dirty = true; pending.conflict = saveConflict.value;
+    if (!pending.saving) pending.expectedRevision = savedInputRevision;
+    if (!pending.conflict) { pending.error = ''; delete navigationSaveErrors.value[pending.key]; }
+  }
+  inputDirty = true; saveState.value = '输入待保存';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => void drainInputSave(pending), 600);
+}
+function syncInputSaveState(pending: PendingInputSave) {
+  if (disposed || pending.key !== restoredInputDraft || pending.projectId !== props.projectId || pending.draftId !== draftId.value || pending.headId !== head.value?.id) return;
+  savedInputRevision = pending.expectedRevision; inputDirty = pending.dirty;
+  saveConflict.value = pending.conflict; savingInput.value = !!pending.saving;
+  saveState.value = pending.error || (pending.saving ? '正在保存编辑输入' : pending.dirty ? '输入待保存' : '编辑输入已保存');
+}
+async function drainInputSave(pending: PendingInputSave) {
+  if (pending.saving) return pending.saving;
+  if (!pending.dirty || pending.conflict || pending.error) return;
+  pending.saving = (async () => {
+    while (pending.dirty && !pending.conflict) {
+      const document = pending.document;
+      try {
+        const saved = await api.saveVideoEditInput(pending.projectId, pending.draftId, { expectedRevision: pending.expectedRevision, editingInput: document });
+        pending.expectedRevision = saved.inputRevision ?? pending.expectedRevision + 1;
+        // Newer text entered during this request drains next with the returned CAS revision.
+        if (pending.document === document) pending.dirty = false;
+        delete navigationSaveErrors.value[pending.key];
+        if (!disposed && pending.key === restoredInputDraft && pending.projectId === props.projectId && pending.draftId === draftId.value && pending.headId === head.value?.id && draft.value) {
+          draft.value = { ...draft.value, editingInput: saved.editingInput, inputRevision: pending.expectedRevision };
+        }
+        syncInputSaveState(pending);
+      } catch (reason) {
+        pending.conflict = reason instanceof ApiError && reason.status === 409;
+        pending.error = pending.conflict ? '另一处已更新这份编辑输入。当前文字仍保留，请读取已保存输入后比较。' : errorPresentation(reason, '编辑输入暂未保存，可手动重试').message;
+        navigationSaveErrors.value[pending.key] = `草稿 ${pending.draftId} 的输入尚未保存：${pending.error} 切换前的输入仍保留在本页，可返回该草稿重试或处理冲突。`;
+        break;
+      }
+    }
+  })().finally(() => {
+    pending.saving = undefined; syncInputSaveState(pending);
+    if (!pending.dirty && pendingInputSaves.get(pending.key) === pending) pendingInputSaves.delete(pending.key);
+  });
+  syncInputSaveState(pending);
+  return pending.saving;
+}
+async function saveInput() {
+  if (hydratingInput.value || restoredInputDraft !== `${props.projectId}:${draft.value?.id}:${head.value?.id}` || !inputDirty || saveConflict.value || !head.value || !draft.value || !source.value) return;
+  if (!pendingInputSaves.has(restoredInputDraft)) queueInputSave();
+  clearTimeout(saveTimer);
+  const pending = pendingInputSaves.get(restoredInputDraft);
+  if (!pending) return;
+  if (!pending.saving) {
+    pending.expectedRevision = savedInputRevision; pending.conflict = false; pending.error = '';
+    delete navigationSaveErrors.value[pending.key];
+  }
+  await drainInputSave(pending);
+}
+const remoteInput = ref<VideoEditDraftDto | null>(null);
+async function readSavedInput() {
+  if (!draft.value) return;
+  const projectId = props.projectId, id = draft.value.id, headId = head.value?.id, revision = inputRevision;
+  const request = ++inputRecoveryRequest;
+  const current = () => !disposed && request === inputRecoveryRequest && projectId === props.projectId && id === draft.value?.id && id === draftId.value && headId === head.value?.id && revision === inputRevision;
+  try {
+    const received = await api.videoEditDraft(projectId, id);
+    if (current()) remoteInput.value = received;
+  } catch (reason) { if (current()) fail(reason, '已保存输入暂时无法读取'); }
+}
+async function resolveInputConflict(useSaved: boolean) {
+  const remote = remoteInput.value;
+  if (!remote || remote.id !== draft.value?.id) return;
+  if (!useSaved) {
+    savedInputRevision = remote.inputRevision ?? 0; saveConflict.value = false;
+    inputDirty = true; remoteInput.value = null; void saveInput(); return;
+  }
+  const saved = remote.editingInput as EditingInput | undefined;
+  if (!saved?.issueRange || saved.baseVideoAssetId !== source.value?.id || saved.baseEditVersionId !== head.value?.id || (saved.sourceResultJobId ?? null) !== (inputResult.value?.id ?? null)) {
+    saveState.value = '已保存输入属于不同来源，请打开对应草稿后查看。'; return;
+  }
+  const projectId = props.projectId, headId = head.value?.id, identity = mediaIdentity.value, revision = inputRevision;
+  const request = ++inputRecoveryRequest;
+  const current = () => !disposed && request === inputRecoveryRequest && projectId === props.projectId && remote.id === draftId.value && remote.id === draft.value?.id && headId === head.value?.id && identity === mediaIdentity.value && revision === inputRevision && remoteInput.value === remote;
+  saveState.value = '正在读取保存输入的关联任务，当前输入仍保留。';
+  try {
+    const restoredJobs = await loadInputJobs(saved);
+    if (!current()) return;
+    restoreInputDocument(saved, restoredJobs);
+    pendingInputSaves.delete(restoredInputDraft); delete navigationSaveErrors.value[restoredInputDraft];
+    savedInputRevision = remote.inputRevision ?? 0; saveConflict.value = false; inputDirty = false;
+    remoteInput.value = null; saveState.value = '已载入保存的输入';
+  } catch (reason) {
+    if (current()) saveState.value = errorPresentation(reason, '关联任务暂时无法读取，当前输入仍保留，可重试').message;
+  }
+}
+async function refreshPrompt() {
+  if (!referenceJob.value || referenceJob.value.status !== 'succeeded' || !head.value || !instruction.value.trim()) return;
+  const revision = inputRevision, preparedId = referenceJob.value.id;
+  try {
+    const received = await api.previewVideoRepair(props.projectId, { ...inputs(), referencePreparationJobId: preparedId });
+    if (revision === inputRevision && preparedId === referenceJob.value?.id) preview.value = received;
+  } catch (reason) { if (revision === inputRevision) fail(reason, '最终指令未能更新，请检查输入和参考'); }
+}
+async function previewTake() {
+  if (takeError.value || !repair.value || !draft.value || resultBusy.value || !parentVersion.value?.timelineHash) return;
+  resultBusy.value = true; resultError.value = '';
+  const chosen = { ...placement.value, candidateSourceRange: { ...placement.value.candidateSourceRange } };
+  const fingerprint = JSON.stringify([repair.value.id, chosen]);
+  const scope = `video-edit-take:${draft.value.id}`;
+  try {
+    const job = await api.renderDraftPreview(props.projectId, draft.value.id, {
+      expectedEditVersionId: parentVersion.value.id, expectedTimelineHash: parentVersion.value.timelineHash,
+      repairId: repair.value.id, placement: chosen, idempotencyKey: pendingIdempotencyKey(scope, fingerprint),
+    });
+    settleIdempotencyKey(scope, fingerprint); selectedTrialId.value = job.id;
+    jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)];
+    await router.replace({ query: { ...route.query, candidateId: repair.value.id, trialJobId: job.id, view: 'after' } });
+    setView('after');
+  } catch (reason) { resultError.value = errorPresentation(reason, '取用范围未能生成接回预览').message; }
+  finally { resultBusy.value = false; }
+}
 async function prepare(retry = false) {
   if (!head.value || !draft.value || locked.value || rangeInputInvalid.value) return;
   busy.value = true; error.value = "";
@@ -343,35 +630,54 @@ async function prepare(retry = false) {
     const previous = referenceJob.value;
     preview.value = null;
     referenceJob.value = await api.prepareSegmentReferences(props.projectId, { ...inputs(), retryAfterJobId: retry ? previous?.id : undefined });
-    restoredReference = referenceJob.value.id;
     await router.replace({ query: { ...route.query, referenceJobId: referenceJob.value.id } });
     await load();
   } catch (reason) { fail(reason, "实际参考暂时无法准备"); } finally { busy.value = false; }
 }
 async function generate() {
   if (blockedReason.value || !preview.value || busy.value) return;
-  const frozen = preview.value; busy.value = true; error.value = ""; const scope = `video-edit:${props.projectId}`;
+  const frozen = preview.value; busy.value = true; error.value = ""; const projectId = props.projectId, targetDraft = draftId.value, context = ++submissionContext; const scope = `video-edit:${projectId}:${targetDraft}`;
+  let created: JobDto;
   try {
-    const job = await api.createVideoRepair(props.projectId, { ...inputs(), referencePreparationJobId: frozen.referencePreparationJobId, expectedInputHash: frozen.inputHash, idempotencyKey: pendingIdempotencyKey(scope, frozen.inputHash) });
+    created = await api.createVideoRepair(projectId, { ...inputs(), referencePreparationJobId: frozen.referencePreparationJobId, expectedInputHash: frozen.inputHash, idempotencyKey: pendingIdempotencyKey(scope, frozen.inputHash) });
     settleIdempotencyKey(scope, frozen.inputHash);
-    jobs.value.unshift(job);
-    if (job.videoRepairId) {
-      selectedRepairId.value = job.videoRepairId;
-      selectedTrialId.value = ''; view.value = 'result';
-      await router.replace({ query: { ...route.query, candidateId: job.videoRepairId, trialJobId: undefined, sourceResultId: undefined, referenceJobId: undefined, view: 'result' } });
-    }
-    await load();
   }
   catch (reason) {
     const definiteFailure = reason instanceof ApiError && [400, 401, 403, 404, 409, 422, 503].includes(reason.status);
+    if (definiteFailure) settleIdempotencyKey(scope, frozen.inputHash);
+    if (disposed || context !== submissionContext || projectId !== props.projectId || targetDraft !== draftId.value) return;
     unresolvedSubmission.value = !definiteFailure;
-    if (definiteFailure && reason.status !== 409) settleIdempotencyKey(scope, frozen.inputHash);
     fail(reason, definiteFailure ? "本次修改任务未创建，请检查提示后再操作" : "暂时无法确认修改任务是否已经创建，请重新检查，不要重复提交");
     if (definiteFailure) await load();
-  } finally { busy.value = false; }
+    return;
+  } finally { if (!disposed && context === submissionContext) busy.value = false; }
+  if (!disposed && context === submissionContext && projectId === props.projectId && targetDraft === draftId.value) await acceptCreatedRepair(created);
+}
+async function acceptCreatedRepair(job: JobDto, refresh = true) {
+  if (disposed) return;
+  const projectId = props.projectId, targetDraft = draftId.value;
+  const snapshot = frozenVideoEdit(job, preview.value ?? undefined);
+  if ((job.projectId && job.projectId !== projectId) || (snapshot?.editDraftId && snapshot.editDraftId !== targetDraft) || !job.videoRepairId) return;
+  acceptedJob.value = job;
+  if (snapshot) {
+    acceptedRepair.value = { id: job.videoRepairId, projectId, baseVideoAssetId: snapshot.baseVideoAssetId, baseEditVersionId: snapshot.baseEditVersionId, baseTimelineHash: snapshot.baseTimelineHash, frameRate: snapshot.frameRate, issueRange: snapshot.issueRange, generationRange: snapshot.generationRange, candidateCoreRange: snapshot.candidateCoreRange, providerDurationSeconds: snapshot.providerDurationSeconds, instruction: snapshot.instruction, inputHash: job.inputHash, status: 'generating', preview: snapshot, createdAt: job.createdAt } as VideoRepairDto;
+    if (!repairs.value.some(item => item.id === job.videoRepairId)) repairs.value.unshift(acceptedRepair.value);
+  }
+  jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)];
+  selectedRepairId.value = job.videoRepairId; selectedTrialId.value = ''; view.value = 'result'; unresolvedSubmission.value = false;
+  acceptedNotice.value = `修改任务已创建：${job.id}。执行进度如下。`;
+  try { await router.replace({ query: { ...route.query, candidateId: job.videoRepairId, trialJobId: undefined, view: 'result' } }); }
+  catch { if (!disposed && props.projectId === projectId && draftId.value === targetDraft) acceptedNotice.value = `任务 ${job.id} 已创建，页面地址暂未更新；请通过下方任务卡查看进度。`; }
+  await nextTick();
+  if (disposed || props.projectId !== projectId || draftId.value !== targetDraft || selectedRepairId.value !== job.videoRepairId) return;
+  submissionProgress.value?.focus({ preventScroll: true }); submissionProgress.value?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  if (refresh) await load();
 }
 async function seek(frame: number) {
   if (!Number.isFinite(frame)) return;
+  // A new playback/seek intent supersedes positioning saved by a view switch,
+  // even when the new video's loadeddata event arrives after this action.
+  pendingFrame = null;
   if (view.value === 'comparison') {
     const target = Math.max(mediaOffset.value, Math.min(mediaOffset.value + mediaFrames.value - 1, Math.trunc(frame)));
     currentFrame.value = target;
@@ -421,22 +727,49 @@ async function saveReview(accept = false) {
     error.value = accept ? "已通过验收并正式选择完整视频；原视频和历史选择仍保留。" : "验收记录已保存，未改变正式视频。";
   } catch (reason) { fail(reason, "验收记录未能保存"); } finally { busy.value = false; }
 }
-watch([() => issue.value.startFrame, () => issue.value.endFrame, instruction, endStatePolicy, desiredEndState, generationMode, audioMode, soundDescription, anchorStart, anchorEnd], () => {
+const mediaIdentity = computed(() => JSON.stringify({
+  source: source.value?.id, head: head.value?.id, timelineHash: head.value?.timelineHash,
+  result: inputResult.value?.id, resultHash: inputResult.value?.frozenInput?.timelineHash,
+  issue: issue.value, mode: generationMode.value,
+  anchorStart: generationMode.value === 'from_frame' ? anchorStart.value : null,
+  anchorEnd: generationMode.value === 'from_frame' && endStatePolicy.value === 'match_original' ? anchorEnd.value : null,
+  includeInAnchor: generationMode.value === 'edit_existing' && includeInAnchor.value,
+  includeOutAnchor: endStatePolicy.value === 'match_original',
+  references: generationMode.value === 'edit_existing' ? referenceRoles.value : [],
+  contextMode: generationMode.value === 'edit_existing' ? contextMode.value : null,
+  contextRange: generationMode.value === 'edit_existing' && contextMode.value === 'custom' ? contextRange.value : null,
+}));
+watch(mediaIdentity, () => {
   if (restoringInputs) return;
-  inputRevision += 1;
+  inputRevision += 1; editContractVersion.value = 2;
   const hadReference = !!referenceJob.value || !!preview.value;
   preview.value = null; referenceJob.value = null;
   if (hadReference && route.query.referenceJobId) void router.replace({ query: { ...route.query, referenceJobId: undefined } });
+  queueInputSave();
 }, { flush: 'sync' });
-watch(() => props.workspace.eventCursor, () => void load()); watch(draftId, () => { restoredHead = ""; void load(); });
+watch([instruction, preserveContent, startState, actionProcess, desiredEndState, avoidProblems, endStatePolicy, audioMode, soundDescription, planSourceJobId], () => {
+  if (restoringInputs) return;
+  inputRevision += 1; editContractVersion.value = 2;
+  preview.value = null; queueInputSave();
+}, { flush: 'sync' });
+watch([plannerJobId, () => referenceJob.value?.id], () => { if (!restoringInputs) { inputRevision += 1; queueInputSave(); } }, { flush: 'sync' });
+watch(() => props.workspace.eventCursor, () => void load());
+watch([() => props.projectId, draftId], (_identity, [oldProjectId, oldDraftId]) => {
+  submissionContext += 1; acceptedJob.value = null; acceptedRepair.value = null; acceptedNotice.value = ''; busy.value = false;
+  unresolvedSubmission.value = !!readPendingIdempotency(`video-edit:${props.projectId}:${draftId.value}`);
+  clearTimeout(saveTimer);
+  for (const pending of pendingInputSaves.values()) if (pending.projectId === oldProjectId && pending.draftId === oldDraftId && pending.dirty) void drainInputSave(pending);
+  hydratingInput.value = true; restoredHead = ''; void load();
+});
 watch(() => displayedVideo.value?.id, () => { loop.value = null; currentFrame.value = pendingFrame ?? 0; if (callbackId !== undefined) callbackOwner?.cancelVideoFrameCallback?.(callbackId); callbackOwner = null; });
 onMounted(async () => { unsubscribeJobs = subscribeJobs(() => ({ projectId: props.projectId }), load, () => jobs.value.some(job => job.execution?.waitingForProvider)); });
-onBeforeUnmount(() => { disposed = true; unsubscribeJobs?.(); if (callbackId !== undefined) callbackOwner?.cancelVideoFrameCallback?.(callbackId); });
+onBeforeUnmount(() => { disposed = true; submissionContext += 1; clearTimeout(saveTimer); for (const pending of pendingInputSaves.values()) if (pending.dirty) void drainInputSave(pending); unsubscribeJobs?.(); if (callbackId !== undefined) callbackOwner?.cancelVideoFrameCallback?.(callbackId); });
 </script>
 
 <template>
   <section class="card draft-editor">
     <header><div><h2>视频编辑</h2><small>选区 → 生成修改 → 查看效果 → 应用到草稿</small></div><span v-if="head">当前草稿 v{{ head.revision }}</span></header>
+    <p v-for="(message, key) in navigationSaveErrors" v-show="key !== restoredInputDraft" :key="key" class="notice" role="alert">{{ message }}</p>
     <div v-if="!draftId" class="setup">
       <p>发现问题的视频也可以进入编辑，无需把不通过项改为通过。</p>
       <label><input v-model="confirmReferences" type="checkbox" />仅在历史视频缺少完整参考时，同意使用当前五张参考创建新的绑定。</label>
@@ -450,13 +783,13 @@ onBeforeUnmount(() => { disposed = true; unsubscribeJobs?.(); if (callbackId !==
       <button v-for="item in drafts" :key="item.id" class="secondary" @click="openDraft(item)">继续草稿 · {{ new Date(item.createdAt).toLocaleString('zh-CN') }}</button>
     </div>
     <template v-else-if="head && draft">
-      <div v-if="!draft.referencesConfirmed" class="notice">此草稿未绑定完整身份参考。可选择“从正确起点重新生成”；使用现有片段路径需要先确认参考绑定。</div>
+      <p v-if="hydratingInput" role="status" class="notice">正在恢复草稿输入与关联任务，完成后即可编辑。</p>
       <div class="candidate-workbench">
         <aside class="candidate-list" aria-label="候选素材列表">
           <h3>候选素材</h3><p v-if="!candidateGroups.length">生成结果会保留在这里。</p>
           <section v-for="group in candidateGroups" :key="group.id"><h4>父草稿版本 {{ group.revision ?? '历史' }} {{ group.id === head.id ? '· 当前' : '' }}</h4>
             <button v-for="item in group.items" :key="item.id" class="candidate-card" :class="{ selected: repair?.id === item.id }" :aria-pressed="repair?.id === item.id" @click="chooseCandidate(item)">
-              <video v-if="item.candidateAssetId" :src="`/api/v1/assets/${item.candidateAssetId}/content#t=0.1`" muted preload="metadata" /><b>{{ item.instruction.slice(0, 44) }}{{ item.instruction.length > 44 ? '…' : '' }}</b><small>[{{ item.issueRange.startFrame }}, {{ item.issueRange.endFrame }}) · {{ (item.issueRange.startFrame / 24).toFixed(2) }}–{{ (item.issueRange.endFrame / 24).toFixed(2) }} 秒</small><span>{{ item.candidateAssetId ? '候选已返回' : item.status === 'generating' ? '正在生成' : '生成记录' }}</span>
+              <video v-if="item.candidateAssetId" :src="`/api/v1/assets/${item.candidateAssetId}/content#t=0.1`" muted preload="metadata" /><b>{{ item.instruction.slice(0, 44) }}{{ item.instruction.length > 44 ? '…' : '' }}</b><small>[{{ item.issueRange.startFrame }}, {{ item.issueRange.endFrame }}) · {{ (item.issueRange.startFrame / 24).toFixed(2) }}–{{ (item.issueRange.endFrame / 24).toFixed(2) }} 秒</small><span>{{ candidateStatus(item) }}</span>
               <small>{{ everUsed(item) ? '曾用于草稿' : '尚未用于草稿' }} · {{ inCurrentDraft(item) ? '当前草稿正在使用' : '当前草稿未使用' }}{{ usedAsStart(item) ? ' · 作为独立草稿起点' : '' }}</small><small v-if="item.preview.sourceResultJobId">{{ sourceCandidateName(item) }} → {{ item.id.slice(0, 8) }}</small>
             </button>
           </section>
@@ -469,16 +802,26 @@ onBeforeUnmount(() => { disposed = true; unsubscribeJobs?.(); if (callbackId !==
           <button v-if="view === 'comparison' && repair?.preview.sourceResultJobId" class="secondary" @click="changeComparison">{{ compareOriginal ? '与上一结果比较' : '与开始修改前比较' }}</button>
           <LinkedVideoComparison v-if="view === 'comparison' && beforeSegment && afterSegment" ref="comparisonPlayer" :before="'/api/v1/assets/' + beforeSegment.id + '/content'" :after="'/api/v1/assets/' + afterSegment.id + '/content'" :total-frames="mediaFrames" :frame-offset="mediaOffset" :initial-frame="currentFrame - mediaOffset" :parent-revision="parentVersion?.revision" :before-label="beforeLabel" after-label="本次结果 · 完整有效片段" :stale="trialStale" @frame="currentFrame = $event + mediaOffset" />
           <div v-else-if="displayedVideo" class="player-stage"><video ref="player" :key="displayedVideo.id" :src="'/api/v1/assets/' + displayedVideo.id + '/content'" controls playsinline preload="auto" @loadeddata="loaded" @timeupdate="timeUpdate" @ended="restartLoop" /><small>草稿第 {{ currentFrame }} 帧 · {{ soundState(displayedVideo) }}</small></div>
-          <p v-else class="notice" role="status">{{ resultError || (candidate && view !== 'base' ? '正在准备修改结果与完整效果（本地处理）' : pendingPaidJob ? '模型正在生成修改片段' : '正在准备完整草稿预览（本地处理）') }}</p>
+          <p v-else class="notice" role="status">{{ playerStatus }}</p>
           <div v-if="view === 'base' && !basePreview && baseJob && ['failed','cancelled'].includes(baseJob.status)" class="notice"><p>{{ baseJob.error?.message || '完整预览未准备完成' }}</p><button class="secondary" :disabled="busy" @click="renderPreview(true)">重试本地预览</button></div>
           <div class="transport"><button class="secondary" @click="seek(currentFrame - 1)">← 1 帧</button><button class="secondary" @click="seek(currentFrame + 1)">1 帧 →</button><button class="secondary" @click="playWhole">从头播放</button><button class="secondary" @click="playSelection">循环修改区间</button><button v-if="trialVideo || view === 'base'" class="secondary" @click="playJunction">查看接头</button><button class="secondary" @click="loop = null; comparisonPlayer?.stopLoop()">停止循环</button></div>
-          <FrameTimeline :model-value="activeRange" @update:model-value="issue = $event" :total-frames="totalFrames" :current-frame="currentFrame" :disabled="locked || view !== 'base'" :min-duration-frames="96" @invalid="rangeInputInvalid = $event" :allowed-range="view === 'base' ? sourceRange : undefined" :context="view === 'base' ? sourceRange ?? preview?.generationRange : resultRange" :thumbnails="thumbnails" :segments="appliedSegments" compact label="草稿时间轴 · 本次修改" @seek="seek" @play="playSelection" />
+          <FrameTimeline :model-value="activeRange" @update:model-value="issue = $event" :total-frames="totalFrames" :current-frame="currentFrame" :disabled="locked || view !== 'base'" :min-duration-frames="1" @invalid="rangeInputInvalid = $event" :allowed-range="view === 'base' ? sourceRange : undefined" :context="view === 'base' ? sourceRange ?? preview?.generationRange : resultRange" :thumbnails="thumbnails" :segments="appliedSegments" compact label="草稿时间轴 · 本次修改" @seek="seek" @play="playSelection" />
           <p v-if="segmentView" class="range-mapping">候选完整有效范围 [{{ resultRange.startFrame }}, {{ resultRange.endFrame }}) · {{ mediaFrames }} 帧；本次内部修改 [{{ activeRange.startFrame }}, {{ activeRange.endFrame }}) · 查看期间范围固定</p>
           <template v-if="view !== 'base' && repair">
             <p class="sound-strip">{{ audioPolicy === 'preserve_current' ? '沿用本次修改起点的声音' : '使用修改片段的声音' }}</p>
+            <details v-if="candidate" class="candidate-take"><summary>查看完整候选并调整取用起点</summary>
+              <video ref="rawCandidatePlayer" :src="'/api/v1/assets/' + candidate.id + '/content'" controls playsinline preload="metadata" />
+              <p>完整候选 {{ candidateFrames }} 帧；本次取用 {{ takeLength }} 帧。调整后可重新查看接回效果。</p>
+              <label>候选取用起点（帧）<input v-model.number="takeStart" aria-label="候选取用起点" type="number" min="0" :max="candidateFrames - takeLength" :disabled="resultBusy" /></label>
+              <button class="secondary" :disabled="resultBusy" @click="takeStart = Math.round((rawCandidatePlayer?.currentTime ?? 0) * 24)">使用候选当前播放位置</button>
+              <p>候选取用 [{{ takeStart }}, {{ takeStart + takeLength }}) → 草稿替换 [{{ repair.issueRange.startFrame }}, {{ repair.issueRange.endFrame }})</p>
+              <label>接回声音<select v-model="audioPolicy" :disabled="resultBusy"><option value="preserve_current">保留本次修改起点声音</option><option value="use_candidate" :disabled="!candidate.metadata.hasAudio">使用候选声音</option></select></label>
+              <div v-if="audioPolicy === 'use_candidate'"><label>声音淡入（毫秒）<input v-model.number="fadeIn" type="number" min="0" max="500" /></label><label>声音淡出（毫秒）<input v-model.number="fadeOut" type="number" min="0" max="500" /></label></div>
+              <p v-if="takeError" role="alert">{{ takeError }}</p>
+              <button class="secondary" data-testid="preview-candidate-take" :disabled="resultBusy || !!takeError || repair.baseEditVersionId !== head.id" @click="previewTake">按此取用范围预览完整效果（本地免费）</button>
+            </details>
             <p v-if="repair.baseEditVersionId !== head.id" class="notice">此结果来自旧父版本，可查看，不能应用到已变化的草稿。</p>
-            <p v-if="resultRange.endFrame - resultRange.startFrame < 96" class="notice">此历史结果不足 4 秒，可查看，不能在内部继续生成；不会自动扩大范围。</p>
-            <p v-if="trialStale && trial" class="notice">此预览对应上一份声音方案，当前结果尚未准备完成。</p>
+            <p v-if="trialStale && trial" class="notice">此预览对应之前的取用范围或声音方案，请按当前设置重新预览。</p>
             <div v-if="candidate && repair.preview.audioMode === 'generate_candidate' && !candidate.metadata.hasAudio" class="notice"><p>已请求声音，但候选没有返回音轨。原始素材仍保留。</p><button class="secondary" :disabled="resultBusy" @click="prepareResult(true)">保留原声并准备结果</button></div>
             <p v-if="resultError && displayedVideo" class="notice" role="alert">{{ resultError }}</p><button v-if="resultError && !resultBusy && (!trial || !['failed','cancelled'].includes(trial.status))" class="secondary" @click="prepareResult()">重新检查本地结果</button>
             <div v-if="trial && ['failed','cancelled'].includes(trial.status)" class="notice"><p>本地处理未完成：{{ trial.error?.message }}</p><button class="secondary" :disabled="resultBusy" @click="prepareResult(false, true)">重试本地处理</button></div>
@@ -487,11 +830,62 @@ onBeforeUnmount(() => { disposed = true; unsubscribeJobs?.(); if (callbackId !==
           </template>
         </div>
       </div>
-      <div v-if="view === 'base'" class="form"><h3>描述本次修改</h3><details><summary>生成方式与起止状态</summary><label>生成路径<select v-model="generationMode" :disabled="locked"><option value="edit_existing">修改现有片段</option><option value="from_frame">从正确起点重新生成</option></select></label><p v-if="generationMode === 'edit_existing'">发送本次实际输入时间线的上下文及来源参考。继续修改时包含上一结果的画面。入点、出点图片通过提示词说明用途，属于普通参考，并非严格首尾帧约束；错误动作仍存在于参考视频中。</p><template v-else><p>仅发送明确选定的正确起始帧和可选结束帧，不发送原动作视频或五张身份参考。动作有更多重新生成空间，但原运动与独立身份约束会减少。</p><label>正确起始帧<input :value="anchorStart" @input="anchorStart = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)" type="number" min="0" :max="totalFrames - 1" :disabled="locked" /></label><button class="secondary" :disabled="locked || view !== 'base'" @click="anchorStart = currentFrame">使用正在查看的帧作为正确起点</button><label v-if="endStatePolicy !== 'replace'">确认正确的结束帧（可留空）<input :value="anchorEnd" type="number" min="0" :max="totalFrames - 1" :disabled="locked" @input="anchorEnd = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)" /></label></template><label>结束状态策略<select v-model="endStatePolicy" :disabled="locked"><option value="match_original">匹配原结束状态（原来的结尾正确）</option><option value="replace">替换结束状态（原来的结尾也需要修改）</option></select></label><label v-if="endStatePolicy === 'replace'">期望的结束状态<textarea v-model="desiredEndState" rows="2" :disabled="locked" /></label><p v-if="issue.endFrame === totalFrames">本次修改到片尾，出点接缝检查不适用。{{ endStatePolicy === 'replace' ? '不会强制匹配原来的错误尾帧。' : '' }}</p></details><label>本次声音生成<select v-model="audioMode" :disabled="locked"><option value="preserve_current">保留本次修改起点声音</option><option value="generate_candidate">生成并替换选区声音</option></select></label><label v-if="audioMode === 'generate_candidate'">修改后的声音描述<textarea v-model="soundDescription" rows="2" :disabled="locked" placeholder="补充与新动作对应的环境、物件、动作声音；有音乐或对白设计时照实填写。" /></label><p v-if="audioMode === 'generate_candidate'">请求原生混合音轨，不传原混合声音参考。实际未返回声音时保留素材，不自动重试；可明确选择保留父草稿声音后继续。</p><label>希望修改什么<textarea v-model="instruction" rows="4" :disabled="locked" placeholder="改变什么：…；保留什么：…；起始状态：…；结束状态：…。大幅改变动作时可选严格起始帧。" /></label><button class="secondary" :disabled="locked || rangeInputInvalid || !instruction.trim() || !isValidIssueRange(issue, totalFrames)" @click="prepare()">准备并检查实际参考（本地免费）</button></div>
-      <section v-if="referenceJob && view === 'base'" class="prompt-preview" aria-label="实际参考准备"><h3>实际参考准备 · {{ jobPresentation(referenceJob.status).label }}</h3><p>只进行本地处理；刷新后可恢复，不调用模型。</p><p v-if="referenceJob.error">{{ referenceJob.error.message }}</p><button v-if="['failed','cancelled'].includes(referenceJob.status)" class="secondary" @click="prepare(true)">重试本地参考准备</button><template v-if="referenceVideo"><video class="reference-player" :src="'/api/v1/assets/' + referenceVideo.id + '/content'" controls preload="metadata" /><p>实际参考：{{ referenceVideo.metadata.width }}×{{ referenceVideo.metadata.height }} · {{ referenceVideo.metadata.durationFrames }} 帧 / {{ (Number(referenceVideo.metadata.durationFrames) / 24).toFixed(3) }} 秒 · 已移除声音 · 尾部补帧 {{ referenceVideo.metadata.paddedTailFrames }}</p><p>来源：{{ startingLabel }} · 输入范围 [{{ referenceVideo.metadata.sourceStartFrame }}, {{ referenceVideo.metadata.sourceEndFrame }})；模型输出规格维持 480p。</p></template></section>
-      <section v-if="preview && view === 'base'" class="prompt-preview" ><h3>本次修改预览</h3><p>本次已准备、提交时发送的输入：{{ preview.generationMode === 'from_frame' ? '严格帧模式，不发送参考视频' : '本次输入结果上下文（无声）与普通图像参考' }} · {{ preview.audioMode === 'generate_candidate' ? '要求生成原生声音' : '不要求生成声音' }}</p><dl><dt>问题／替换区间</dt><dd>[{{ preview.issueRange.startFrame }}, {{ preview.issueRange.endFrame }}) · {{ (preview.issueRange.startFrame / 24).toFixed(3) }}–{{ (preview.issueRange.endFrame / 24).toFixed(3) }} 秒</dd><dt>模型生成上下文</dt><dd>[{{ preview.generationRange.startFrame }}, {{ preview.generationRange.endFrame }}) · 模型生成 {{ preview.providerDurationSeconds }} 秒</dd><dt>自动生成修改片段</dt><dd>[{{ preview.candidateCoreRange.startFrame }}, {{ preview.candidateCoreRange.endFrame }}) · 与替换区间等长</dd></dl><p>返回后按本次冻结范围自动准备结果。原片保持 {{ totalFrames }} 帧，未改动区间保持原时间线。</p><details><summary>完整修改指令</summary><pre>{{ preview.prompt }}</pre><p>需要避免的问题：{{ preview.negativePrompt }}</p></details><details><summary>本次将发送的实际图片</summary><div class="references"><figure v-for="reference in preview.imageReferences" :key="reference.role"><img v-if="reference.assetId" :src="`/api/v1/assets/${reference.assetId}/content`" :alt="reference.role" /><figcaption>{{ reference.role === 'first_frame' ? `严格首帧 · 第 ${reference.frameNumber} 帧` : reference.role === 'last_frame' ? `严格尾帧 · 第 ${reference.frameNumber} 帧` : reference.role === 'anchor_in' ? `入点参考 · 第 ${reference.frameNumber} 帧` : reference.role === 'anchor_out' ? `出点参考 · 第 ${reference.frameNumber} 帧` : ({ episode_child: '儿童', episode_cat: '猫咪', pair_scale: '人猫比例', environment: '环境', style_board: '画风' } as Record<string, string>)[reference.role] }}</figcaption></figure></div></details><details><summary>技术详情</summary><p>输入标识 {{ preview.inputHash }} · 模型 {{ preview.model }}</p><p>草稿版本 {{ preview.baseEditVersionId }} · 完整时间线 {{ preview.baseTimelineHash }}</p></details></section>
+      <div v-if="view === 'base'" class="form">
+        <h3>当前修改方案</h3><p>此处保留当前编辑输入；所选任务的实际输入在下方独立展示。</p>
+        <div class="edit-strategies">
+          <label>生成方式<select v-model="generationMode" aria-label="生成方式" :disabled="locked"><option value="edit_existing">修改现有片段</option><option value="from_frame">从正确起点重新生成</option></select></label>
+          <label>结束状态策略<select v-model="endStatePolicy" aria-label="结束状态策略" :disabled="locked"><option value="follow_instruction">按修改描述结束（默认）</option><option value="match_original">保留原结束状态</option><option value="replace">使用新的结束状态</option></select></label>
+        </div>
+        <p>{{ endStatePolicy === 'match_original' ? '已选择保留原结束状态；实际发送的结束参考会在下方显示，请确认图片中的状态正确。' : '结束状态按当前修改方案描述，不发送原出点图片。' }}</p>
+        <p v-if="issue.endFrame === totalFrames">本次修改到片尾，出点接缝检查不适用。</p>
+        <label>修改目标<textarea v-model="instruction" aria-label="修改目标" rows="4" maxlength="4000" :disabled="locked" placeholder="写明希望改成什么。可以直接填写后生成，也可以使用下方可选的 AI 整理。" /></label>
+        <label>期望结束状态{{ endStatePolicy === 'replace' ? '（必填）' : '（可选）' }}<textarea v-model="desiredEndState" aria-label="期望结束状态" rows="2" maxlength="4000" :disabled="locked" /></label>
+        <details class="edit-details"><summary>补充保留内容、起始状态与动作过程（可选）</summary>
+          <label>保留内容<textarea v-model="preserveContent" aria-label="保留内容" rows="2" maxlength="4000" :disabled="locked" /></label>
+          <label>起始状态<textarea v-model="startState" aria-label="起始状态" rows="2" maxlength="4000" :disabled="locked" /></label>
+          <label>动作过程<textarea v-model="actionProcess" aria-label="动作过程" rows="3" maxlength="4000" :disabled="locked" /></label>
+          <label>需要避免的问题<textarea v-model="avoidProblems" aria-label="需要避免的问题" rows="2" maxlength="4000" :disabled="locked" /></label>
+        </details>
+        <VideoEditPlanner :key="draft.id" :project-id="projectId" :command="plannerCommand" :job-id="plannerJobId" :disabled="locked" :blocked-reason="paidModelBlockedReason(runtime)" @job="plannerJobId = $event" @adopt="adoptPlan" />
+        <section v-if="generationMode === 'edit_existing'" class="reference-options" aria-label="来源参考选择">
+          <p>使用当前实际时间线的视频参考。入点和出点图片是衔接参考；修改目标与原画面冲突时，以当前方案为准。</p>
+          <label class="check-option"><input v-model="includeInAnchor" aria-label="使用入点衔接参考" type="checkbox" :disabled="locked" />使用选区入点的衔接参考（起点有问题时可关闭）</label>
+          <div class="frozen-references"><label v-for="reference in draft.references" :key="String(reference.role)" class="reference-choice"><input v-model="referenceRoles" type="checkbox" :value="reference.role" :disabled="locked" /><img :src="'/api/v1/assets/' + reference.assetId + '/content'" :alt="referenceLabels[String(reference.role)] || String(reference.role)" /><span>{{ referenceLabels[String(reference.role)] || reference.role }}</span></label></div>
+          <p v-if="!draft.references?.length">来源草稿没有冻结的角色或场景参考；本次仅使用所选视频和衔接图片。</p>
+          <label>参考视频范围<select v-model="contextMode" aria-label="参考视频范围" :disabled="locked"><option value="auto">满足模型输入能力的最小范围</option><option value="selection">仅选区</option><option value="custom">自行设置上下文范围</option></select></label>
+          <div v-if="contextMode === 'custom'" class="edit-strategies"><label>参考起点帧<input v-model.number="contextRange.startFrame" aria-label="参考起点帧" type="number" min="0" :max="issue.startFrame" :disabled="locked" /></label><label>参考出点帧（不包含）<input v-model.number="contextRange.endFrame" aria-label="参考出点帧" type="number" :min="issue.endFrame" :max="totalFrames" :disabled="locked" /></label></div>
+          <p>上下文只用于提供参考，替换选区保持 [{{ issue.startFrame }}, {{ issue.endFrame }})。仅选区不足模型输入时，可补充上下文或选择从正确起点重新生成。</p>
+        </section>
+        <section v-else class="reference-options" aria-label="正确起点选择">
+          <p>使用你选定的起始图片重新生成动作。实际输入为首帧和适用时的尾帧。</p>
+          <label>正确起始帧<input :value="anchorStart" aria-label="正确起始帧" @input="anchorStart = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)" type="number" min="0" :max="totalFrames - 1" :disabled="locked" /></label>
+          <button class="secondary" :disabled="locked" @click="anchorStart = currentFrame">使用正在查看的帧作为正确起点</button>
+          <label v-if="endStatePolicy === 'match_original' && issue.endFrame - issue.startFrame >= 96 && (issue.endFrame - issue.startFrame) % 24 === 0">确认正确的结束帧（可留空）<input :value="anchorEnd" aria-label="正确结束帧" type="number" min="0" :max="totalFrames - 1" :disabled="locked" @input="anchorEnd = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)" /></label>
+          <p v-if="issue.endFrame - issue.startFrame < 96 || (issue.endFrame - issue.startFrame) % 24 !== 0">这次只取用部分模型输出，使用首帧与文字结束目标。可在“期望结束状态”描述取用区间的结尾。</p>
+        </section>
+        <label>本次声音生成<select v-model="audioMode" :disabled="locked"><option value="preserve_current">保留本次修改起点声音</option><option value="generate_candidate">生成并替换选区声音</option></select></label>
+        <label v-if="audioMode === 'generate_candidate'">修改后的声音描述<textarea v-model="soundDescription" rows="2" maxlength="2000" :disabled="locked" /></label>
+        <p v-if="audioMode === 'generate_candidate'">请求原生混合音轨。没有返回声音时，可选择保留本次修改起点声音。</p>
+        <div class="input-save"><span aria-live="polite">{{ saveState }}</span><button class="secondary" :disabled="savingInput || saveConflict" @click="saveInput">保存当前输入</button><button v-if="saveConflict" class="secondary" @click="readSavedInput">读取已保存输入进行比较</button></div>
+        <section v-if="remoteInput" class="input-conflict"><h4>已保存的编辑输入</h4><pre>{{ remoteInput.editingInput }}</pre><button class="secondary" @click="resolveInputConflict(true)">载入这份输入</button><button class="secondary" @click="resolveInputConflict(false)">保留当前输入并保存为新修订</button></section>
+        <button v-if="referenceJob?.status === 'succeeded'" class="secondary" data-testid="refresh-edit-prompt" :disabled="locked || !instruction.trim()" @click="refreshPrompt">更新最终指令预览（复用已准备参考）</button>
+        <button v-else class="secondary" data-testid="prepare-references" :disabled="locked || rangeInputInvalid || !instruction.trim() || !isValidIssueRange(issue, totalFrames)" @click="prepare()">准备并检查实际参考（本地免费）</button>
+      </div>
+      <section v-if="referenceJob && view === 'base'" class="prompt-preview" aria-label="实际参考准备"><h3>当前方案的参考准备 · {{ jobExecutionPresentation(referenceJob).label }}</h3><p>按来源时间线裁切参考视频并提取图片；这是免费素材准备，刷新后可恢复，不调用模型。</p><p v-if="referenceJob.error">{{ referenceJob.error.message }}</p><button v-if="['failed','cancelled'].includes(referenceJob.status)" class="secondary" @click="prepare(true)">重试本地参考准备</button><template v-if="referenceVideo"><video class="reference-player" :src="'/api/v1/assets/' + referenceVideo.id + '/content'" controls preload="metadata" /><p>实际参考：{{ referenceVideo.metadata.width }}×{{ referenceVideo.metadata.height }} · {{ referenceVideo.metadata.durationFrames }} 帧 / {{ (Number(referenceVideo.metadata.durationFrames) / 24).toFixed(3) }} 秒 · 已移除声音 · 尾部补帧 {{ referenceVideo.metadata.paddedTailFrames }}</p><p>来源：{{ startingLabel }} · 输入范围 [{{ referenceVideo.metadata.sourceStartFrame }}, {{ referenceVideo.metadata.sourceEndFrame }})；模型输出规格维持 480p。</p></template></section>
+      <section v-if="preview && view === 'base'" class="prompt-preview" ><h3>当前方案的提交预览</h3><p>本次已准备、提交时发送的输入：{{ preview.generationMode === 'from_frame' ? '严格帧模式，不发送参考视频' : '本次输入结果上下文（无声）与普通图像参考' }} · {{ preview.audioMode === 'generate_candidate' ? '要求生成原生声音' : '不要求生成声音' }}</p><dl><dt>问题／替换区间</dt><dd>[{{ preview.issueRange.startFrame }}, {{ preview.issueRange.endFrame }}) · {{ (preview.issueRange.startFrame / 24).toFixed(3) }}–{{ (preview.issueRange.endFrame / 24).toFixed(3) }} 秒</dd><dt>来源参考区间</dt><dd>[{{ preview.generationRange.startFrame }}, {{ preview.generationRange.endFrame }}) · 模型生成 {{ preview.providerDurationSeconds }} 秒</dd><dt>候选默认取用区间</dt><dd>[{{ preview.candidateCoreRange.startFrame }}, {{ preview.candidateCoreRange.endFrame }}) · 与替换区间等长</dd></dl><p>返回后按本次范围准备本地预览，也可人工调整取用起点。原片保持 {{ totalFrames }} 帧，未改动区间保持原时间线。</p><ProviderPrompt :historical="repair?.preview.inputHash === preview.inputHash" :compiled-provider-prompt="preview.compiledProviderPrompt" :prompt="preview.prompt" :negative-prompt="preview.negativePrompt" :warnings="preview.warnings" /><details :open="preview.endStatePolicy === 'match_original'"><summary>本次将发送的实际图片（按发送顺序）</summary>
+        <div class="references"><figure v-for="(reference, index) in preview.imageReferences" :key="reference.role">
+          <img v-if="reference.assetId" :src="`/api/v1/assets/${reference.assetId}/content`" :alt="reference.role" />
+          <figcaption>图片 {{ index + 1 }} · {{ reference.role === 'first_frame' ? '严格首帧' : reference.role === 'last_frame' ? '严格尾帧' : reference.role === 'anchor_in' ? '入点衔接参考' : reference.role === 'anchor_out' ? '出点衔接参考' : referenceLabels[reference.role] }}
+            <template v-if="reference.frameNumber != null"><br />草稿第 {{ reference.frameNumber }} 帧<template v-if="reference.role === 'anchor_in' || reference.role === 'anchor_out'"><br />参考片段内 {{ ((reference.frameNumber - preview.generationRange.startFrame) / 24).toFixed(3) }} 秒</template></template>
+          </figcaption>
+        </figure></div>
+      </details><details><summary>技术详情</summary><p>输入标识 {{ preview.inputHash }} · 模型 {{ preview.model }}</p><p>草稿版本 {{ preview.baseEditVersionId }} · 完整时间线 {{ preview.baseTimelineHash }}</p></details></section>
       <div v-if="view === 'base'" class="submit"><p>本次操作产生一次模型费用；不自动重试。<br /><span>{{ blockedReason }}</span></p><button class="primary" :disabled="Boolean(blockedReason) || busy" @click="generate">生成修改结果（付费）</button></div>
-      <JobStatusCard v-if="repairJob" :job-id="repairJob.id" title="局部修改任务" @replacement="load" />
+      <VideoEditTaskDetails v-if="selectedSnapshot" :snapshot="selectedSnapshot" :job="repairJob" :assets="assets" :reuse-disabled="reuseDisabled" @reuse="reuseParameters" />
+      <section v-if="repairJob" ref="submissionProgress" class="submission-progress" tabindex="-1" aria-label="局部修改执行进度">
+        <p v-if="acceptedNotice && acceptedJob?.id === repairJob.id" role="status">{{ acceptedNotice }}</p>
+        <JobStatusCard :job-id="repairJob.id" title="局部修改任务" @changed="load" @replacement="acceptCreatedRepair" />
+      </section>
       <details class="acceptance-panel"><summary>验收与导出 · 当前完整草稿</summary><section v-if="basePreview" class="review"><h3>当前完整草稿的验收</h3><p>可以保存不通过项，继续修复；只有真正全部通过后才能正式选择。</p><div class="checks"><label v-for="(label, key) in labels" :key="key">{{ label }}<select v-model="checks[key]"><option value="">未判断</option><option value="pass">通过</option><option value="warning">需留意</option><option value="fail">不通过</option></select></label></div><div v-if="needsSoundReview" class="checks"><label v-for="(label, key) in audioLabels" :key="key">{{ label }}<select v-model="audioChecks[key]"><option value="">未判断</option><option value="pass">通过</option><option value="warning">需留意</option><option value="fail">不通过</option><option v-if="key !== 'soundIntent' && basePreview.metadata.hasAudio === false" value="not_applicable">无音轨，不适用</option></select></label></div><label>问题备注（关联当前所选区间）<textarea v-model="notes" rows="3" /></label><button class="secondary" :disabled="busy" @click="saveReview(false)">保存问题与验收记录</button><button class="primary" :disabled="busy || !allPass" @click="saveReview(true)">验收通过并正式选择完整视频</button></section>
       <details class="history"><summary>来源问题记录与不可变版本历史</summary><p v-for="review in reviews" :key="review.id">{{ review.notes }} <span v-for="item in review.issues" :key="item.note">[{{ item.range.startFrame }}, {{ item.range.endFrame }}) {{ item.note }}</span></p><p v-for="edit in edits.filter(item => item.editDraftId === draftId)" :key="edit.id">草稿版本 {{ edit.revision }} · {{ new Date(edit.createdAt).toLocaleString('zh-CN') }} · {{ edit.id === head.id ? '当前编辑' : '历史保留' }}</p></details>
     </details></template>
@@ -504,6 +898,7 @@ onBeforeUnmount(() => { disposed = true; unsubscribeJobs?.(); if (callbackId !==
 .setup,.toolbar,.form,.prompt-preview,.submit,.comparison,.review,.history { padding: 20px 24px; }.toolbar,.submit { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }.submit { justify-content: space-between; background: #fbf4ed; }.setup { display: grid; gap: 14px; }.setup input { width: auto; }
 .player-stage { display: grid; justify-items: center; gap: 12px; background: #292622; color: white; padding: 20px; }.player-stage video { height: clamp(150px, 31vh, 320px); max-width: 100%; background: #111; }.player-stage button { margin: 3px; }
 .form { display: grid; gap: 14px; border-block: 1px solid var(--line); }.form label,.review > label { display: grid; gap: 8px; }textarea { width: 100%; }.prompt-preview { background: #fffdf9; overflow-wrap: anywhere; }pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; }dl { display: grid; grid-template-columns: 160px 1fr; gap: 10px; }dd { margin: 0; }.references { display: flex; gap: 12px; overflow-x: auto; }figure { margin: 0; min-width: 100px; max-width: 130px; }figure img { width: 100%; height: 100px; object-fit: contain; }figcaption { font-size: 12px; }.notice { margin: 12px 24px; }details { margin-top: 12px; }summary { cursor: pointer; font-weight: 600; }code { overflow-wrap: anywhere; }
+.edit-strategies { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }.edit-details label { margin-top:12px; }.reference-options { display:grid; gap:12px; border-top:1px solid var(--line); padding-top:12px; }.form .check-option { display:flex; align-items:center; gap:8px; }.check-option input,.reference-choice input { width:auto; }.frozen-references { display:flex; flex-wrap:wrap; gap:12px; }.reference-choice { width:120px; padding:10px; border:1px solid var(--line); border-radius:8px; }.reference-choice img { width:100%; height:90px; object-fit:contain; }.input-save { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }.input-save span { color:var(--muted); }.input-conflict pre { max-height:300px; overflow:auto; }.candidate-take { margin:12px 18px; padding:14px; background:#f8f4ed; border-radius:8px; }.candidate-take video { display:block; max-height:320px; max-width:100%; margin-top:12px; }.candidate-take label { display:inline-flex; align-items:center; gap:8px; margin:8px; }.candidate-take input { width:110px; }.candidate-take button { margin:6px; }@media(max-width:700px) { .edit-strategies { grid-template-columns:1fr; } }
 .comparison { border: 1px solid #d9b79e; margin: 20px; border-radius: 12px; }.comparison button,.review button { margin: 8px 8px 0 0; }.checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }.checks label { display: flex; justify-content: space-between; align-items: center; gap: 10px; }.checks select { width: 110px; }@media (max-width: 900px) { .checks { grid-template-columns: 1fr; }dl { grid-template-columns: 1fr; }header { flex-direction: column; } }
 .candidate-workbench { display: grid; grid-template-columns: 240px minmax(0, 1fr); border-block: 1px solid var(--line); }
 .candidate-list { padding: 18px; background: #f7f3ef; border-right: 1px solid var(--line); max-height: 850px; overflow-y: auto; }

@@ -53,6 +53,7 @@ describe("AssetsStep", () => {
   const runtime = { provider: { apiKeyConfigured: true, paidCallsEnabled: true } };
   beforeEach(() => {
     vi.clearAllMocks();
+    client.job.mockReset();
     vi.stubGlobal("EventSource", class { addEventListener() {} close() {} });
     client.assets.mockResolvedValue([]);
     client.environmentDraft.mockResolvedValue({ revision: 0, mode: "description", sourceStoryVersionId: "story-1", description: "雨天玄关和吸水脚垫", prompt: null, negativePrompt: null, sourceAssetId: null });
@@ -75,6 +76,98 @@ describe("AssetsStep", () => {
       expectedCostMicros: null, costEstimateStatus: "unmetered_paid", warnings: [],
     });
     client.createAssetGeneration.mockResolvedValue({ id: "job-1", status: "queued" });
+  });
+
+  it("displays image preview advice separately and switches from a frozen final prompt to an honest historical record", async () => {
+    const final = "已冻结环境\n避免项：额外主体\n参考图 1：仅画风\n";
+    const previewFinal = "当前空场景\n参考图 1：画风\n";
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const originalPreview = await client.previewAssetGeneration();
+    client.previewAssetGeneration.mockResolvedValue({ ...originalPreview, compiledProviderPrompt: previewFinal, warnings: [{ code: "SPATIAL_REVIEW", message: "人工核对空间留白" }] });
+    client.assets.mockResolvedValue([
+      { id: "new-environment", role: "environment", mediaType: "image", metadata: {}, producingJobId: "new-image-job" },
+      { id: "old-environment", role: "environment", mediaType: "image", metadata: {}, producingJobId: "old-image-job" },
+    ]);
+    client.job.mockImplementation(async id => ({ imageInputSnapshot: id === "new-image-job"
+      ? { schemaVersion: 3, compiledProviderPrompt: final, prompt: "冻结正文", negativePrompt: "冻结避免项" }
+      : { schemaVersion: 1, prompt: "历史正文", negativePrompt: "历史避免项" },
+    }));
+    const wrapper = mount(AssetsStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()], stubs: { teleport: true } } });
+    await flushPromises();
+    expect(wrapper.get(".compiled-provider-prompt").element.textContent).toBe(previewFinal);
+    expect(wrapper.get('[aria-label="制作审查建议"]').text()).toContain("人工核对空间留白");
+    await wrapper.findAll("button").find(button => button.text() === "复制最终模型指令")!.trigger("click");
+    expect(writeText).toHaveBeenLastCalledWith(previewFinal);
+    await wrapper.findAll(".environment-candidates .image-open")[0].trigger("click");
+    await flushPromises();
+    const viewer = wrapper.get('[role="dialog"]');
+    expect(viewer.get(".compiled-provider-prompt").element.textContent).toBe(final);
+    await viewer.findAll("button").find(button => button.text() === "复制最终模型指令")!.trigger("click");
+    expect(writeText).toHaveBeenLastCalledWith(final);
+    await viewer.get('[aria-label="下一张候选"]').trigger("click");
+    await flushPromises();
+    expect(viewer.find(".compiled-provider-prompt").exists()).toBe(false);
+    expect(viewer.text()).toContain("旧任务未记录最终模型指令");
+    expect(viewer.text()).not.toContain("已冻结环境");
+    expect(viewer.text()).not.toContain("当前空场景");
+    await viewer.findAll("button").find(button => button.text() === "复制已记录正文（非完整指令）")!.trigger("click");
+    expect(writeText).toHaveBeenLastCalledWith("历史正文");
+    wrapper.unmount();
+  });
+
+  it("displays and copies a non-environment candidate's versioned frozen final prompt without an image snapshot", async () => {
+    const final = "  已冻结角色原貌 ABC 123\n避免项：多余手指\n图1：提供角色身份\n";
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fixedWorkspace: WorkspaceDto = { ...workspace, selections: { ...workspace.selections,
+      episode_child: { ...workspace.selections.episode_child!, producingJobId: "fixed-image-job" },
+    } };
+    client.job.mockResolvedValue({ frozenInput: { providerPromptVersion: 1, compiledProviderPrompt: final, prompt: "仅冻结正文" } });
+    const wrapper = mount(AssetsStep, { props: { projectId: "project-1", workspace: fixedWorkspace, runtime }, global: { plugins: [createPinia()], stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.findAll(".candidates.inherited .image-open")[0].trigger("click");
+    await flushPromises();
+    expect(client.job).toHaveBeenCalledWith("fixed-image-job");
+    const viewer = wrapper.get('[role="dialog"]');
+    expect(viewer.get(".compiled-provider-prompt").element.textContent).toBe(final);
+    expect(viewer.text()).not.toContain("旧任务未记录");
+    expect(viewer.text()).not.toContain("仅冻结正文");
+    await viewer.findAll("button").find(button => button.text() === "复制最终模型指令")!.trigger("click");
+    expect(writeText).toHaveBeenLastCalledWith(final);
+    wrapper.unmount();
+  });
+
+  it("does not infer a final prompt from an unversioned historical frozen input", async () => {
+    const fixedWorkspace: WorkspaceDto = { ...workspace, selections: { ...workspace.selections,
+      episode_child: { ...workspace.selections.episode_child!, producingJobId: "historical-fixed-image-job" },
+    } };
+    client.job.mockResolvedValue({ frozenInput: { compiledProviderPrompt: "没有版本标记的文本", prompt: "历史拼装输入" } });
+    const wrapper = mount(AssetsStep, { props: { projectId: "project-1", workspace: fixedWorkspace, runtime }, global: { plugins: [createPinia()], stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.findAll(".candidates.inherited .image-open")[0].trigger("click");
+    await flushPromises();
+    const viewer = wrapper.get('[role="dialog"]');
+    expect(viewer.find(".compiled-provider-prompt").exists()).toBe(false);
+    expect(viewer.text()).toContain("旧任务未记录最终模型指令");
+    expect(viewer.text()).not.toContain("没有版本标记的文本");
+    expect(viewer.text()).not.toContain("历史拼装输入");
+    expect(viewer.findAll("button").some(button => button.text() === "复制最终模型指令")).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("distinguishes an unreadable image job from a historical missing prompt", async () => {
+    client.assets.mockResolvedValue([{ id: "unreadable", role: "environment", mediaType: "image", metadata: {}, producingJobId: "offline-job" }]);
+    client.job.mockRejectedValue(new Error("temporary read failure"));
+    const wrapper = mount(AssetsStep, { props: { projectId: "project-1", workspace, runtime }, global: { plugins: [createPinia()], stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.get(".environment-candidates .image-open").trigger("click");
+    await flushPromises();
+    const viewer = wrapper.get('[role="dialog"]');
+    expect(viewer.get('[role="alert"]').text()).toContain("生成指令记录暂时无法读取");
+    expect(viewer.text()).not.toContain("旧任务未记录");
+    expect(viewer.find(".compiled-provider-prompt").exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it("generates an environment directly without a validation-run confirmation", async () => {
@@ -169,12 +262,12 @@ describe("AssetsStep", () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const wrapper = mount(AssetsStep, { props: { projectId: 'project-1', workspace, runtime }, global: { plugins: [createPinia()] } });
     await flushPromises();
-    await wrapper.get('textarea[aria-label="完整 Prompt"]').setValue('只有平躺风车的空场景');
+    await wrapper.get('textarea[aria-label="生成指令正文"]').setValue('只有平躺风车的空场景');
     await wrapper.get('textarea[aria-label="需要避免的问题"]').setValue('不要竖立支架');
     expect(wrapper.get('textarea[aria-label="场景描述"]').attributes('readonly')).toBeDefined();
     const button = wrapper.findAll('button').find(b => b.text() === '返回场景描述模式')!;
     await button.trigger('click');
-    expect((wrapper.get('textarea[aria-label="完整 Prompt"]').element as HTMLTextAreaElement).value).toBe('只有平躺风车的空场景');
+    expect((wrapper.get('textarea[aria-label="生成指令正文"]').element as HTMLTextAreaElement).value).toBe('只有平躺风车的空场景');
     client.saveEnvironmentDraft.mockImplementationOnce(async (_id, value) => ({ ...value, revision: 1 }));
     await wrapper.findAll('button').find(b => b.text() === '保存修改')!.trigger('click');
     await flushPromises();

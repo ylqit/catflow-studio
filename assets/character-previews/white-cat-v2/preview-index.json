@@ -1,0 +1,58 @@
+{
+  "status": "rejected-by-user",
+  "supersededBy": "../white-cat-v3/README.md",
+  "rejectionNote": "User rejected v2; seated references also do not satisfy the explicit five standing-reference deliverables.",
+  "generator": "built-in-imagegen",
+  "runtimeIntegrated": false,
+  "identityMaster": "front-seated-master.png",
+  "hiddenBack": "new aesthetic design completion; not recovered ground truth",
+  "masterByteIdentical": true,
+  "masterSha256": "4eb638ad80effb9410abab5045c84e69abf5bda8a2080b8277183c888bdbefd1",
+  "images": [
+    {
+      "file": "front-seated-master.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "sha256": "4eb638ad80effb9410abab5045c84e69abf5bda8a2080b8277183c888bdbefd1",
+      "bytes": 1899358
+    },
+    {
+      "file": "pair-scale-seated.png",
+      "size": [
+        941,
+        1672
+      ],
+      "sha256": "fd71b39440e422dca8531565a2a28ee3616f095395b898436fa177b806ae68ed",
+      "bytes": 1599851
+    },
+    {
+      "file": "rear-seated-refined.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "sha256": "05466e6190192bdee662161b7c532fdce1a11cb1bff8dcb8de52f735a553eeec",
+      "bytes": 1782510
+    },
+    {
+      "file": "side-seated.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "sha256": "1df767c6da6fd6b6fb5cb3df9c292f3c3b657b0cf89a292c626f1670691585fa",
+      "bytes": 1873866
+    },
+    {
+      "file": "three-view-seated.png",
+      "size": [
+        2172,
+        724
+      ],
+      "sha256": "81f9d0796fa7eaeb9c94859b0f82846e32c59bd3985846aeb6870d7b23f89792",
+      "bytes": 1699141
+    }
+  ]
+}

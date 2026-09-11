@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from catflow.application.provider_config import ProviderRuntime
 from catflow.application.service import StudioService
 from catflow.config import RuntimeConfig, RuntimePaths
+from catflow.infrastructure.ark_provider_reader import ArkProviderTaskReader
 from catflow.infrastructure.database import (
     DatabaseSettings,
     create_database_engine,
@@ -61,6 +62,7 @@ def serve(
         StudioService(
             repository,
             provider_runtime=provider_runtime,
+            provider_task_reader=ArkProviderTaskReader(),
             project_library_repository=PostgresProjectLibraryRepository(sessions),
         ),
         settings=AppSettings(

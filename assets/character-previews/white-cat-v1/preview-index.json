@@ -1,0 +1,44 @@
+{
+  "status": "rejected-identity-drift",
+  "generator": "built-in-imagegen",
+  "runtimeIntegrated": false,
+  "identitySource": "identity-seated.png",
+  "assets": [
+    {
+      "file": "identity-seated.png",
+      "width": 1254,
+      "height": 1254,
+      "role": "seated identity source"
+    },
+    {
+      "file": "front-standing.png",
+      "width": 1254,
+      "height": 1254,
+      "role": "front standing design"
+    },
+    {
+      "file": "side-standing.png",
+      "width": 1536,
+      "height": 1024,
+      "role": "left-facing side standing design"
+    },
+    {
+      "file": "rear-standing.png",
+      "width": 1254,
+      "height": 1254,
+      "role": "rear standing design; unseen markings completed"
+    },
+    {
+      "file": "three-view-board.png",
+      "width": 1983,
+      "height": 793,
+      "role": "human design review only"
+    },
+    {
+      "file": "pair-scale.png",
+      "width": 941,
+      "height": 1672,
+      "role": "child and cat visual scale preview"
+    }
+  ]
+}

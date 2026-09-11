@@ -16,6 +16,7 @@ import type {
   VideoReviewDto,
   GenerationPreviewDto,
   JobDto,
+  ProviderTaskLookupDto, JobRecoveryCommand,
   JobResultDto, GenerationPreparationDto, EnvironmentGenerationDraft, EnvironmentGenerationInput,
   JobUsageDto,
   PlannerSnapshotDto,
@@ -36,7 +37,7 @@ import type {
   SeriesEpisodeDto,
   SeriesEpisodeStoryPreviewDto,
   SeriesAssetBindingDto,
-  SeriesPlanDraft,
+  SeriesPlanMaterializeCommand,
   SeriesPlanPreviewDto,
   SeriesPlanSegmentCommand,
   SeriesPlanSegmentPreviewDto,
@@ -238,7 +239,7 @@ export class CatFlowClient {
   materializeSeriesPlan(
     seriesId: string,
     planVersionId: string,
-    command: { basePlanVersionId: string; plan: SeriesPlanDraft; idempotencyKey: string },
+    command: SeriesPlanMaterializeCommand,
   ): Promise<SeriesPlanVersionDto> {
     return this.json(
       `/api/v1/story-series/${seriesId}/plans/${planVersionId}/materialize`,
@@ -622,8 +623,11 @@ export class CatFlowClient {
     return this.json(`/api/v1/projects/${projectId}/environment-generation-draft`, "PUT", input);
   }
   jobResult(jobId: string): Promise<JobResultDto> { return this.request(`/api/v1/jobs/${jobId}/result`); }
-  recoverJob(jobId: string, action: "query_provider" | "process_result", expectedRevision: number, idempotencyKey: string): Promise<JobDto> {
-    return this.json(`/api/v1/jobs/${jobId}/recovery`, "POST", { action, expectedRevision, idempotencyKey });
+  providerTasks(jobId: string): Promise<ProviderTaskLookupDto> {
+    return this.request(`/api/v1/jobs/${jobId}/provider-tasks`);
+  }
+  recoverJob(jobId: string, command: JobRecoveryCommand): Promise<JobDto> {
+    return this.json(`/api/v1/jobs/${jobId}/recovery`, "POST", command);
   }
   prepareJobReplacement(jobId: string): Promise<GenerationPreparationDto> {
     return this.json(`/api/v1/jobs/${jobId}/replacement-preview`, "POST", {});
@@ -656,6 +660,12 @@ export class CatFlowClient {
   }
   videoEditDrafts(projectId: string): Promise<VideoEditDraftDto[]> {
     return this.request(`/api/v1/projects/${projectId}/video-edit-drafts`);
+  }
+  saveVideoEditInput(projectId: string, draftId: string, command: { expectedRevision: number; editingInput: Record<string, unknown> }): Promise<VideoEditDraftDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/input`, "PATCH", command);
+  }
+  planVideoEdit(projectId: string, command: SegmentRepairPreviewCommand & { idempotencyKey: string }): Promise<JobDto> {
+    return this.json(`/api/v1/projects/${projectId}/video-edits/plans`, "POST", command);
   }
   videoDraftJobs(projectId: string, draftId: string): Promise<JobDto[]> {
     return this.request(`/api/v1/projects/${projectId}/video-edit-drafts/${draftId}/jobs`);

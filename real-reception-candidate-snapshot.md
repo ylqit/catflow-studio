@@ -1,0 +1,250 @@
+- main [ref=e15]:
+  - generic [ref=e18]:
+    - generic [ref=e19]:
+      - link "←" [ref=e20] [cursor=pointer]:
+        - /url: /series/acc45e70-36cf-4574-9c2e-78ae5ec76af9
+      - generic [ref=e21]:
+        - paragraph [ref=e22]:
+          - link "下雨天·新版验证" [ref=e23] [cursor=pointer]:
+            - /url: /series/acc45e70-36cf-4574-9c2e-78ae5ec76af9
+          - text: · 第 3 集
+        - heading "第3集 · 暖灯下听夜雨" [level=1] [ref=e24]
+    - generic [ref=e25]:
+      - generic [ref=e26]: 15s
+      - generic [ref=e27]: 9:16
+  - generic [ref=e29]:
+    - text: 切换剧集
+    - combobox "切换剧集" [ref=e30]:
+      - option "第 1 集 · 雾玻璃上的猫脸"
+      - option "第 2 集 · 顺着水流漂走的纸船"
+      - option "第 3 集 · 暖灯下听夜雨" [selected]
+  - navigation "五步创作流程" [ref=e31]:
+    - link "01 本集剧情 ✓" [ref=e32] [cursor=pointer]:
+      - /url: /projects/b898fd78-1327-4a3c-bc37-10c42e353195/planner
+      - generic [ref=e33]: "01"
+      - generic [ref=e34]: 本集剧情
+      - generic [ref=e36]: ✓
+    - link "02 角色与画风 ✓" [ref=e37] [cursor=pointer]:
+      - /url: /projects/b898fd78-1327-4a3c-bc37-10c42e353195/assets
+      - generic [ref=e38]: "02"
+      - generic [ref=e39]: 角色与画风
+      - generic [ref=e41]: ✓
+    - link "03 分镜画布 ✓" [ref=e42] [cursor=pointer]:
+      - /url: /projects/b898fd78-1327-4a3c-bc37-10c42e353195/storyboard
+      - generic [ref=e43]: "03"
+      - generic [ref=e44]: 分镜画布
+      - generic [ref=e46]: ✓
+    - link "04 生成与选择" [ref=e47] [cursor=pointer]:
+      - /url: /projects/b898fd78-1327-4a3c-bc37-10c42e353195/generation
+      - generic [ref=e48]: "04"
+      - generic [ref=e49]: 生成与选择
+    - link "05 剪辑与导出" [ref=e51] [cursor=pointer]:
+      - /url: /projects/b898fd78-1327-4a3c-bc37-10c42e353195/delivery
+      - generic [ref=e52]: "05"
+      - generic [ref=e53]: 剪辑与导出
+  - generic [ref=e56]:
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - heading "视频编辑" [level=2] [ref=e59]
+        - text: 选区 → 生成修改 → 查看效果 → 应用到草稿
+      - generic [ref=e111]: 当前草稿 v1
+    - generic [ref=e112]:
+      - complementary "候选素材列表" [ref=e113]:
+        - heading "候选素材" [level=3] [ref=e114]
+        - generic [ref=e115]:
+          - heading "父草稿版本 1 · 当前" [level=4] [ref=e116]
+          - button "修改帧265-361区间内人物盖毯子的动作：使用两张毯子分别覆盖，第一张毯子覆盖人物腿部… [265, 361) · 11.04–15.04 秒 结果已保存 尚未用于草稿 · 当前草稿未使用 f77616f4 → 06bc7737" [pressed] [ref=e117]:
+            - generic [ref=e119]: 修改帧265-361区间内人物盖毯子的动作：使用两张毯子分别覆盖，第一张毯子覆盖人物腿部…
+            - generic [ref=e120]: "[265, 361) · 11.04–15.04 秒"
+            - generic [ref=e121]: 结果已保存
+            - generic [ref=e122]: 尚未用于草稿 · 当前草稿未使用
+            - generic [ref=e123]: f77616f4 → 06bc7737
+          - button "修改帧265-361区间内人物盖毯子的动作：使用两张毯子分别覆盖，第一张毯子覆盖人物腿部… [265, 361) · 11.04–15.04 秒 提交结果待核实 尚未用于草稿 · 当前草稿未使用 f77616f4 → 78e11551" [ref=e124]:
+            - generic [ref=e125]: 修改帧265-361区间内人物盖毯子的动作：使用两张毯子分别覆盖，第一张毯子覆盖人物腿部…
+            - generic [ref=e126]: "[265, 361) · 11.04–15.04 秒"
+            - generic [ref=e127]: 提交结果待核实
+            - generic [ref=e128]: 尚未用于草稿 · 当前草稿未使用
+            - generic [ref=e129]: f77616f4 → 78e11551
+          - button "对于毯子盖上人物的腿跟猫咪时需要确保对于原视频中的毯子穿透猫咪的问题，需要符合真实场景下… [265, 361) · 11.04–15.04 秒 结果已保存 尚未用于草稿 · 当前草稿未使用" [ref=e130]:
+            - generic [ref=e132]: 对于毯子盖上人物的腿跟猫咪时需要确保对于原视频中的毯子穿透猫咪的问题，需要符合真实场景下…
+            - generic [ref=e133]: "[265, 361) · 11.04–15.04 秒"
+            - generic [ref=e134]: 结果已保存
+            - generic [ref=e135]: 尚未用于草稿 · 当前草稿未使用
+      - generic [ref=e136]:
+        - generic [ref=e137]:
+          - generic [ref=e138]: 本次修改片段
+          - generic [ref=e139]: 父草稿 v1 · 11.042–15.042 秒
+        - generic [ref=e140]:
+          - button "单屏查看结果" [pressed] [ref=e141] [cursor=pointer]
+          - button "并排对比" [ref=e142] [cursor=pointer]
+          - button "查看完整效果" [ref=e143] [cursor=pointer]
+          - button "修改当前草稿其他区间" [ref=e144] [cursor=pointer]
+          - button "继续修改此结果" [disabled] [ref=e145]
+        - status [ref=e146]: 合成时间线与声音，准备接回预览，不调用生成模型。
+        - generic [ref=e147]:
+          - button "← 1 帧" [ref=e148] [cursor=pointer]
+          - button "1 帧 →" [ref=e149] [cursor=pointer]
+          - button "从头播放" [ref=e150] [cursor=pointer]
+          - button "循环修改区间" [ref=e151] [cursor=pointer]
+          - button "查看接头" [ref=e152] [cursor=pointer]
+          - button "停止循环" [ref=e153] [cursor=pointer]
+        - region "草稿时间轴 · 本次修改" [ref=e154]:
+          - generic [ref=e155]:
+            - generic [ref=e156]: 草稿时间轴 · 本次修改 · 24 fps · [265, 361)
+            - generic [ref=e157]:
+              - text: 时间轴缩放
+              - combobox "时间轴缩放" [ref=e158]
+          - generic [ref=e160]:
+            - generic [ref=e161]:
+              - img "第 0 帧" [ref=e162]
+              - img "第 33 帧" [ref=e163]
+              - img "第 65 帧" [ref=e164]
+              - img "第 98 帧" [ref=e165]
+              - img "第 131 帧" [ref=e166]
+              - img "第 164 帧" [ref=e167]
+              - img "第 196 帧" [ref=e168]
+              - img "第 229 帧" [ref=e169]
+              - img "第 262 帧" [ref=e170]
+              - img "第 295 帧" [ref=e171]
+              - img "第 327 帧" [ref=e172]
+              - img "第 360 帧" [ref=e226]
+            - generic "候选链片段"
+            - slider "选区入点" [disabled] [ref=e174]
+            - slider "选区出点" [disabled] [ref=e175]
+          - generic [ref=e176]:
+            - generic [ref=e177]: 0 秒 / 0 帧
+            - generic [ref=e178]:
+              - text: 定位帧
+              - spinbutton "草稿定位帧" [ref=e179]: "0"
+            - generic [ref=e180]: 15.042 秒 / 361 帧
+        - paragraph [ref=e181]: 候选完整有效范围 [265, 361) · 96 帧；本次内部修改 [265, 361) · 查看期间范围固定
+        - paragraph [ref=e182]: 沿用本次修改起点的声音
+        - group [ref=e183]:
+          - generic "查看完整候选并调整取用起点" [ref=e184] [cursor=pointer]
+          - option "保留本次修改起点声音" [selected]
+          - option "使用候选声音" [disabled]
+        - generic [ref=e185]: 应用前请查看接回后的完整效果。
+        - group [ref=e186]:
+          - generic "结果详情与历史" [ref=e187] [cursor=pointer]
+          - option "2026/9/11 00:37:20 · 正在保存" [selected]
+    - region "所选任务冻结输入" [ref=e188]:
+      - heading "所选任务实际输入 · 只读" [level=3] [ref=e189]
+      - paragraph [ref=e190]: 以下内容来自提交时保存的快照。当前修改方案单独保留。
+      - generic [ref=e191]:
+        - term [ref=e192]: 生成任务
+        - definition [ref=e193]: 42b01932-d527-4f27-a5ea-255841c926a4 · doubao-seedance-2-0-260128
+        - term [ref=e194]: 来源结果
+        - definition [ref=e195]: 48f2ea77-6ca8-4f61-9974-d0d853baa009
+        - term [ref=e196]: 来源草稿版本
+        - definition [ref=e197]: 0d935f4f-ff6e-486d-a05f-ae7e8b2e31bc
+        - term [ref=e198]: 参考准备任务
+        - definition [ref=e199]: d139b6d2-6b9d-49e4-ad46-cafd0c429435
+        - term [ref=e200]: 替换区间
+        - definition [ref=e201]: "[265, 361) · 96 帧"
+        - term [ref=e202]: 来源参考区间
+        - definition [ref=e203]: "[265, 361) · 96 帧"
+        - term [ref=e204]: 输出与默认取用
+        - definition [ref=e205]: 生成 4 秒 · 取用 [0, 96)
+        - term [ref=e206]: 生成方式
+        - definition [ref=e207]: 修改现有片段
+        - term [ref=e208]: 结束策略
+        - definition [ref=e209]: 按修改描述结束
+        - term [ref=e210]: 修改目标
+        - definition [ref=e211]: 修改帧265-361区间内人物盖毯子的动作：使用两张毯子分别覆盖，第一张毯子覆盖人物腿部，第二张毯子覆盖猫咪身体，全程保证猫咪头部露出，修复原视频中毯子穿透猫咪的问题，盖毯动作自然符合真实物理逻辑，最终呈现自然的休息状态。
+      - paragraph [ref=e213]: 实际参考视频：e39a3d02-ef30-44a6-bc3a-e12d1f898784 · 96 帧 / 4.000 秒
+      - region "模型指令记录" [ref=e214]:
+        - generic [ref=e215]: 最终模型指令
+        - paragraph [ref=e216]: 包含避免项与参考图职责，按本次记录原样展示和复制。
+        - button "复制最终模型指令" [ref=e217] [cursor=pointer]
+        - generic [ref=e218]: 【当前修改目标（用户原文，最高优先）】 修改帧265-361区间内人物盖毯子的动作：使用两张毯子分别覆盖，第一张毯子覆盖人物腿部，第二张毯子覆盖猫咪身体，全程保证猫咪头部露出，修复原视频中毯子穿透猫咪的问题，盖毯动作自然符合真实物理逻辑，最终呈现自然的休息状态。 【起始状态（用户原文）】 起始帧265时，人物盘腿坐在地毯上，双手放在趴卧在身前地毯上的灰白虎斑猫身上，猫咪闭眼睡觉，人物腿部裸露，尚未拿起毯子，窗外为下雨的傍晚，室内暖光柔和。 【动作过程或持续状态（用户原文）】 人物先拿起第一张毯子，自然展开后覆盖在自己的腿部，将腿部妥善盖住；随后拿起第二张毯子，轻柔展开覆盖在猫咪的身体部分，全程让猫咪的头部完整露出在毯子外，两张毯子都贴合被覆盖物体的形态，布料褶皱自然，不出现穿模、穿透猫咪身体的问题，盖毯动作轻柔连贯，符合日常盖毯子休息的真实动作逻辑。 【期望结束状态（用户原文）】 人物腿部被第一张毯子自然覆盖，猫咪身体被第二张毯子覆盖且头部完整露出，二者都处于舒适自然的休息状态，毯子形态自然无穿模，整体氛围安静温暖。 【保留内容（用户原文）】 保留原场景的雨夜窗边室内环境、暖光氛围、地毯、床头柜、水杯、香薰蜡烛、人物白T恤深蓝短裤棕色凉鞋的造型、灰白虎斑猫的外观与趴卧睡觉的状态、原音频不变，保留人物原本轻柔安抚的动作基调。 【时间对应，24 fps，区间右端不包含】 全局修改帧 [265,361)，全局秒 [11.042,15.042)。 参考来自全局帧 [265,361)；参考内修改帧 [0,96)，秒 [0.000,4.000)。 候选输出 4 秒；默认采用候选帧 [0,96)，秒 [0.000,4.000)。用户可手动选择其他等长片段。 请在默认采用的候选时间区间内完成当前要求的变化，并在该区间末端达到期望结束状态；持续状态要求应贯穿该区间。区间之外的额外输出时间自然延续当前状态，不将所需变化推迟到截取范围以外。 【实际参考职责】 视频1：来源时间线上下文和未要求修改的外观；其中与当前目标冲突的动作或状态应修改。不得变速或复制参考来填充输出。 图片1（anchor_in）：仅提供修改起点的外观与构图；动作和状态以当前文字为准；来自全局帧 265（11.042 秒），对应参考内帧 0（0.000 秒），默认采用候选内同一帧时刻 图片2（episode_child）：角色身份外观 图片3（episode_cat）：角色身份外观 图片4（pair_scale）：角色间比例 图片5（environment）：场景空间外观 图片6（style_board）：画风与材质 结束状态遵循当前文字；未指定时合理延续。 【避免问题（用户原文）】 避免毯子穿透猫咪或人物身体的穿模问题；避免用同一张毯子同时覆盖人和猫导致猫咪头部被遮挡；避免毯子褶皱不符合物理规律；避免改变猫咪睡觉的状态、人物造型与场景原有陈设和光影氛围；避免动作生硬不自然。
+        - group [ref=e219]:
+          - generic "查看正文与避免项摘要" [ref=e220] [cursor=pointer]
+      - group [ref=e221]:
+        - generic "实际发送图片（按提交顺序）" [ref=e222]
+      - button "复用参数到当前修改方案" [ref=e223] [cursor=pointer]
+    - region "局部修改执行进度" [ref=e66]:
+      - status [ref=e67]: 修改任务已创建：42b01932-d527-4f27-a5ea-255841c926a4。执行进度如下。
+      - generic [ref=e68]:
+        - generic [ref=e69]:
+          - generic [ref=e70]: 局部修改任务
+          - generic [ref=e71]: 结果已保存，内容质量仍需检查。
+        - text: 最后确认：2026/9/11 00:37:03 · 本地更新：2026/9/11 00:37:22
+        - paragraph [ref=e77]: "实际用量：{\"totalTokens\":80770,\"completionTokens\":80770} · 待核价"
+        - group [ref=e75]:
+          - generic "任务详情与返回内容" [ref=e76] [cursor=pointer]
+          - generic [ref=e78]:
+            - term [ref=e79]: 本地 Job
+            - definition [ref=e80]:
+              - code [ref=e81]: 42b01932-d527-4f27-a5ea-255841c926a4
+              - text: · 修订 16
+            - term [ref=e82]: 火山 Task ID
+            - definition [ref=e83]: cgt-20260911000923-vfm8b
+            - term [ref=e84]: Response ID
+            - definition [ref=e85]: 未收到
+            - term [ref=e86]: 客户端追踪编号
+            - definition [ref=e87]: 4182a98f-fa2d-4457-aef1-02f2e2e8afda
+            - term [ref=e88]: 服务端请求编号
+            - definition [ref=e89]: 021789058223130ba9f922dd9222ae26d697747c3d0268896b8a7
+            - term [ref=e90]: 外部状态
+            - definition [ref=e91]: succeeded
+            - term [ref=e92]: 本地阶段／恢复
+            - definition [ref=e93]: complete / none
+            - term [ref=e94]: 结果完整性
+            - definition [ref=e95]: 完整回执
+            - term [ref=e96]: 模型
+            - definition [ref=e97]: ark / doubao-seedance-2-0-260128
+          - generic "传输诊断证据" [ref=e98]:
+            - term [ref=e99]: 超时类别
+            - definition [ref=e100]: 未发生／未记录
+            - term [ref=e101]: 请求体大小
+            - definition [ref=e102]: 13221704 字节 · 实际 HTTP 请求
+            - term [ref=e103]: 实际参考数量
+            - definition [ref=e104]: 6 张图片 · 1 段视频
+            - term [ref=e105]: 阶段耗时
+            - definition [ref=e106]: 参考发布准备 2700.084 ms · 提交等待 13410.222 ms
+            - term [ref=e107]: 请求超时设置
+            - definition [ref=e108]: 120 秒
+          - group [ref=e109]:
+            - generic "已收到的实际内容" [ref=e110] [cursor=pointer]
+    - group [ref=e224]:
+      - generic "验收与导出 · 当前完整草稿" [ref=e225] [cursor=pointer]
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"
+      - option "未判断" [selected]
+      - option "通过"
+      - option "需留意"
+      - option "不通过"

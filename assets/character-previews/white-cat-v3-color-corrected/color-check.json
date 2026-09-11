@@ -1,0 +1,379 @@
+{
+  "method": "13x13 pixel channel medians at fixed coordinates in before/after files. Red-minus-blue is a simple warm-cast indicator for the selected white-fur patches only; not Delta E, a calibrated colorimetric score, or a whole-cat average.",
+  "originalWhiteReference": {
+    "file": "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/白猫.png",
+    "chestCenter": [
+      963,
+      1024
+    ],
+    "medianRGB": [
+      255,
+      255,
+      253
+    ],
+    "medianHex": "#FFFFFD",
+    "alpha": 255,
+    "profile": "sRGB IEC61966-2.1"
+  },
+  "samples": {
+    "front-standing.png": {
+      "before": {
+        "size": [
+          1254,
+          1254
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              627,
+              721
+            ],
+            "rgb": [
+              252,
+              245,
+              238
+            ],
+            "hex": "#FCF5EE",
+            "redMinusBlue": 14
+          },
+          "gray": {
+            "center": [
+              796,
+              752
+            ],
+            "rgb": [
+              195,
+              178,
+              168
+            ],
+            "hex": "#C3B2A8",
+            "redMinusBlue": 27
+          }
+        }
+      },
+      "after": {
+        "size": [
+          1254,
+          1254
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              627,
+              721
+            ],
+            "rgb": [
+              253,
+              252,
+              250
+            ],
+            "hex": "#FDFCFA",
+            "redMinusBlue": 3
+          },
+          "gray": {
+            "center": [
+              796,
+              752
+            ],
+            "rgb": [
+              190,
+              179,
+              172
+            ],
+            "hex": "#BEB3AC",
+            "redMinusBlue": 18
+          }
+        }
+      }
+    },
+    "side-standing.png": {
+      "before": {
+        "size": [
+          1536,
+          1024
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              380,
+              460
+            ],
+            "rgb": [
+              252,
+              246,
+              241
+            ],
+            "hex": "#FCF6F1",
+            "redMinusBlue": 11
+          },
+          "gray": {
+            "center": [
+              951,
+              497
+            ],
+            "rgb": [
+              201,
+              182,
+              169
+            ],
+            "hex": "#C9B6A9",
+            "redMinusBlue": 32
+          }
+        }
+      },
+      "after": {
+        "size": [
+          1536,
+          1024
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              380,
+              460
+            ],
+            "rgb": [
+              251,
+              250,
+              249
+            ],
+            "hex": "#FBFAF9",
+            "redMinusBlue": 2
+          },
+          "gray": {
+            "center": [
+              951,
+              497
+            ],
+            "rgb": [
+              190,
+              182,
+              179
+            ],
+            "hex": "#BEB6B3",
+            "redMinusBlue": 11
+          }
+        }
+      }
+    },
+    "rear-standing.png": {
+      "before": {
+        "size": [
+          1254,
+          1254
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              617,
+              364
+            ],
+            "rgb": [
+              240,
+              230,
+              223
+            ],
+            "hex": "#F0E6DF",
+            "redMinusBlue": 17
+          },
+          "gray": {
+            "center": [
+              614,
+              448
+            ],
+            "rgb": [
+              169,
+              148,
+              137
+            ],
+            "hex": "#A99489",
+            "redMinusBlue": 32
+          }
+        }
+      },
+      "after": {
+        "size": [
+          1254,
+          1254
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              617,
+              364
+            ],
+            "rgb": [
+              240,
+              239,
+              239
+            ],
+            "hex": "#F0EFEF",
+            "redMinusBlue": 1
+          },
+          "gray": {
+            "center": [
+              614,
+              448
+            ],
+            "rgb": [
+              143,
+              136,
+              134
+            ],
+            "hex": "#8F8886",
+            "redMinusBlue": 9
+          }
+        }
+      }
+    },
+    "three-view-board.png": {
+      "before": {
+        "size": [
+          2172,
+          724
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              330,
+              412
+            ],
+            "rgb": [
+              253,
+              248,
+              242
+            ],
+            "hex": "#FDF8F2",
+            "redMinusBlue": 11
+          },
+          "gray": {
+            "center": [
+              1140,
+              359
+            ],
+            "rgb": [
+              191,
+              170,
+              156
+            ],
+            "hex": "#BFAA9C",
+            "redMinusBlue": 35
+          }
+        }
+      },
+      "after": {
+        "size": [
+          2172,
+          724
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              330,
+              412
+            ],
+            "rgb": [
+              253,
+              253,
+              253
+            ],
+            "hex": "#FDFDFD",
+            "redMinusBlue": 0
+          },
+          "gray": {
+            "center": [
+              1140,
+              359
+            ],
+            "rgb": [
+              180,
+              170,
+              166
+            ],
+            "hex": "#B4AAA6",
+            "redMinusBlue": 14
+          }
+        }
+      }
+    },
+    "pair-scale.png": {
+      "before": {
+        "size": [
+          941,
+          1672
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              674,
+              1321
+            ],
+            "rgb": [
+              251,
+              243,
+              237
+            ],
+            "hex": "#FBF3ED",
+            "redMinusBlue": 14
+          },
+          "gray": {
+            "center": [
+              604,
+              1294
+            ],
+            "rgb": [
+              238,
+              225,
+              216
+            ],
+            "hex": "#EEE1D8",
+            "redMinusBlue": 22
+          }
+        }
+      },
+      "after": {
+        "size": [
+          941,
+          1672
+        ],
+        "samples": {
+          "white": {
+            "center": [
+              674,
+              1321
+            ],
+            "rgb": [
+              252,
+              251,
+              250
+            ],
+            "hex": "#FCFBFA",
+            "redMinusBlue": 2
+          },
+          "gray": {
+            "center": [
+              604,
+              1294
+            ],
+            "rgb": [
+              238,
+              233,
+              230
+            ],
+            "hex": "#EEE9E6",
+            "redMinusBlue": 8
+          }
+        }
+      }
+    }
+  },
+  "childRegionMeanAbsoluteRGBDifference": 7.034448639427246,
+  "childRegionBounds": [
+    80,
+    140,
+    515,
+    1510
+  ],
+  "note": "Generative edits changed some non-cat pixels. Geometry/identity are visually reviewed, not guaranteed pixel-exact."
+}
+

@@ -1,0 +1,110 @@
+{
+  "version": 3,
+  "status": "rejected-by-user",
+  "rejectionNote": "User rejected the generated references. Do not reuse their derived anatomy or coat. The specified approved adaptation remains the sole cat identity master; existing finalized cat images can guide pose and structure.",
+  "createdDate": "2026-09-10",
+  "generator": "built-in-imagegen",
+  "runtimeIntegrated": false,
+  "replacesRejectedPreview": "../white-cat-v2",
+  "identityMaster": {
+    "file": "identity-source.png",
+    "source": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png",
+    "byteIdentical": true,
+    "sha256": "4eb638ad80effb9410abab5045c84e69abf5bda8a2080b8277183c888bdbefd1"
+  },
+  "childReference": "D:/soft/code/OpenGit/catflow-studio/assets/canon/v4/episode-child.png",
+  "hiddenBack": "New design completion inferred from visible flank markings and fur; not recovered ground truth.",
+  "pairScale": {
+    "observedEarToGroundHeightRatioApprox": 0.3,
+    "measurement": "Manual visual estimate relative to child full height; not calibrated physical dimensions."
+  },
+  "validation": {
+    "allFinalPngDecoded": true,
+    "visualReviewCompleted": true,
+    "sourceIdentityExactOnlyForCopiedMaster": true,
+    "geometricallyCalibrated": false,
+    "videoTested": false
+  },
+  "images": [
+    {
+      "file": "identity-source.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "mode": "RGB",
+      "bytes": 1899358,
+      "sha256": "4eb638ad80effb9410abab5045c84e69abf5bda8a2080b8277183c888bdbefd1",
+      "decodeVerified": true,
+      "role": "unaltered-seated-identity-reference",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-cf668a2b-9f58-4836-a3f7-6757d515469d.png"
+    },
+    {
+      "file": "front-standing.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "mode": "RGB",
+      "bytes": 1704625,
+      "sha256": "599e27cb1c7bc8fc06967a2ce832cdcbd98804c6610168f11c7f7b6a54b08b3f",
+      "decodeVerified": true,
+      "role": "standing-preview-deliverable",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-bef2a996-e762-40d3-a70a-b64001797f6d.png"
+    },
+    {
+      "file": "side-standing.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "mode": "RGB",
+      "bytes": 1783221,
+      "sha256": "041b34e11e1e72ecd8bd46b1382722a4001d33461e39cc6aa7bc90c487db0f16",
+      "decodeVerified": true,
+      "role": "standing-preview-deliverable",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-c1079ba1-951b-4d8e-8817-79314f7fbbe2.png"
+    },
+    {
+      "file": "rear-standing.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "mode": "RGB",
+      "bytes": 1579544,
+      "sha256": "b84f32663a9f6715c342298bf5ca21875a6b5fc4e541d2b7a6504840be44a14a",
+      "decodeVerified": true,
+      "role": "standing-preview-deliverable",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-a426db30-8ae9-493f-bfc4-362ec3506dc6.png"
+    },
+    {
+      "file": "three-view-board.png",
+      "size": [
+        2172,
+        724
+      ],
+      "mode": "RGB",
+      "bytes": 1703835,
+      "sha256": "8981179055230e2844bb08754b320d0daa1c03f804ef05a091a734454f834cb2",
+      "decodeVerified": true,
+      "role": "standing-preview-deliverable",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-71499e96-8009-4254-8280-8ebaf47720da.png"
+    },
+    {
+      "file": "pair-scale.png",
+      "size": [
+        941,
+        1672
+      ],
+      "mode": "RGB",
+      "bytes": 1457313,
+      "sha256": "8bae6b2d31a6999703132c850c438fa6716395593ab820280c018175a42d268e",
+      "decodeVerified": true,
+      "role": "standing-preview-deliverable",
+      "generationOutput": "C:/Users/wwwab/.codex/generated_images/01a08aa5-2e14-7ff3-a2aa-5bb0d5e9d5aa/exec-83b9bd1d-247b-4595-be81-e7431a622487.png"
+    }
+  ],
+  "promptSet": "generation-prompts.md",
+  "draftsExcludedFromDeliverables": true
+}

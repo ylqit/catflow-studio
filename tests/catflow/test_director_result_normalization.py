@@ -51,6 +51,9 @@ def _director_payload() -> dict[str, object]:
                 "catAction": "猫咪挪步避开水滴后绕花盆迈一步",
                 "environmentChange": "盆土颜色变深，托盘回到花盆正下方",
                 "transition": "continuous",
+                "cameraSpatialRelation": "摄影机在室内，孩子和猫位于窗台内侧，双手与肩部连接可见",
+                "interactionConstraints": ["孩子双手握住同一水壶，水从壶嘴落到盆土接触处"],
+                "visualExclusions": ["独立于孩子身体的手臂"],
                 "lens": {
                     "focalLengthEquivalent": "35mm",
                     "cameraHeight": "窗台高度",
@@ -149,6 +152,7 @@ def test_normalizer_keeps_four_sound_effects_and_ignores_unknown_provider_field(
         "sound_detail_dense",
         "unknown_provider_field",
         "micro_motion_dense",
+        "ending_review",
     }
     assert all(issue.severity == "warning" for issue in result.issues)
     extra_issue = next(
@@ -238,7 +242,8 @@ def test_professional_output_schema_requires_the_same_fields_as_validation() -> 
 
     schema = director_provider_output_schema()["$defs"]["ProfessionalShotOutput"]
     for key in ("childBlocking", "catBlocking", "durationFrames", "lens", "composition",
-                "physicalChange", "continuity", "lighting", "sound", "directorIntent"):
+                "physicalChange", "continuity", "lighting", "sound", "directorIntent",
+                "cameraSpatialRelation", "interactionConstraints", "visualExclusions"):
         assert key in schema["required"]
         assert "default" not in schema["properties"][key]
         assert "anyOf" not in schema["properties"][key]
@@ -290,7 +295,7 @@ def test_real_episode_two_receipt_recovers_without_changing_any_action() -> None
     before = deepcopy(payload)
     legacy = normalize_director_result(payload, legacy=True)
     assert legacy.disposition == "needs_input"
-    result = normalize_director_result(payload)
+    result = normalize_director_result(payload, output_contract_revision="professional-director-v2")
     assert payload == before
     assert result.disposition == "candidate_ready"
     assert [shot.duration_seconds for shot in result.plan.shots] == [3, 4, 5, 3]
@@ -313,3 +318,40 @@ def test_missing_nested_detail_and_wrong_duration_remain_blocking() -> None:
     payload = _director_payload()
     payload["targetDurationSeconds"] = 15
     assert normalize_director_result(payload).disposition == "needs_input"
+
+
+@pytest.mark.parametrize("final_frame", [
+    "猫耳轻颤，胡须舒展，水面泛起涟漪",
+    "不做停帧，不让角色原地互看，猫耳轻颤",
+    "孩子和猫咪原地互看，画面静止",
+    "孩子推正托盘，猫咪继续迈步",
+])
+def test_ending_uncertainty_is_advice_and_preserves_provider_text(final_frame: str) -> None:
+    from catflow.domain.director_results import normalize_director_result
+
+    payload = _director_payload()
+    payload["shots"][-1]["continuity"]["finalFrame"] = final_frame
+    before = deepcopy(payload)
+    result = normalize_director_result(payload)
+
+    assert result.disposition == "candidate_ready"
+    assert result.plan.shots[-1].continuity.final_frame == final_frame
+    assert payload == before == result.raw_payload
+    assert result.normalized_payload["shots"][-1]["continuity"]["finalFrame"] == final_frame
+    advice = next(issue for issue in result.issues if issue.code == "ending_review")
+    assert advice.severity == "warning"
+    assert advice.path == f"shots.{len(payload['shots']) - 1}.continuity.finalFrame"
+    assert advice.provider_value == final_frame
+
+
+@pytest.mark.parametrize("invalid_frame", [None, "", 123])
+def test_ending_advice_does_not_relax_required_final_frame(invalid_frame: object) -> None:
+    from catflow.domain.director_results import normalize_director_result
+
+    payload = _director_payload()
+    payload["shots"][-1]["continuity"]["finalFrame"] = invalid_frame
+    result = normalize_director_result(payload)
+    assert result.disposition == "needs_input"
+    assert result.plan is None
+    assert any(issue.severity == "blocking" and issue.path.endswith("finalFrame")
+               for issue in result.issues)

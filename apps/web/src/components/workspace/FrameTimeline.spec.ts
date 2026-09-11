@@ -3,6 +3,20 @@ import { describe, expect, it } from "vitest";
 import FrameTimeline from "./FrameTimeline.vue";
 
 describe("one frame coordinate space", () => {
+  it("accepts the 83-frame final shot through compact seconds and frame controls", async () => {
+    const view = mount(FrameTimeline, { props: { totalFrames: 361, modelValue: { startFrame: 265, endFrame: 361 }, currentFrame: 360, compact: true } });
+    await view.get('input[aria-label="选区开始秒数"]').setValue(String(278 / 24));
+    expect(view.emitted('update:modelValue')?.at(-1)).toEqual([{ startFrame: 278, endFrame: 361 }]);
+    await view.get('input[aria-label="选区入点帧"]').setValue('360');
+    expect(view.emitted('update:modelValue')?.at(-1)).toEqual([{ startFrame: 360, endFrame: 361 }]);
+    view.unmount();
+  });
+  it("allows a one-frame tail and keyboard adjustments without expanding it", async () => {
+    const view = mount(FrameTimeline, { props: { totalFrames: 361, modelValue: { startFrame: 359, endFrame: 361 }, currentFrame: 360 } });
+    await view.get('[data-testid="in-handle"]').trigger('keydown', { key: 'ArrowRight' });
+    expect(view.emitted('update:modelValue')?.at(-1)).toEqual([{ startFrame: 360, endFrame: 361 }]);
+    view.unmount();
+  });
   it("positions both handles at the exact selected-window boundaries", () => {
     const view = mount(FrameTimeline, { props: { totalFrames: 289, modelValue: { startFrame: 144, endFrame: 289 }, currentFrame: 150 } });
     expect(view.get('[data-testid="in-handle"]').attributes("style")).toContain(`${144 / 289 * 100}%`);
