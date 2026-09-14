@@ -5,7 +5,7 @@ import ProjectListView from "./ProjectListView.vue";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const route = vi.hoisted(() => ({ query: {} as Record<string, string | string[]> }));
-const client = vi.hoisted(() => ({
+const client = vi.hoisted(() => ({ catReferenceOptions: vi.fn(), referenceBinding: vi.fn(),
   projectLibrary: vi.fn(),
   projectCollections: vi.fn(),
   createProject: vi.fn(),
@@ -50,6 +50,8 @@ const facets = {
 describe("ProjectListView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    client.catReferenceOptions.mockResolvedValue([{ key: "gray-original", label: "原版灰猫", canonProfileId: "gray-canon", available: true, fixedAssets: {}, auxiliary: [] }, { key: "white-v4", label: "V4 校色白猫", canonProfileId: "white-canon", available: true, fixedAssets: {}, auxiliary: [] }]);
+    client.referenceBinding.mockResolvedValue({ canonProfileId: "gray-canon", label: "原版灰猫", canChange: true });
     route.query = {};
     window.localStorage.clear();
     client.projectCollections.mockResolvedValue([{ id: "home", name: "居家日常", colorKey: "sage", sortOrder: 0, archived: false, createdAt: now, updatedAt: now }]);

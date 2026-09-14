@@ -161,6 +161,9 @@ class GenerationPrepared(Exception):
         self.document = document
 
 
+generation_references: ContextVar[dict[tuple[str, str], str] | None] = ContextVar("generation_references", default=None)
+
+
 def generation_request(method):
     """Scope preparation and one-submission consent across nested generation entry points."""
     signature = inspect.signature(method)
@@ -172,9 +175,12 @@ def generation_request(method):
         # outer request consent when that entry calls the series-specific builder.
         current = generation_command.get()
         token = generation_command.set(current if current is not None else command)
+        references = generation_references.get()
+        reference_token = generation_references.set(references if references is not None else {})
         try:
             return method(*args, **kwargs)
         finally:
+            generation_references.reset(reference_token)
             generation_command.reset(token)
 
     return execute

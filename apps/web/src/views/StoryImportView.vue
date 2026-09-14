@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import CatReferenceSelector from "../components/CatReferenceSelector.vue";
+import ReferenceBindingPanel from "../components/ReferenceBindingPanel.vue";
 import ProductionTargetFields from "../components/ProductionTargetFields.vue";
 import JobStatusCard from "../components/JobStatusCard.vue";
 import { subscribeJobs } from "../jobUpdates";
@@ -177,6 +179,7 @@ async function confirm(suggestionId: string) {
   const target = suggestionTarget(suggestionId);
   const goal = targets.value[suggestionId] ?? defaultTarget.value;
   if (!targetValid(goal)) { error.value = "固定系列至少 2 集，每集为 8–15 秒整数。"; return; }
+  if (["new_series", "independent"].includes(target) && !goal.canonProfileId) { error.value = "请选择猫咪参考。"; return; }
   const seriesLengthMode = target === "new_series" ? goal.lengthMode : null;
   const scope = "story-import:confirm:" + document.value!.id + ":" + suggestionId;
   const fingerprint = JSON.stringify({ target, goal, series: targetSeriesBySuggestion.value[suggestionId], project: targetProjectBySuggestion.value[suggestionId] });
@@ -188,6 +191,7 @@ async function confirm(suggestionId: string) {
     const result = await api.confirmStoryImport(document.value!.id, {
       suggestionId,
       target,
+      canonProfileId: ["new_series", "independent"].includes(target) ? goal.canonProfileId : undefined,
       targetSeriesId: ["append_series", "revision", "reference"].includes(target) && !targetProjectBySuggestion.value[suggestionId] ? targetSeriesBySuggestion.value[suggestionId] || null : null,
       targetProjectId: ["revision", "reference"].includes(target) ? targetProjectBySuggestion.value[suggestionId] || null : null,
       seriesLengthMode,
@@ -278,10 +282,11 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); unsubscrib
             <div class="relation-action"><select v-model="targetBySuggestion[suggestion.id]" :aria-label="`${suggestion.title}的处理方式`"><option value="new_series">创建新系列</option><option value="append_series">追加到现有系列</option><option value="independent">创建独立短片</option><option value="revision">作为修订稿</option><option value="reference">作为参考资料</option></select><section v-if="['new_series', 'independent'].includes(suggestionTarget(suggestion.id))" class="series-length">
               <ProductionTargetFields v-if="suggestionTarget(suggestion.id) === 'new_series' && targets[suggestion.id]" v-model="targets[suggestion.id]" :label="suggestion.title + '生产目标'" />
               <label v-else>短片时长（秒）<input v-if="targets[suggestion.id]" v-model.number="targets[suggestion.id].defaultEpisodeDurationSeconds" type="number" min="8" max="15" /></label>
+              <CatReferenceSelector v-if="suggestionTarget(suggestion.id) === 'independent' && targets[suggestion.id]" v-model="targets[suggestion.id].canonProfileId" />
               <p>{{ suggestion.unitIds.length }} 个来源事件，按本组目标确认缩编方案。不同故事组独立设置。</p>
               <small>故事分析中的集数建议未考虑当前时长；以这里的生产目标为准。创建后只准备文字方案，逐集确认后制作。</small>
               <button class="ghost" :disabled="busy || !allTargetsValid" @click="saveTargets">保存各组目标</button>
-            </section><select v-if="suggestionTarget(suggestion.id) === 'append_series'" v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">选择系列</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select><template v-if="['revision', 'reference'].includes(suggestionTarget(suggestion.id))"><select v-model="targetProjectBySuggestion[suggestion.id]" aria-label="选择目标短片"><option value="">关联到短片（可选）</option><option v-for="item in projects" :key="item.id" :value="item.id">{{ item.title }}</option></select><select v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">关联到系列（可选）</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select></template><button class="secondary confirm-relation" :disabled="busy || (suggestion.status !== 'suggested' && suggestionTarget(suggestion.id) !== 'new_series') || (['new_series', 'independent'].includes(suggestionTarget(suggestion.id)) && !targetValid(targets[suggestion.id] ?? defaultTarget)) || (suggestionTarget(suggestion.id) === 'append_series' && !targetSeriesBySuggestion[suggestion.id]) || (['revision', 'reference'].includes(suggestionTarget(suggestion.id)) && !targetSeriesBySuggestion[suggestion.id] && !targetProjectBySuggestion[suggestion.id])" @click="confirm(suggestion.id)">{{ suggestion.status === "suggested" ? "确认关系" : suggestionTarget(suggestion.id) === "new_series" ? "创建另一个新系列" : "已确认" }}</button></div>
+            </section><select v-if="suggestionTarget(suggestion.id) === 'append_series'" v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">选择系列</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select><template v-if="['revision', 'reference'].includes(suggestionTarget(suggestion.id))"><select v-model="targetProjectBySuggestion[suggestion.id]" aria-label="选择目标短片"><option value="">关联到短片（可选）</option><option v-for="item in projects" :key="item.id" :value="item.id">{{ item.title }}</option></select><select v-model="targetSeriesBySuggestion[suggestion.id]" aria-label="选择目标系列"><option value="">关联到系列（可选）</option><option v-for="item in series" :key="item.id" :value="item.id">{{ item.title }}</option></select></template><ReferenceBindingPanel v-if="['append_series', 'revision', 'reference'].includes(suggestionTarget(suggestion.id)) && (targetProjectBySuggestion[suggestion.id] || targetSeriesBySuggestion[suggestion.id])" :scope="targetProjectBySuggestion[suggestion.id] ? 'project' : 'series'" :object-id="targetProjectBySuggestion[suggestion.id] || targetSeriesBySuggestion[suggestion.id]" readonly /><button class="secondary confirm-relation" :disabled="busy || (suggestion.status !== 'suggested' && suggestionTarget(suggestion.id) !== 'new_series') || (['new_series', 'independent'].includes(suggestionTarget(suggestion.id)) && !targetValid(targets[suggestion.id] ?? defaultTarget)) || (suggestionTarget(suggestion.id) === 'append_series' && !targetSeriesBySuggestion[suggestion.id]) || (['revision', 'reference'].includes(suggestionTarget(suggestion.id)) && !targetSeriesBySuggestion[suggestion.id] && !targetProjectBySuggestion[suggestion.id])" @click="confirm(suggestion.id)">{{ suggestion.status === "suggested" ? "确认关系" : suggestionTarget(suggestion.id) === "new_series" ? "创建另一个新系列" : "已确认" }}</button></div>
           </article>
         </template>
       </section>

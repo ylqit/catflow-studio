@@ -83,4 +83,11 @@ describe('returned director draft editing', () => {
     expect(wrapper.get('textarea').element.value).toBe('{invalid');
     expect(wrapper.emitted('update:modelValue')).toBeUndefined();
   });
+  it('keeps malformed paid beat output intact for explicit correction', () => {
+    const value = JSON.stringify({ shots: [{ durationSeconds: 4, actionBeats: [null, { catAction: '抬头' }] }] });
+    const wrapper = mount(DirectorDraftEditor, { props: { modelValue: value } });
+    expect(wrapper.get('[role="alert"]').text()).toContain('原结果已保留');
+    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="待补充的分镜草稿"]').element.value).toBe(value);
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+  });
 });

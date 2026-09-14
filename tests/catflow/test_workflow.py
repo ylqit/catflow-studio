@@ -102,6 +102,12 @@ def _director_payload() -> DirectorPlanPayload:
                     "order": 1,
                     "durationSeconds": 12,
                     "durationFrames": 288,
+                    "actionBeats": [{
+                        "startFrame": 0, "endFrame": 288, "purpose": "action",
+                        "childAction": "孩子用毛巾逐只擦干猫爪",
+                        "catAction": "猫咪抬爪配合后向室内迈步",
+                        "visibleChange": "湿爪印逐渐减少",
+                    }],
                     "framing": "中景",
                     "cameraMovement": "轻微跟随",
                     "childAction": "孩子用毛巾逐只擦干猫爪",
@@ -377,7 +383,7 @@ def test_story_shot_plan_assets_and_generation_form_one_direct_chain() -> None:
     assert first_video_job.input_snapshot.schema_version == 3
     assert (
         first_video_job.input_snapshot.prompt_compiler_revision
-        == "seedance-professional-v7-spatial"
+        == "seedance-professional-v9-performance"
     )
     assert first_video_job.input_snapshot.prompt_summary == preview.prompt_summary
     assert first_video_job.input_snapshot.prompt_sections == preview.prompt_sections
@@ -448,9 +454,9 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert job.kind == "plan_shots"
     assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
     assert job.frozen_input["storyVersionId"] == str(story.id)
-    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v6-spatial"
-    assert job.frozen_input["outputContractRevision"] == "professional-director-v3"
-    assert job.frozen_input["normalizationRevision"] == "director-normalizer-v3"
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v7-performance"
+    assert job.frozen_input["outputContractRevision"] == "professional-director-v4-performance"
+    assert job.frozen_input["normalizationRevision"] == "director-normalizer-v4-performance"
     assert "规划分镜" in job.frozen_input["inputInstruction"]
     assert "不得输出空占位镜头、备用镜头或修订镜头" in job.frozen_input["prompt"]
     assert job.frozen_input["referenceRoles"] == [
@@ -470,11 +476,13 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
 
 
 def test_repository_idempotency_input_conflict_has_a_stable_error_code() -> None:
-    repository = MemoryStudioRepository()
+    service = _service()
+    project = _project(service)
+    repository = service._repository
     now = datetime.now(UTC)
     first = JobDto(
         id=uuid.uuid4(),
-        projectId=uuid.uuid4(),
+        projectId=project.id,
         kind="plan_shots",
         status="failed",
         inputHash="a" * 64,
@@ -664,7 +672,7 @@ def test_paid_director_result_can_be_recovered_without_another_provider_job() ->
     repeated = service.recover_shot_plan_generation_result(project.id, job.id, command)
     after_recovery = service.get_job(job.id).model_dump(mode="json")
     validation = after_recovery["provider_result"]["validation"]
-    assert validation["normalizationRevision"] == "director-normalizer-v3"
+    assert validation["normalizationRevision"] == "director-normalizer-v4-performance"
     assert after_recovery["provider_result"]["validationHistory"][-1] == previous_validation
     for field in ("frozen_input", "status", "error", "provider_task_id"):
         assert after_recovery[field] == before_recovery[field]
@@ -843,6 +851,10 @@ def test_video_prompt_compiles_professional_director_fields_in_execution_order()
         project.id,
         ShotPlanGenerationCommand(idempotencyKey="professional-prompt-plan"),
     )
+    # This test exercises the v3 blocking-based compiler fallback, not the new beat contract.
+    service._repository._jobs[job.id] = job.model_copy(update={
+        "frozen_input": {**job.frozen_input, "outputContractRevision": "professional-director-v3"}
+    })
     shot = ShotSpec(
         id="shot-1",
         order=1,

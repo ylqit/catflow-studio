@@ -402,6 +402,8 @@ class ArkProviderJobGateway:
                     "segment-edit-v5",
                     "segment-edit-v6",
                     "segment-edit-v7",
+                    "segment-edit-v6-performance",
+                    "segment-edit-v8-performance",
                 }
                 else 0
             )

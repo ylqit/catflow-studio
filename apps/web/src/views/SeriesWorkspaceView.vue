@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ReferenceBindingPanel from "../components/ReferenceBindingPanel.vue";
 import { computed, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -560,6 +561,7 @@ watch(selectedPlanId, () => { editingPlan.value = false; editablePlan.value = nu
       </header>
       <p v-if="error" class="notice error">{{ error }}</p>
 
+      <ReferenceBindingPanel scope="series" :object-id="series.id" :revision="series.updatedAt + jobs.map(job => job.id).join(',')" @changed="load" />
       <nav class="series-tabs" aria-label="系列创作台"><a href="#setting">系列设定</a><a href="#route">整季路线</a><a href="#episodes">剧集列表</a><a href="#assets">共享资产</a><a href="#continuity">连续性</a></nav>
 
       <section id="setting" class="card studio-section">

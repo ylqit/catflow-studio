@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeriesWorkspaceView from "./SeriesWorkspaceView.vue";
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
-const client = vi.hoisted(() => ({
+const client = vi.hoisted(() => ({ catReferenceOptions: vi.fn(), referenceBinding: vi.fn(),
   storySeriesDetail: vi.fn(),
   seriesPlans: vi.fn(),
   seriesEpisodes: vi.fn(),
@@ -152,6 +152,8 @@ function mountView() {
 describe("SeriesWorkspaceView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    client.catReferenceOptions.mockResolvedValue([{ key: "gray-original", label: "原版灰猫", canonProfileId: "gray-canon", available: true, fixedAssets: {}, auxiliary: [] }, { key: "white-v4", label: "V4 校色白猫", canonProfileId: "white-canon", available: true, fixedAssets: {}, auxiliary: [] }]);
+    client.referenceBinding.mockResolvedValue({ canonProfileId: "gray-canon", label: "原版灰猫", canChange: true });
     client.storySeriesDetail.mockResolvedValue(series);
     client.seriesPlans.mockResolvedValue([candidatePlan, acceptedPlan]);
     client.seriesEpisodes.mockResolvedValue(episodes);

@@ -19,6 +19,9 @@ from catflow.infrastructure.models import (
     AssetRecord,
     Base,
     CanonProfileRecord,
+    CatReferenceOptionRecord,
+    CharacterRemakeRecord,
+    StorySeriesRecord,
     EditVersionRecord,
     JobEventRecord,
     JobRecord,
@@ -421,6 +424,19 @@ class CleanupService:
             name: {_uuid_or_raise(value) for value in values}
             for name, values in document["targets"].items()
         }
+        catalog = list(session.scalars(select(CatReferenceOptionRecord)))
+        protected_assets = {uuid.UUID(item["assetId"]) for option in catalog for item in option.auxiliary_json}
+        for option in catalog:
+            profile = session.get(CanonProfileRecord, option.canon_profile_id) if option.canon_profile_id else None
+            if profile:
+                protected_assets.update(uuid.UUID(item["assetId"]) for item in profile.profile_json.get("fixedAssets", {}).values())
+        if protected_assets.intersection(targets["asset_ids"]):
+            raise RuntimeError("cleanup cannot delete approved cat reference assets")
+        if session.scalar(select(CharacterRemakeRecord.id).where(or_(
+            CharacterRemakeRecord.source_id.in_(targets["project_ids"]),
+            CharacterRemakeRecord.target_id.in_(targets["project_ids"]),
+        )).limit(1)):
+            raise RuntimeError("cleanup cannot erase character remake provenance")
         projects = targets["project_ids"]
         jobs = targets["job_ids"]
         assets = targets["asset_ids"]
@@ -504,6 +520,10 @@ class CleanupService:
     def _canon_references(self, session: Session, canon_id: uuid.UUID) -> list[str]:
         value = str(canon_id)
         references: list[str] = []
+        for model in (CatReferenceOptionRecord, CharacterRemakeRecord, StorySeriesRecord):
+            if session.scalar(select(model).where(model.canon_profile_id == canon_id).limit(1)):
+                references.append(model.__tablename__)
+
         if session.scalar(
             select(func.count())
             .select_from(ProjectRecord)

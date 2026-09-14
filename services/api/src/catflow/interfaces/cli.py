@@ -18,6 +18,7 @@ from catflow.infrastructure.database import (
     create_session_factory,
 )
 from catflow.infrastructure.media import LocalMediaStore
+from catflow.infrastructure.cat_reference_catalog import initialize_cat_reference_catalog
 from catflow.infrastructure.object_storage import ObjectPublisherRuntime
 from catflow.infrastructure.postgres_project_library import PostgresProjectLibraryRepository
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
@@ -58,6 +59,8 @@ def serve(
     sessions = create_session_factory(engine)
     repository = PostgresStudioRepository(sessions)
     repository.active_canon_profile_id()
+    media_store = LocalMediaStore(paths.media_root)
+    initialize_cat_reference_catalog(repository, media_store, project_root)
     application = create_app(
         StudioService(
             repository,
@@ -75,7 +78,7 @@ def serve(
             ffmpeg_ready=_configured_tool_ready("FFMPEG_PATH"),
             ffprobe_ready=_configured_tool_ready("FFPROBE_PATH"),
         ),
-        media_store=LocalMediaStore(paths.media_root),
+        media_store=media_store,
         spa_dist=spa_dist,
         object_publisher_runtime=object_publisher_runtime,
     )

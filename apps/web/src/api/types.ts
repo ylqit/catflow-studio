@@ -61,6 +61,7 @@ export interface WorkerRuntimeDto {
 export type FixedCanonRole = "episode_child" | "episode_cat" | "pair_scale" | "style_board";
 
 export interface ProjectCreate {
+  canonProfileId?: string | null;
   title: string;
   theme: string;
   targetDurationSeconds: number;
@@ -78,6 +79,7 @@ export type SeriesNarrativeMode = "continuous" | "lightly_serialized" | "antholo
 export type SeriesLengthMode = "fixed" | "ongoing";
 
 export interface SeriesCreateCommand {
+  canonProfileId?: string | null;
   adaptationPolicy?: "preserve_all" | "condense_mainline";
   title: string;
   premise: string;
@@ -709,7 +711,23 @@ export interface ShotMediaPreviewDto {
   durationSeconds: number | null; targetDurationFrames: number; generateAudio: boolean;
   references: Array<{ assetId: string; role: string; sha256: string }>;
 }
+export interface CatPerformanceDto {
+  visibility: 'visible' | 'partial' | 'hidden';
+  gazeFrom: string;
+  gazeTo: string;
+  eyelidAction: 'none' | 'blink' | 'slow_blink' | 'squint_release';
+}
+export interface ActionBeatDto {
+  startFrame: number;
+  endFrame: number;
+  purpose: 'trigger' | 'action' | 'reaction' | 'payoff';
+  childAction: string;
+  catAction: string;
+  visibleChange: string;
+  catPerformance?: CatPerformanceDto | null;
+}
 export interface ShotSpecDto {
+  actionBeats?: ActionBeatDto[] | null;
   cameraSpatialRelation?: string | null;
   interactionConstraints?: string[];
   visualExclusions?: string[];
@@ -949,7 +967,7 @@ export interface WorkspaceDto {
   latestAssetJob?: JobDto | null;
 }
 
-export type StoryProductionTarget = Required<components["schemas"]["StoryProductionTarget"]>;
+export type StoryProductionTarget = Required<Omit<components["schemas"]["StoryProductionTarget"], "canonProfileId">> & { canonProfileId?: string | null };
 
 export type StoryProductionTargetsCommand = components["schemas"]["StoryProductionTargetsCommand"];
 
@@ -971,3 +989,11 @@ export interface JobResultDto { jobId: string; revision: number; state: string; 
 export type ProviderTaskLookupDto = components['schemas']['ProviderTaskLookupDto'];
 export type JobRecoveryCommand = components['schemas']['JobRecoveryCommand'];
 export interface GenerationPreparationDto { preparedOnly: true; kind: string; provider: string; model: string; inputHash: string; executionInputHash: string; input: Record<string, unknown>; expectedCostMicros: number | null; replacesJobId: string | null }
+
+export type CatReferenceOptionDto = components["schemas"]["CatReferenceOptionDto"];
+export type ReferenceBindingDto = components["schemas"]["ReferenceBindingDto"];
+export type ReferenceBindingCommand = components["schemas"]["ReferenceBindingCommand"];
+export type CharacterRemakePreviewDto = components["schemas"]["CharacterRemakePreviewDto"];
+export type CharacterRemakePreviewCommand = components["schemas"]["CharacterRemakePreviewCommand"];
+export type CharacterRemakeCommand = components["schemas"]["CharacterRemakeCommand"];
+export type CharacterRemakeDto = components["schemas"]["CharacterRemakeDto"];

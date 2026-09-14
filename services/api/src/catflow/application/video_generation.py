@@ -6,9 +6,10 @@ from typing import Literal
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import BlockingDesign, DirectorStoryTreatment, ShotSpec
 
+from .creative_direction import CAT_PERFORMANCE_DIRECTION, ENDING_DIRECTION
 from .media_prompt import validate_system_prompt
 
-VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v8-canon-identity"
+VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v9-performance"
 
 _BASE_VIDEO_EXCLUSIONS = (
     "真实摄影",
@@ -23,7 +24,7 @@ _BASE_VIDEO_EXCLUSIONS = (
     "Logo",
     "水印",
     "背景严重跳变",
-    "原地互看",
+    "长时间无回应地对视填充时长",
     "静止停帧",
     "循环动作填充时长",
     "禁止8岁以上的修长儿童比例",
@@ -87,7 +88,27 @@ def _blocking_summary(blocking: BlockingDesign) -> str:
 def synchronize_professional_shot_summaries(shot: ShotSpec) -> ShotSpec:
     """Make compatibility summaries reflect the authoritative structured shot fields."""
 
-    updates: dict[str, str] = {}
+    updates: dict[str, object] = {}
+    if shot.action_beats:
+        for actor in ("child", "cat"):
+            actions = (
+                "；".join(
+                    action
+                    for beat in shot.action_beats
+                    if (action := getattr(beat, f"{actor}_action"))
+                )
+                or "本镜头无可见动作"
+            )
+            summary = actions if len(actions) <= 500 else actions[:499] + "…"
+            updates[f"{actor}_action"] = summary
+            blocking = getattr(shot, f"{actor}_blocking")
+            if blocking is not None:
+                updates[f"{actor}_blocking"] = blocking.model_copy(
+                    update={"movement_path": summary, "micro_motions": []}
+                )
+        changes = "；".join(beat.visible_change for beat in shot.action_beats)
+        updates["environment_change"] = changes if len(changes) <= 500 else changes[:499] + "…"
+        return shot.model_copy(update=updates)
     if shot.child_blocking is not None:
         updates["child_action"] = _blocking_summary(shot.child_blocking)
     if shot.cat_blocking is not None:
@@ -101,13 +122,16 @@ def synchronize_professional_shot_summaries(shot: ShotSpec) -> ShotSpec:
     return shot.model_copy(update=updates) if updates else shot
 
 
-def _identity_style_section(project_title: str, target_duration_seconds: int, cat_identity: str) -> str:
+def _identity_style_section(
+    project_title: str, target_duration_seconds: int, cat_identity: str
+) -> str:
     return compile_prompt_sentence(
         f"原创一人一猫生活短片《{_clean_fragment(project_title)}》，9:16，"
         f"{target_duration_seconds}秒",
         "固定同一位6至7岁儿童，身高约1.2米，齐下颌短发，保持圆润儿童脸型和"
         "约4.5至5头身的低龄儿童比例",
         cat_identity,
+        CAT_PERFORMANCE_DIRECTION,
         "二维柔和数字插画，暖灰细轮廓线，哑光材质，轻微纸感颗粒，柔和漫射暖光",
     )
 
@@ -144,7 +168,13 @@ def _creative_treatment_section(treatment: DirectorStoryTreatment | None) -> str
     return compile_prompt_sentence(*clauses)
 
 
-def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bool = False) -> str:
+def _shot_execution(
+    shot: ShotSpec,
+    *,
+    start_seconds: int = 0,
+    initial_frame: bool = False,
+    previous_shot: ShotSpec | None = None,
+) -> str:
     transition = {"continuous": "连续衔接", "soft_cut": "柔和切换", "hard_cut": "直接切换"}
     paragraphs = [
         compile_prompt_sentence(
@@ -153,6 +183,45 @@ def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bo
             "" if initial_frame else f"转场：{transition[shot.transition]}",
         )
     ]
+    if shot.action_beats and not initial_frame:
+        purposes = {"trigger": "触发", "action": "行动", "reaction": "反应", "payoff": "回报"}
+        eyelids = {
+            "none": "",
+            "blink": "自然闭合眼睑后重新睁开，过程清楚可见",
+            "slow_blink": "缓慢闭合眼睑，短暂停留，再自然睁开",
+            "squint_release": "因当前刺激短暂半眯眼，随后恢复正常睁眼",
+        }
+        visibility = {
+            "visible": "脸部清楚可读",
+            "partial": "脸部部分可见",
+            "hidden": "脸部不可见，不要求可见眼部表演",
+        }
+        for beat in shot.action_beats:
+            start = f"{start_seconds + beat.start_frame / 24:.3f}".rstrip("0").rstrip(".")
+            end = f"{start_seconds + beat.end_frame / 24:.3f}".rstrip("0").rstrip(".")
+            paragraphs.append(
+                compile_prompt_sentence(
+                    f"节拍 {start}–{end}秒 · {purposes[beat.purpose]}",
+                    f"儿童：{beat.child_action}" if beat.child_action else "",
+                    f"猫咪：{beat.cat_action}" if beat.cat_action else "",
+                    f"可见变化：{beat.visible_change}",
+                )
+            )
+            performance = beat.cat_performance
+            if performance is not None:
+                paragraphs.append(
+                    compile_prompt_sentence(
+                        f"本节拍猫咪表演：{visibility[performance.visibility]}",
+                        f"目光从{performance.gaze_from}转向{performance.gaze_to}"
+                        if performance.visibility != "hidden"
+                        and performance.gaze_from
+                        and performance.gaze_to
+                        else "",
+                        eyelids[performance.eyelid_action]
+                        if performance.visibility != "hidden"
+                        else "",
+                    )
+                )
     if shot.lens is not None:
         paragraphs.append(
             compile_prompt_sentence(
@@ -188,7 +257,7 @@ def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bo
                 f"中景：{shot.composition.middle_ground}",
                 f"背景：{shot.composition.background}",
                 "" if initial_frame else f"画面运动方向：{shot.composition.screen_direction}",
-                f"视线：{shot.composition.eye_line}",
+                f"视线：{shot.composition.eye_line}" if not shot.action_beats else "",
             )
         )
     if shot.child_blocking is not None:
@@ -196,28 +265,38 @@ def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bo
             compile_prompt_sentence(
                 f"人物起始状态：{shot.child_blocking.initial_state}"
                 if initial_frame
-                else f"人物走位：{_blocking_summary(shot.child_blocking)}",
+                else (
+                    f"人物空间起止：{shot.child_blocking.initial_state}"
+                    f" → {shot.child_blocking.end_state}"
+                    if shot.action_beats
+                    else f"人物走位：{_blocking_summary(shot.child_blocking)}"
+                ),
                 ""
-                if initial_frame or not shot.child_blocking.micro_motions
+                if initial_frame or shot.action_beats or not shot.child_blocking.micro_motions
                 else f"人物微动作：{_items(shot.child_blocking.micro_motions)}",
             )
         )
-    elif not initial_frame:
+    elif not initial_frame and not shot.action_beats:
         paragraphs.append(compile_prompt_sentence(f"人物动作：{shot.child_action}"))
     if shot.cat_blocking is not None:
         paragraphs.append(
             compile_prompt_sentence(
                 f"猫咪起始状态：{shot.cat_blocking.initial_state}"
                 if initial_frame
-                else f"猫咪走位：{_blocking_summary(shot.cat_blocking)}",
+                else (
+                    f"猫咪空间起止：{shot.cat_blocking.initial_state}"
+                    f" → {shot.cat_blocking.end_state}"
+                    if shot.action_beats
+                    else f"猫咪走位：{_blocking_summary(shot.cat_blocking)}"
+                ),
                 ""
-                if initial_frame or not shot.cat_blocking.micro_motions
+                if initial_frame or shot.action_beats or not shot.cat_blocking.micro_motions
                 else f"猫咪微动作：{_items(shot.cat_blocking.micro_motions)}",
             )
         )
-    elif not initial_frame:
+    elif not initial_frame and not shot.action_beats:
         paragraphs.append(compile_prompt_sentence(f"猫咪动作：{shot.cat_action}"))
-    if shot.physical_change is not None:
+    if shot.physical_change is not None and (initial_frame or not shot.action_beats):
         paragraphs.append(
             compile_prompt_sentence(
                 f"物体起始状态：{shot.physical_change.subject}，{shot.physical_change.before}"
@@ -227,7 +306,7 @@ def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bo
                 f"{_clean_fragment(shot.physical_change.after)}"
             )
         )
-    elif not initial_frame:
+    elif not initial_frame and not shot.action_beats:
         paragraphs.append(compile_prompt_sentence(f"画面变化：{shot.environment_change}"))
     if shot.continuity is not None:
         paragraphs.append(
@@ -237,7 +316,13 @@ def _shot_execution(shot: ShotSpec, *, start_seconds: int = 0, initial_frame: bo
                 f"共享视觉元素：{shot.continuity.shared_visual_element}",
             )
         )
-    if shot.lighting is not None:
+    if (
+        previous_shot is not None
+        and shot.lighting is not None
+        and shot.lighting == previous_shot.lighting
+    ):
+        paragraphs.append(f"光线：沿用镜头{previous_shot.order}的方向、柔和度与色彩。")
+    elif shot.lighting is not None:
         paragraphs.append(
             compile_prompt_sentence(
                 f"光线方向：{shot.lighting.direction}",
@@ -280,6 +365,16 @@ def _prompt_summary(project_title: str, shots: list[ShotSpec], active_ending: st
     actions: list[str] = []
     changes: list[str] = []
     for shot in shots:
+        if shot.action_beats:
+            actions.append(
+                f"镜头{shot.order}："
+                + "；".join(
+                    "，".join(action for action in (beat.child_action, beat.cat_action) if action)
+                    for beat in shot.action_beats
+                )
+            )
+            changes.extend(beat.visible_change for beat in shot.action_beats)
+            continue
         child = (
             _clean_fragment(shot.child_blocking.movement_path)
             if shot.child_blocking is not None
@@ -315,7 +410,7 @@ def _negative_prompt(shots: list[ShotSpec], *, initial_frame: bool = False) -> s
         or item
         not in {
             "背景严重跳变",
-            "原地互看",
+            "长时间无回应地对视填充时长",
             "静止停帧",
             "循环动作填充时长",
         }
@@ -373,9 +468,11 @@ def compile_video_generation_prompt(
             )
         )
     elapsed = 0
+    previous_shot = None
     for shot in shots:
-        executions.append(_shot_execution(shot, start_seconds=elapsed))
+        executions.append(_shot_execution(shot, start_seconds=elapsed, previous_shot=previous_shot))
         elapsed += shot.duration_seconds
+        previous_shot = shot
     active_ending = _active_ending(shots)
     sections = (
         GenerationPromptSectionDto(
@@ -402,8 +499,7 @@ def compile_video_generation_prompt(
                     compile_prompt_sentence(
                         "结尾必须完成逐镜指定的最后动作并清楚呈现最终状态",
                         "不得擅自追加下一项任务",
-                        "不得让儿童和猫咪原地互看",
-                        "不得使用完全静止、重复呼吸、无意义慢镜头或停帧填充剩余时长",
+                        ENDING_DIRECTION,
                     ),
                     compile_prompt_sentence(
                         "无文字、无Logo、无水印",
@@ -442,6 +538,10 @@ def compile_shot_media_prompt(
     content = _shot_execution(shot, initial_frame=initial_frame)
     if initial_frame:
         content = "生成动作尚未开始的一张画面，保持起始状态，不提前表现动作结果。\n" + content
+    else:
+        content = (
+            CAT_PERFORMANCE_DIRECTION + "严格首帧仅固定开始状态，之后按节拍自然表演。\n" + content
+        )
     return CompiledVideoGenerationPrompt(
         prompt=content,
         negative_prompt=_negative_prompt([shot], initial_frame=initial_frame),

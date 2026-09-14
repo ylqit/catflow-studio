@@ -115,7 +115,7 @@ def test_v2_preview_no_original_out_or_current_project_reference_fallback():
     assert [ref.role for ref in preview.image_references] == ["anchor_in"]
     assert preview.instruction == "  保持静止\n不要改变姿态。  "
     assert preview.instruction in preview.compiled_provider_prompt
-    assert preview.input_snapshot.prompt_compiler_revision == "segment-edit-v7"
+    assert preview.input_snapshot.prompt_compiler_revision == "segment-edit-v8-performance"
     changed = service.preview_video_repair(
         project.id, command.model_copy(update={"instruction": "离开画面"})
     )

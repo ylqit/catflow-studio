@@ -26,6 +26,11 @@ docs/LibTV
 !/docs/DUAL_PLAYER_SCENE_PRODUCTION.md
 !/docs/PROMPT_GOVERNANCE.md
 !/docs/LOCAL_VIDEO_EDIT.md
+!/docs/CAT_REFERENCE_OPTIONS.md
+!/docs/README.md
+!/docs/JOB_EXECUTION_RECOVERY.md
+!/docs/PERFORMANCE_AND_CLEANUP.md
+!/docs/archive/
 !/docs/checklists/
 /docs/checklists/*
 !/docs/checklists/shot-queue-production-core.md

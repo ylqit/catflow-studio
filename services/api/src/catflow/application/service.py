@@ -18,6 +18,17 @@ from pydantic import (
     model_validator,
 )
 
+from catflow.application.character_references import (
+    CharacterRemakeCommand,
+    CharacterRemakeDto,
+    CharacterRemakePreviewCommand,
+    CharacterRemakePreviewDto,
+    ReferenceBindingCommand,
+    ReferenceBindingDto,
+    ReferenceScope,
+    remake_preview,
+    remake_story_context,
+)
 from catflow.application.job_execution import (
     GenerationPrepared,
     JobExecutionDto,
@@ -26,6 +37,7 @@ from catflow.application.job_execution import (
     execution_contract,
     generation_command,
     generation_request,
+    generation_references,
     public_result,
     replacing_unknown,
     summarize_execution,
@@ -62,6 +74,7 @@ from catflow.domain.models import (
     LifeStoryProposalDraft,
     MicroEvent,
     ProfessionalDirectorOutput,
+    PerformanceDirectorOutput,
     ProfessionalShotPlanDraft,
     ShotPlanDraft,
     ShotSpec,
@@ -96,6 +109,9 @@ from .continuity import (
     compile_continuity_constraints,
 )
 from .media_prompt import compile_provider_media_prompt, validate_system_prompt
+from .creative_direction import (
+    CAT_PERFORMANCE_DIRECTION, DIRECTOR_BEAT_DIRECTION, NARRATIVE_DIRECTION,
+)
 from .project_library import (
     ProjectCollectionCreate,
     ProjectCollectionDto,
@@ -333,6 +349,7 @@ class EnvironmentDraftSaveCommand(EnvironmentGenerationInput):
 
 
 class ProjectCreate(ContractModel):
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
     title: str = Field(min_length=1, max_length=160)
     theme: str = Field(min_length=1, max_length=2_000)
     target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=15)
@@ -586,6 +603,24 @@ class CanonProfileDto(ContractModel):
             return "固定同一只灰白虎斑猫，保持毛色分区、眼睛、鼻口、环纹尾巴和正常四足结构"
         identity = CanonCatIdentity.model_validate(cat)
         return f"{identity.identity}，保持{'、'.join(identity.locked_traits)}"
+
+
+class AuxiliaryCatReferenceDto(ContractModel):
+    view: str
+    asset: AssetDto
+
+
+class CatReferenceOptionDto(ContractModel):
+    key: str
+    label: str
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
+    profile_hash: str | None = Field(alias="profileHash", default=None)
+    version: int | None = None
+    cat_identity: str = Field(alias="catIdentity", default="")
+    fixed_assets: dict[str, AssetDto] = Field(alias="fixedAssets", default_factory=dict)
+    auxiliary: list[AuxiliaryCatReferenceDto] = Field(default_factory=list)
+    available: bool = True
+    unavailable_reason: str | None = Field(alias="unavailableReason", default=None)
 
 
 class ProjectSelectionDto(ContractModel):
@@ -1415,10 +1450,27 @@ class StudioRepository(Protocol):
 
     def get_canon_profile(self, profile_id: uuid.UUID) -> CanonProfileDto: ...
 
+    def list_canon_profiles(self) -> list[CanonProfileDto]: ...
+
+    def list_cat_reference_options(self) -> list[CatReferenceOptionDto]: ...
+
+    def save_cat_reference_option(self, *, key: str, label: str, canon_profile_id: uuid.UUID | None, auxiliary: list[dict], sort_order: int, unavailable_reason: str | None = None) -> None: ...
+
+    def get_reference_binding(self, scope: ReferenceScope, object_id: uuid.UUID) -> ReferenceBindingDto: ...
+
+    def change_reference_binding(self, scope: ReferenceScope, object_id: uuid.UUID, command: ReferenceBindingCommand) -> None: ...
+
+    def character_remake_source(self, scope: ReferenceScope, object_id: uuid.UUID) -> dict[str, Any]: ...
+
+    def create_character_remake(self, command: CharacterRemakeCommand) -> CharacterRemakeDto: ...
+
+    def remake_input_context(self, project_id: uuid.UUID) -> dict[str, Any] | None: ...
+
+
     def register_canon_asset(
         self,
         *,
-        role: FixedCanonRole,
+        role: str,
         sha256: str,
         storage_key: str,
         byte_size: int,
@@ -1817,9 +1869,12 @@ class StudioService:
         return self._repository.latest_validation_run()
 
     def create_project(self, draft: ProjectCreate) -> ProjectDto:
+        profile_id = draft.canon_profile_id or self._repository.active_canon_profile_id()
+        if draft.canon_profile_id is not None:
+            self._require_complete_canon(profile_id)
         return self._repository.create_project(
             draft,
-            canon_profile_id=self._repository.active_canon_profile_id(),
+            canon_profile_id=profile_id,
         )
 
     def current_canon_profile_id(self) -> uuid.UUID:
@@ -1830,6 +1885,32 @@ class StudioService:
 
     def get_canon(self, profile_id: uuid.UUID) -> CanonProfileDto:
         return self._repository.get_canon_profile(profile_id)
+
+    def _require_complete_canon(self, profile_id: uuid.UUID) -> CanonProfileDto:
+        canon = self.get_canon(profile_id)
+        if set(canon.fixed_assets) != set(FIXED_CANON_ROLES):
+            raise StudioConflictError("所选猫咪参考不完整，请检查参考资料。")
+        return canon
+
+    def cat_reference_options(self) -> list[CatReferenceOptionDto]:
+        return self._repository.list_cat_reference_options()
+
+    def reference_binding(self, scope: ReferenceScope, object_id: uuid.UUID) -> ReferenceBindingDto:
+        return self._repository.get_reference_binding(scope, object_id)
+
+    def change_reference_binding(self, scope: ReferenceScope, object_id: uuid.UUID, command: ReferenceBindingCommand) -> ReferenceBindingDto:
+        self._require_complete_canon(command.canon_profile_id)
+        self._repository.change_reference_binding(scope, object_id, command)
+        return self.reference_binding(scope, object_id)
+
+    def preview_character_remake(self, command: CharacterRemakePreviewCommand) -> CharacterRemakePreviewDto:
+        canon = self._require_complete_canon(command.canon_profile_id)
+        option = next((o for o in self.cat_reference_options() if o.canon_profile_id == canon.id), None)
+        snapshot = self._repository.character_remake_source(command.source_type, command.source_id)
+        return remake_preview(command, snapshot, canon_hash=canon.profile_hash, label=option.label if option else "历史参考设定")
+
+    def create_character_remake(self, command: CharacterRemakeCommand) -> CharacterRemakeDto:
+        return self._repository.create_character_remake(command)
 
     def register_canon_asset(
         self,
@@ -1854,7 +1935,8 @@ class StudioService:
 
     def create_story_series(self, command: SeriesCreateCommand) -> StorySeriesDto:
         profile_id = command.canon_profile_id or self._repository.active_canon_profile_id()
-        self._repository.get_canon_profile(profile_id)
+        if command.canon_profile_id is not None:
+            self._require_complete_canon(profile_id)
         return self._repository.create_story_series(
             command, canon_profile_id=profile_id
         )
@@ -1866,6 +1948,9 @@ class StudioService:
         series = self._repository.get_story_series(series_id)
         if series is None:
             raise StudioNotFoundError("story series not found")
+        references = generation_references.get()
+        if references is not None:
+            references.setdefault(("series", str(series.id)), str(series.canon_profile_id))
         return series
 
     def update_story_series(
@@ -1885,6 +1970,7 @@ class StudioService:
             series,
             source_beats=self._repository.list_series_source_beats(series_id),
             canon_profile_hash=canon.profile_hash,
+            cat_identity=canon.cat_identity_prompt,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
             capability_revision=self._provider_runtime.capability_revision,
@@ -1965,6 +2051,7 @@ class StudioService:
             command=command,
             source_beats=self._repository.list_series_source_beats(series_id),
             canon_profile_hash=canon.profile_hash,
+            cat_identity=canon.cat_identity_prompt,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
             capability_revision=self._provider_runtime.capability_revision,
@@ -2256,6 +2343,7 @@ class StudioService:
             incoming_continuity=incoming,
             additional_notes=additional_notes,
             canon_profile_hash=canon.profile_hash,
+            cat_identity=canon.cat_identity_prompt,
             provider=self._provider_runtime.provider,
             model=self._provider_runtime.planning_model,
             capability_revision=self._provider_runtime.capability_revision,
@@ -2557,6 +2645,8 @@ class StudioService:
         self, document_id: uuid.UUID, command: StoryImportConfirmCommand
     ) -> StoryImportMaterializationDto:
         self.get_story_import(document_id)
+        if command.canon_profile_id is not None:
+            self._require_complete_canon(command.canon_profile_id)
         return self._repository.confirm_story_source(document_id, command)
 
     def project_library(self, query: ProjectLibraryQuery) -> ProjectLibraryPageDto:
@@ -2659,8 +2749,10 @@ class StudioService:
                 ),
             )
         self._require_paid_calls_enabled()
-        prompt = _planner_prompt(project, command.text)
-        output_schema = _planner_output_schema()
+        canon = self.get_canon(project.canon_profile_id)
+        prompt = _planner_prompt(project, command.text, canon.cat_identity_prompt)
+        prompt += remake_story_context(self._repository.remake_input_context(project_id))
+        output_schema = _planner_output_schema(project.target_duration_seconds)
         input_hash = _hash_document(
             {
                 "projectId": str(project_id),
@@ -2671,7 +2763,8 @@ class StudioService:
                 "capabilityRevision": self._provider_runtime.capability_revision,
                 "prompt": prompt,
                 "outputSchema": output_schema,
-                "plannerPromptRevision": "catflow-life-planner-v3-spatial",
+                "plannerPromptRevision": "catflow-life-planner-v5-performance",
+                "canonProfileId": str(canon.id), "canonProfileHash": canon.profile_hash,
             }
         )
         now = datetime.now(UTC)
@@ -2692,7 +2785,8 @@ class StudioService:
                 "targetDurationSeconds": project.target_duration_seconds,
                 "prompt": prompt,
                 "outputSchema": output_schema,
-                "plannerPromptRevision": "catflow-life-planner-v3-spatial",
+                "plannerPromptRevision": "catflow-life-planner-v5-performance",
+                "canonProfileId": str(canon.id), "canonProfileHash": canon.profile_hash,
                 "capabilityRevision": self._provider_runtime.capability_revision,
             },
             resultAssetIds=[],
@@ -2729,11 +2823,18 @@ class StudioService:
         )
         if existing is not None:
             return existing
-        if job.frozen_input.get("outputContractRevision") == DIRECTOR_OUTPUT_CONTRACT:
+        if job.frozen_input.get("outputContractRevision") in {
+            DIRECTOR_OUTPUT_CONTRACT, "professional-director-v3",
+        }:
             # Manual result repair shares the same generation contract as Provider output.
             # exclude_unset preserves the distinction between missing and explicitly empty lists.
             try:
-                payload = ProfessionalDirectorOutput.model_validate(
+                output_model = (
+                    PerformanceDirectorOutput
+                    if job.frozen_input["outputContractRevision"] == DIRECTOR_OUTPUT_CONTRACT
+                    else ProfessionalDirectorOutput
+                )
+                payload = output_model.model_validate(
                     payload.model_dump(by_alias=True, exclude_unset=True)
                 )
             except ValidationError as exc:
@@ -2860,6 +2961,29 @@ class StudioService:
             environmentIntent=story.environment_intent,
         )
         prompt = _director_prompt(project, story, self.get_canon(project.canon_profile_id).cat_identity_prompt)
+        # Carry only the adopted proposal's frozen user directions. A later, unadopted
+        # planner conversation must not silently change this story's director input.
+        planner = self._repository.planner_snapshot(project_id)
+        source_proposal = next(
+            (item for item in planner.proposals if item.id == story.source_proposal_id), None
+        )
+        source_job = next(
+            (item for item in self._repository.list_project_jobs(project_id)
+             if source_proposal is not None and item.input_hash == source_proposal.context_hash
+             and item.kind in {"plan_story", "plan_series_episode"}), None
+        )
+        user_directions = ""
+        if source_job is not None:
+            user_directions = source_job.frozen_input.get(
+                "text", source_job.frozen_input.get("additionalNotes", "")
+            )
+            if not isinstance(user_directions, str):
+                user_directions = ""
+        if user_directions:
+            prompt += (
+                "\n【已采用故事对应的用户补充（原文）】\n" + user_directions
+                + "\n依据已采用故事安排表演与节奏；不因补充说明增加第二条剧情或改写原始来源事实。"
+            )
         output_schema = director_provider_output_schema()
         selection_hash = self.current_selection_hash(project_id)
         base_shot_plan = self._repository.active_shot_plan(project_id)
@@ -2877,7 +3001,8 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v6-spatial",
+            "directorPromptRevision": "catflow-director-v7-performance",
+            "storyUserDirections": user_directions,
             "outputContractRevision": DIRECTOR_OUTPUT_CONTRACT,
             "normalizationRevision": DIRECTOR_NORMALIZATION_REVISION,
             "inputInstruction": "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
@@ -3047,7 +3172,7 @@ class StudioService:
             if is_video
             else self._provider_runtime.image_model,
             "capabilityRevision": self._provider_runtime.capability_revision,
-            "promptCompilerRevision": "catflow-shot-production-v2",
+            "promptCompilerRevision": "catflow-shot-production-v3-performance",
             "generationMode": "from_frame" if is_video else "references",
             "durationSeconds": duration if is_video else None,
             "targetDurationFrames": context["targetDurationFrames"],
@@ -5492,7 +5617,7 @@ class StudioService:
         if len(image_references) > self._provider_runtime.maximum_segment_image_references:
             raise StudioConflictError("所选参考图片超过当前接口支持数量，请减少参考。")
         if command.edit_contract_version == 2:
-            compiler_revision = "segment-edit-v7"
+            compiler_revision = "segment-edit-v8-performance"
             negative_prompt = command.avoid_problems
             prompt = compile_edit_prompt(
                 command,
@@ -5529,7 +5654,7 @@ class StudioService:
                 end_state_policy=command.end_state_policy,
                 desired_end_state=command.desired_end_state,
             )
-            compiler_revision = "segment-edit-v6"
+            compiler_revision = "segment-edit-v6-performance"
             if command.generation_mode == "from_frame":
                 prompt = (
                     f"以提供的正确起始画面开始，重新生成动作：{command.instruction}。"
@@ -6377,6 +6502,9 @@ class StudioService:
         project = self._repository.get_project(project_id)
         if project is None:
             raise StudioNotFoundError("project not found")
+        references = generation_references.get()
+        if references is not None:
+            references.setdefault(("project", str(project.id)), str(project.canon_profile_id))
         return project
 
     def _require_paid_calls_enabled(self) -> None:
@@ -6388,6 +6516,21 @@ class StudioService:
         return self._repository.create_job(job)
 
     def _with_pricing_snapshot(self, job: JobDto) -> JobDto:
+        if job.project_id is not None or job.series_id is not None:
+            scope, oid = ("project", job.project_id) if job.project_id else ("series", job.series_id)
+            captured = (generation_references.get() or {}).get((scope, str(oid)))
+            profile_id = job.frozen_input.get("canonProfileId") or captured
+            if profile_id is None:
+                owner = self._require_project(oid) if scope == "project" else self.get_story_series(oid)
+                profile_id = str(owner.canon_profile_id)
+            if captured is not None and str(profile_id) != captured:
+                raise StudioConflictError("猫咪参考已变化，请重新预览后提交。")
+            canon = self.get_canon(uuid.UUID(str(profile_id)))
+            job = job.model_copy(update={"frozen_input": {
+                **job.frozen_input, "canonProfileId": str(canon.id), "canonProfileHash": canon.profile_hash,
+                "catIdentity": canon.cat_identity_prompt,
+                "fixedCanonReferences": {role: {"assetId": str(asset.id), "sha256": asset.sha256} for role, asset in canon.fixed_assets.items()},
+            }})
         if job.provider == "ark" and "executionContract" not in job.frozen_input:
             contract = execution_contract(job.kind)
             contract["apiBaseUrl"] = self._provider_runtime.api_base_url.rstrip("/")
@@ -6531,7 +6674,9 @@ def _hash_document(document: object) -> str:
     ).hexdigest()
 
 
-def _planner_output_schema() -> dict[str, Any]:
+def _planner_output_schema(target_duration_seconds: int) -> dict[str, Any]:
+    if not 8 <= target_duration_seconds <= 15:
+        raise ValueError("story duration must be between 8 and 15 seconds")
     required = [
         "title",
         "summary",
@@ -6557,21 +6702,21 @@ def _planner_output_schema() -> dict[str, Any]:
             },
             "title": {"type": "string", "minLength": 4, "maxLength": 12},
             "summary": {"type": "string", "minLength": 1, "maxLength": 60},
-            "targetDurationSeconds": {"type": "integer", "const": 12},
+            "targetDurationSeconds": {"type": "integer", "const": target_duration_seconds},
             "dialoguePolicy": {"type": "string", "enum": ["none", "minimal"]},
         },
     }
 
 
-def _planner_prompt(project: ProjectDto, user_text: str) -> str:
+def _planner_prompt(project: ProjectDto, user_text: str, cat_identity: str = "固定同一只灰白虎斑猫") -> str:
     return (
+        f"【本次猫咪身份】{cat_identity}。本次所选身份决定猫咪外观，来源文字保留动作与因果。\n"
         f"为原创一人一猫生活短片《{project.title}》生成一条结构化提案。"
+        f"创作构想（原始输入）：{project.theme}。"
         f"用户主题：{user_text}。目标严格为{project.target_duration_seconds}秒、9:16、"
         "无对白或极少对白。只允许一个主要生活事件，并清楚表达"
         "触发、孩子动作、猫咪反应、可见变化和温暖结尾。"
-        "结尾必须继续发生清晰、"
-        "自然、可观察的小动作；不得让儿童和猫咪原地互看，不得用静止停帧、"
-        "重复呼吸、无意义慢镜头或循环动作填充时长。保持原创，不复制任何现有IP。"
+        f"{NARRATIVE_DIRECTION}{CAT_PERFORMANCE_DIRECTION}保持原创，不复制任何现有IP。"
         "标题使用4至12个汉字，摘要不超过60个汉字；标题、摘要与触发字段不得整句重复，"
         "不得复述用户原文。禁止使用‘围绕……展开’、‘通过……呈现’、‘营造……氛围’、"
         "‘体现治愈感’等空泛套话；每个字段优先描述儿童、猫咪、道具或环境具体、可观察的"
@@ -6605,8 +6750,8 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
         "每个镜头必须同时提供默认镜头卡和详细导演执行设计：焦距、机位高度与角度、"
         "前中后景构图、视线与运动方向、人物和猫咪的初始状态—运动路径—结束状态、"
         "可见物理状态变化、前后镜头连续性、最终帧、光线、环境声、物件声、动作声、"
-        "导演意图与生成风险。每个角色每镜头最多三个有意义微动作。"
-        "结尾必须继续发生自然动作，不得原地互看、停帧、重复呼吸或循环填时长。"
+        "导演意图与生成风险。"
+        f"{NARRATIVE_DIRECTION}{CAT_PERFORMANCE_DIRECTION}{DIRECTOR_BEAT_DIRECTION}"
         "固定儿童为6至7岁、约1.2米、约4.5至5头身、齐下颌短发；动作符合低龄儿童"
         "能力，禁止8岁以上修长比例、青少年脸型、成人化身体或成人化表情。"
         f"{cat_identity}。保持正确四足、尾巴和可信人猫比例。"
@@ -6627,7 +6772,7 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
         "【参考图核对】实际检查图中已有物体及其数量、状态、可接触表面、落脚点和活动空间。"
         "图三是图一和图二同一组角色的比例参考，不能增加角色。区分固定陈设、可移动物体和携带物，"
         "不把环境图中已完成的物体状态作为故事动作起点。冲突写进待处理意见并指出涉及镜头。"
-        "【动作与声音】走位、物理变化和连续性是执行动作的唯一来源；兼容摘要应与它们一致，"
+        "【动作与声音】actionBeats是时间和动作顺序的唯一来源；走位提供空间起止，兼容摘要与节拍一致，"
         "整体基调和导演意图不再给出另一套动作顺序。按各镜时长安排一个主动作及必要反应，"
         "声音只能对应已经设计的动作和环境，不通过声音重新引入被删除的姿态、人物或道具。"
         "【输出前自检】在本次调用中逐项核对故事、实际参考图、构图、走位、物理变化、"
@@ -6755,7 +6900,9 @@ def _segment_edit_prompt(
         "需要修正的错误动作和道具状态不得照搬。入点参考负责起始衔接。"
         + f"\n【结束状态】\n{ending}\n"
         "角色动作必须明确表现初始状态—运动路径—结束状态，并在结束状态形成可观察的"
-        "物理闭合；不得静止、原地互看或循环动作填充时长。"
+        "闭合；允许有回应的短暂目光交流和自然收尾，不循环动作填充时长。"
+        "若明确要求修改眼部表演，固定基础眼型而允许闭合、重睁与视线转移；"
+        "仅作用于本次选区及指定目标，不自动修改其他表演或选区外内容。"
     )
 
 
@@ -6890,9 +7037,9 @@ def _segment_generation_input_snapshot(
             "generationRange": preview.generation_range,
             "candidateCoreRange": preview.candidate_core_range,
         },
-        promptCompilerRevision="segment-edit-v7"
+        promptCompilerRevision="segment-edit-v8-performance"
         if preview.edit_contract_version == 2
-        else "segment-edit-v6"
+        else "segment-edit-v6-performance"
         if preview.compiled_provider_prompt
         else "segment-edit-v5"
         if preview.reference_preparation_job_id

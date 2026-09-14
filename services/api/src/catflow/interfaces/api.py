@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from catflow.application.character_references import (
+    ReferenceBindingCommand, ReferenceBindingDto, CharacterRemakePreviewCommand,
+    CharacterRemakeCommand, CharacterRemakePreviewDto, CharacterRemakeDto,
+)
+
 import asyncio
 import ctypes
 import json
@@ -77,6 +82,7 @@ from catflow.application.service import (
     AssetGenerationPreviewDto,
     CanonProfileDto,
     CanonRevisionCreateCommand,
+    CatReferenceOptionDto,
     EditCreateCommand,
     EditVersionDto,
     EnvironmentDraftSaveCommand,
@@ -388,6 +394,34 @@ def create_app(
     @app.get("/api/v1/canon/current")
     def current_canon() -> CanonProfileDto:
         return service.current_canon()
+
+    @app.get("/api/v1/canon/options", response_model=list[CatReferenceOptionDto])
+    def cat_reference_options():
+        return service.cat_reference_options()
+
+    @app.get("/api/v1/projects/{project_id}/reference-binding", response_model=ReferenceBindingDto)
+    def project_reference_binding(project_id: uuid.UUID):
+        return service.reference_binding("project", project_id)
+
+    @app.patch("/api/v1/projects/{project_id}/reference-binding", response_model=ReferenceBindingDto)
+    def change_project_reference_binding(project_id: uuid.UUID, command: ReferenceBindingCommand):
+        return service.change_reference_binding("project", project_id, command)
+
+    @app.get("/api/v1/story-series/{series_id}/reference-binding", response_model=ReferenceBindingDto)
+    def series_reference_binding(series_id: uuid.UUID):
+        return service.reference_binding("series", series_id)
+
+    @app.patch("/api/v1/story-series/{series_id}/reference-binding", response_model=ReferenceBindingDto)
+    def change_series_reference_binding(series_id: uuid.UUID, command: ReferenceBindingCommand):
+        return service.change_reference_binding("series", series_id, command)
+
+    @app.post("/api/v1/character-remakes/preview", response_model=CharacterRemakePreviewDto)
+    def preview_character_remake(command: CharacterRemakePreviewCommand):
+        return service.preview_character_remake(command)
+
+    @app.post("/api/v1/character-remakes", response_model=CharacterRemakeDto, status_code=201)
+    def create_character_remake(command: CharacterRemakeCommand):
+        return service.create_character_remake(command)
 
     @app.get("/api/v1/canon/profiles/{profile_id}")
     def get_canon(profile_id: uuid.UUID) -> CanonProfileDto:

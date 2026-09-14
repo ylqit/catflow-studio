@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from .contract import ContractModel
 
@@ -124,6 +124,35 @@ class ConfirmedShotFrame(ContractModel):
     ] = Field(min_length=5, max_length=5)
 
 
+class CatPerformance(ContractModel):
+    visibility: Literal["visible", "partial", "hidden"]
+    gaze_from: str = Field(alias="gazeFrom", max_length=160)
+    gaze_to: str = Field(alias="gazeTo", max_length=160)
+    eyelid_action: Literal["none", "blink", "slow_blink", "squint_release"] = Field(
+        alias="eyelidAction"
+    )
+
+
+class ActionBeat(ContractModel):
+    start_frame: int = Field(alias="startFrame", ge=0, lt=360)
+    end_frame: int = Field(alias="endFrame", gt=0, le=360)
+    purpose: Literal["trigger", "action", "reaction", "payoff"]
+    child_action: str = Field(alias="childAction", max_length=300)
+    cat_action: str = Field(alias="catAction", max_length=300)
+    visible_change: str = Field(alias="visibleChange", min_length=1, max_length=300)
+    cat_performance: CatPerformance | None = Field(alias="catPerformance", default=None)
+
+    @model_validator(mode="after")
+    def validate_beat(self) -> ActionBeat:
+        if self.end_frame <= self.start_frame:
+            raise ValueError("节拍结束帧必须晚于开始帧")
+        if not self.child_action.strip() and not self.cat_action.strip():
+            raise ValueError("节拍至少需要一个角色的可见动作或反应")
+        if not self.visible_change.strip():
+            raise ValueError("节拍需要说明可见的新变化")
+        return self
+
+
 class ShotSpec(ContractModel):
     id: str = Field(min_length=1, max_length=80)
     order: int = Field(ge=1, le=4)
@@ -155,11 +184,26 @@ class ShotSpec(ContractModel):
         alias="environmentUse", default="recompose"
     )
     confirmed_frame: ConfirmedShotFrame | None = Field(alias="confirmedFrame", default=None)
+    action_beats: list[ActionBeat] | None = Field(alias="actionBeats", default=None, min_length=1)
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_document(self, handler):
+        document = handler(self)
+        # Absent performance design must not change old snapshots or design hashes.
+        if self.action_beats is None:
+            document.pop("actionBeats", None)
+            document.pop("action_beats", None)
+        return document
 
     @model_validator(mode="after")
     def validate_frame_duration(self) -> ShotSpec:
         if self.duration_frames is not None and self.duration_frames != self.duration_seconds * 24:
             raise ValueError("durationFrames must equal durationSeconds at the 24 fps edit rate")
+        previous_end = 0
+        for beat in self.action_beats or []:
+            if beat.start_frame < previous_end or beat.end_frame > self.duration_seconds * 24:
+                raise ValueError("节拍须按时间排列、不可重叠或超出镜头时长")
+            previous_end = beat.end_frame
         return self
 
 
@@ -175,7 +219,10 @@ def _screen_direction(value: str) -> Literal["left_to_right", "right_to_left"] |
 def _validate_professional_semantics(shots: list[ShotSpec]) -> None:
     for shot in shots:
         assert shot.physical_change is not None
-        if shot.physical_change.before.strip() == shot.physical_change.after.strip():
+        if (
+            not shot.action_beats
+            and shot.physical_change.before.strip() == shot.physical_change.after.strip()
+        ):
             raise ValueError(
                 f"professional shot {shot.order} requires a visible physical state change"
             )
@@ -329,6 +376,14 @@ class DirectorPlanPayload(ContractModel):
 
 class ProfessionalDirectorOutput(DirectorPlanPayload):
     shots: list[ProfessionalShotOutput] = Field(min_length=1, max_length=4)
+
+
+class PerformanceShotOutput(ProfessionalShotOutput):
+    action_beats: list[ActionBeat] = Field(alias="actionBeats", min_length=1)
+
+
+class PerformanceDirectorOutput(DirectorPlanPayload):
+    shots: list[PerformanceShotOutput] = Field(min_length=1, max_length=4)
 
 
 class ProfessionalShotPlanDraft(ShotPlanDraft):

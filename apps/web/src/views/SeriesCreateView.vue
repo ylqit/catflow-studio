@@ -2,11 +2,13 @@
 import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
+import CatReferenceSelector from "../components/CatReferenceSelector.vue";
 import { api } from "../api/client";
 import type { SeriesCreateCommand } from "../api/types";
 
 const router = useRouter();
 const saving = ref(false);
+const catReady = ref(false);
 const error = ref("");
 const form = reactive<SeriesCreateCommand>({
   title: "",
@@ -35,6 +37,7 @@ async function create() {
   saving.value = true;
   error.value = "";
   try {
+    if (!form.canonProfileId || !catReady.value) throw new Error("请选择可用的猫咪参考。");
     const created = await api.createStorySeries({
       ...form,
       plannedEpisodeCount: form.lengthMode === "fixed" ? form.plannedEpisodeCount : null,
@@ -58,6 +61,7 @@ async function create() {
     <nav class="wizard-steps" aria-label="新建系列步骤"><b>1 系列构想</b><span>2 规划预览</span><span>3 确认整季方案</span><span>4 开始制作</span></nav>
     <form class="card series-form" @submit.prevent="create">
       <header><div><h1>新建系列</h1><p>填写系列方向。本步骤只保存构想，不调用模型。</p></div><RouterLink to="/series">返回系列</RouterLink></header>
+      <CatReferenceSelector v-model="form.canonProfileId" @ready="catReady = $event" />
       <div class="form-grid">
         <label class="field"><span>系列名称</span><input v-model="form.title" aria-label="系列名称" required maxlength="160" placeholder="森林野餐" /></label>
         <label class="field"><span>叙事方式</span><select v-model="form.narrativeMode"><option value="continuous">连续剧情</option><option value="lightly_serialized">轻连续</option><option value="anthology">单元故事</option></select></label>
@@ -75,7 +79,7 @@ async function create() {
         <label class="field"><span>补充说明</span><textarea v-model="form.additionalNotes" placeholder="可留空" /></label>
       </div>
       <p v-if="error" class="notice error">{{ error }}</p>
-      <footer><p>固定 9:16、24 fps；儿童、猫咪和基础画风继承当前固定设定。</p><button class="primary" :disabled="saving">{{ saving ? "正在保存" : "保存构想并查看规划" }}</button></footer>
+      <footer><p>固定 9:16、24 fps；儿童与画风共用固定参考，猫咪采用上方选择。</p><button class="primary" :disabled="saving || !catReady">{{ saving ? "正在保存" : "保存构想并查看规划" }}</button></footer>
     </form>
   </main>
 </template>

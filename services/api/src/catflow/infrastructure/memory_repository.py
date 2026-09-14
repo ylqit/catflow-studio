@@ -101,6 +101,7 @@ from catflow.application.story_imports import (
     StorySourceRelationSuggestionDto,
     StorySourceUnitDto,
     story_import_confirmation_request_snapshot,
+    confirmation_request_matches,
 )
 from catflow.domain.billing import rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, ShotPlanDraft
@@ -109,10 +110,17 @@ from catflow.domain.video_repairs import FrameRange
 _provider_association_lock = RLock()
 
 
-class MemoryStudioRepository:
+from .memory_character_references import MemoryCharacterReferences, reference_transaction
+
+
+class MemoryStudioRepository(MemoryCharacterReferences):
     """Deterministic test repository; production uses PostgreSQL."""
 
     def __init__(self) -> None:
+        self._reference_lock = RLock()
+        self._production_started = {}
+        self._character_remakes = {}
+        self._cat_options = {}
         self._canon_profile_id = uuid.uuid4()
         now = datetime.now(UTC)
         self._assets: dict[uuid.UUID, StoredAssetDto] = {}
@@ -265,7 +273,7 @@ class MemoryStudioRepository:
     def register_canon_asset(
         self,
         *,
-        role: FixedCanonRole,
+        role: str,
         sha256: str,
         storage_key: str,
         byte_size: int,
@@ -1273,6 +1281,7 @@ class MemoryStudioRepository:
             reverse=True,
         )
 
+    @reference_transaction
     def materialize_series_episode(
         self,
         series_id: uuid.UUID,
@@ -1626,6 +1635,7 @@ class MemoryStudioRepository:
         self._record_event(completed, "story_source.analysis.completed")
         return updated
 
+    @reference_transaction
     def confirm_story_source(
         self, document_id: uuid.UUID, command: StoryImportConfirmCommand
     ) -> StoryImportMaterializationDto:
@@ -1635,9 +1645,7 @@ class MemoryStudioRepository:
                 command.idempotency_key
             )
             if original_request is not None:
-                input_conflicts = original_request != story_import_confirmation_request_snapshot(
-                    command
-                )
+                input_conflicts = not confirmation_request_matches(original_request, command)
             else:
                 input_conflicts = (
                     existing.suggestion_id != command.suggestion_id
@@ -1691,7 +1699,7 @@ class MemoryStudioRepository:
                     mustAvoid=["不得无依据改写来源事实"],
                     additionalNotes=f"来源文档 {document.id}",
                 ),
-                canon_profile_id=self._canon_profile_id,
+                canon_profile_id=command.canon_profile_id or self._canon_profile_id,
             )
         elif command.target == "append_series":
             if command.target_series_id is None:
@@ -1712,7 +1720,7 @@ class MemoryStudioRepository:
                         theme=text,
                         targetDurationSeconds=command.default_episode_duration_seconds,
                     ),
-                    canon_profile_id=self._canon_profile_id,
+                    canon_profile_id=command.canon_profile_id or self._canon_profile_id,
                 )
                 for title, text in stories
             ]
@@ -1725,6 +1733,11 @@ class MemoryStudioRepository:
                 raise StudioNotFoundError("target project not found")
         else:
             raise StudioConflictError("story relationship target is missing")
+        if command.target in {"append_series", "revision", "reference"}:
+            scope, oid = ("series", command.target_series_id) if command.target_series_id else ("project", command.target_project_id)
+            binding = self.get_reference_binding(scope, oid)
+            if command.canon_profile_id is not None and command.canon_profile_id != binding.canon_profile_id:
+                raise StudioConflictError("导入必须继承目标作品的猫咪参考。")
         now = datetime.now(UTC)
         if series is not None and command.target in {"new_series", "append_series"}:
             existing_unit_ids = {
@@ -1859,6 +1872,7 @@ class MemoryStudioRepository:
             ),
         )
 
+    @reference_transaction
     def enqueue_planner_message(
         self, project_id: uuid.UUID, command: PlannerMessageCommand, *, job: JobDto
     ) -> JobDto:
@@ -1932,6 +1946,7 @@ class MemoryStudioRepository:
         self._record_event(job, "planner.proposal.created", {"proposalId": str(dto.id)})
         return dto
 
+    @reference_transaction
     def adopt_proposal(self, project_id: uuid.UUID, proposal_id: uuid.UUID) -> StoryVersionDto:
         proposal = self._proposals.get(proposal_id)
         if proposal is None or proposal.project_id != project_id:
@@ -1968,6 +1983,7 @@ class MemoryStudioRepository:
     def list_stories(self, project_id: uuid.UUID) -> list[StoryVersionDto]:
         return list(reversed(self._stories.get(project_id, [])))
 
+    @reference_transaction
     def create_story(self, project_id: uuid.UUID, command: StoryCreateCommand) -> StoryVersionDto:
         stories = self._stories.setdefault(project_id, [])
         for story in stories:
@@ -2054,6 +2070,7 @@ class MemoryStudioRepository:
     def list_shot_plans(self, project_id: uuid.UUID) -> list[ShotPlanVersionDto]:
         return list(reversed(self._shot_plans.get(project_id, [])))
 
+    @reference_transaction
     def activate_shot_plan(
         self,
         project_id: uuid.UUID,
@@ -2218,6 +2235,7 @@ class MemoryStudioRepository:
     def get_asset(self, asset_id: uuid.UUID) -> StoredAssetDto | None:
         return self._assets.get(asset_id)
 
+    @reference_transaction
     def create_job(self, job: JobDto) -> JobDto:
         existing = self._existing_job(job.idempotency_key, input_hash=job.input_hash)
         if existing is not None:
@@ -2231,6 +2249,7 @@ class MemoryStudioRepository:
             story = self.active_story(job.project_id)
             if snapshot and (story is None or story.id != snapshot.source_story_version_id):
                 raise StudioConflictError("故事来源已变化，请重新预览后提交。")
+        self._mark_reference_production(job)
         self._jobs[job.id] = job
         self._jobs_by_idempotency[job.idempotency_key] = job.id
         self._record_event(job, "job.queued")

@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import JobStatusCard from "../JobStatusCard.vue";
 import { api } from "../../api/client";
 import ShotProduction from "./ShotProduction.vue";
+import ActionBeatsEditor from "./ActionBeatsEditor.vue";
 import DirectorDraftEditor from "./DirectorDraftEditor.vue";
 import type { AssetDto, JobDto, ShotPlanGenerationAttemptDto, ShotPlanVersionDto, ShotSpecDto, WorkspaceDto } from "../../api/types";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
@@ -205,7 +206,7 @@ const comparisonSummary = computed(() => {
   if (!left || !right) return { added: 0, removed: 0, changed: 0, durationClosed: false };
   const coreFields: CoreComparisonField[] = [
     "durationSeconds", "framing", "cameraMovement", "childAction", "catAction", "environmentChange", "finalFrame", "transition",
-    "cameraSpatialRelation", "interactionConstraints", "visualExclusions",
+    "cameraSpatialRelation", "interactionConstraints", "visualExclusions", "actionBeats",
   ];
   let changed = 0;
   for (let index = 0; index < Math.min(left.shots.length, right.shots.length); index += 1) {
@@ -221,7 +222,7 @@ const comparisonSummary = computed(() => {
   };
 });
 
-type CoreComparisonField = "durationSeconds" | "framing" | "cameraMovement" | "childAction" | "catAction" | "environmentChange" | "finalFrame" | "transition" | "cameraSpatialRelation" | "interactionConstraints" | "visualExclusions";
+type CoreComparisonField = "durationSeconds" | "framing" | "cameraMovement" | "childAction" | "catAction" | "environmentChange" | "finalFrame" | "transition" | "cameraSpatialRelation" | "interactionConstraints" | "visualExclusions" | "actionBeats";
 
 function trimSummaryBoundary(value?: string | null) {
   return (value ?? "").trim().replace(/[，,；;。.!！?？：:]+$/u, "");
@@ -239,14 +240,15 @@ function actionSummary(
 }
 
 function childSummary(shot: ShotSpecDto) {
-  return actionSummary(shot.childBlocking, shot.childAction);
+  return shot.actionBeats?.map(beat => beat.childAction).filter(Boolean).join("；") || actionSummary(shot.childBlocking, shot.childAction);
 }
 
 function catSummary(shot: ShotSpecDto) {
-  return actionSummary(shot.catBlocking, shot.catAction);
+  return shot.actionBeats?.map(beat => beat.catAction).filter(Boolean).join("；") || actionSummary(shot.catBlocking, shot.catAction);
 }
 
 function changeSummary(shot: ShotSpecDto) {
+  if (shot.actionBeats?.length) return shot.actionBeats.map(beat => beat.visibleChange).join("；");
   if (!shot.physicalChange) return shot.environmentChange;
   const subject = trimSummaryBoundary(shot.physicalChange.subject);
   const before = trimSummaryBoundary(shot.physicalChange.before);
@@ -274,13 +276,20 @@ function coreFieldValue(shot: ShotSpecDto, field: CoreComparisonField): string |
   if (field === "catAction") return catSummary(shot);
   if (field === "environmentChange") return changeSummary(shot);
   if (field === "finalFrame") return finalFrameSummary(shot);
-  if (field === "interactionConstraints" || field === "visualExclusions") return JSON.stringify(shot[field]) ?? "未记录";
+  if (field === "interactionConstraints" || field === "visualExclusions" || field === "actionBeats") return JSON.stringify(shot[field]) ?? "未记录";
   if (field === "cameraSpatialRelation") return shot.cameraSpatialRelation ?? "未记录";
   return shot[field];
 }
 
 const professionalFieldDefinitions = [
   ["动作与状态", "人物初始状态", (shot: ShotSpecDto) => shot.childBlocking?.initialState],
+  ["节拍与表演", "时间与角色反应", (shot: ShotSpecDto) => shot.actionBeats?.map(beat => (
+    (beat.startFrame / 24).toFixed(2) + "–" + (beat.endFrame / 24).toFixed(2) + "秒：" +
+    [beat.childAction, beat.catAction, beat.visibleChange].filter(Boolean).join("；") +
+    (beat.catPerformance ? "；关注：" + beat.catPerformance.gazeFrom + " → " + beat.catPerformance.gazeTo +
+      "；眼睑：" + ({ none: "未指定", blink: "闭合再睁开", slow_blink: "缓慢闭合再睁开", squint_release: "半眯后恢复" }[beat.catPerformance.eyelidAction]) +
+      "；脸部：" + ({ visible: "清楚可见", partial: "部分可见", hidden: "不可见" }[beat.catPerformance.visibility]) : "")
+  ))],
   ["动作与状态", "人物运动路径", (shot: ShotSpecDto) => shot.childBlocking?.movementPath],
   ["动作与状态", "人物结束状态", (shot: ShotSpecDto) => shot.childBlocking?.endState],
   ["动作与状态", "人物微动作", (shot: ShotSpecDto) => shot.childBlocking?.microMotions],
@@ -788,6 +797,7 @@ async function closeComparison() {
       <div class="shot-list">
         <article v-for="shot in shots" :key="shot.id" class="shot-card">
           <div class="shot-scene-controls"><label>镜头场景<select v-model="shot.sceneAssetId" :disabled="!canEditSelected"><option :value="null">当前项目环境</option><option v-for="asset in sceneAssets" :key="asset.id" :value="asset.id">环境 · {{ asset.id.slice(0, 8) }}</option></select></label><label>环境使用<select v-model="shot.environmentUse" :disabled="!canEditSelected"><option value="recompose">保持场景外观，允许重新构图</option><option value="preserve_layout">沿用此图布局</option></select></label><button v-if="shot.confirmedFrame" class="quiet" :disabled="!canEditSelected" @click="shot.confirmedFrame = null">移除当前镜头画面绑定（保存后生效）</button></div>
+          <ActionBeatsEditor v-model="shot.actionBeats" :duration-frames="shot.durationSeconds * 24" :disabled="!canEditSelected" :initial-child-action="shot.childAction" :initial-cat-action="shot.catAction" :initial-visible-change="shot.environmentChange" />
           <ShotProduction v-if="selectedPlan" :project-id="projectId" :plan-id="selectedPlan.id" :shot-id="shot.id" :disabled="shotsDirty || !selectedPlan.active" :runtime="runtime" @changed="selectedPlanId = null; emit('changed'); loadVersionData()" />
           <div class="shot-summary">
             <div class="shot-number">{{ String(shot.order).padStart(2, "0") }}<label><input v-model.number="shot.durationSeconds" type="number" min="2" max="15" :disabled="!canEditSelected" /> 秒</label></div>
@@ -826,8 +836,8 @@ async function closeComparison() {
             <fieldset v-if="shot.lens && shot.composition && shot.childBlocking && shot.catBlocking && shot.physicalChange && shot.continuity && shot.lighting && shot.sound" class="professional-editor" :disabled="!canEditSelected">
             <div class="professional-grid">
               <section class="detail-group span-two"><h3>动作与状态</h3><div class="detail-subgrid detail-three">
-                <div class="detail-subgroup"><h4>人物走位</h4><label>初始状态<textarea v-model="shot.childBlocking.initialState" data-detail-target="child" /></label><label>运动路径<textarea v-model="shot.childBlocking.movementPath" :data-testid="`${shot.id}-child-movement`" /></label><label>结束状态<textarea v-model="shot.childBlocking.endState" /></label><div class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.childBlocking.microMotions" :key="`child-motion-${index}`"><textarea v-model="shot.childBlocking.microMotions[index]" :aria-label="`人物微动作 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除人物微动作 ${index + 1}`" @click="shot.childBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.childBlocking.microMotions.length">暂无微动作</span></div></div>
-                <div class="detail-subgroup"><h4>猫咪走位</h4><label>初始状态<textarea v-model="shot.catBlocking.initialState" data-detail-target="cat" /></label><label>运动路径<textarea v-model="shot.catBlocking.movementPath" /></label><label>结束状态<textarea v-model="shot.catBlocking.endState" /></label><div class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.catBlocking.microMotions" :key="`cat-motion-${index}`"><textarea v-model="shot.catBlocking.microMotions[index]" :aria-label="`猫咪微动作 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除猫咪微动作 ${index + 1}`" @click="shot.catBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.catBlocking.microMotions.length">暂无微动作</span></div></div>
+                <div class="detail-subgroup"><h4>人物走位</h4><label>初始状态<textarea v-model="shot.childBlocking.initialState" data-detail-target="child" /></label><label v-if="!shot.actionBeats?.length">运动路径<textarea v-model="shot.childBlocking.movementPath" :data-testid="`${shot.id}-child-movement`" /></label><label>结束状态<textarea v-model="shot.childBlocking.endState" /></label><div v-if="!shot.actionBeats?.length" class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.childBlocking.microMotions" :key="`child-motion-${index}`"><textarea v-model="shot.childBlocking.microMotions[index]" :aria-label="`人物微动作 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除人物微动作 ${index + 1}`" @click="shot.childBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.childBlocking.microMotions.length">暂无微动作</span></div></div>
+                <div class="detail-subgroup"><h4>猫咪走位</h4><label>初始状态<textarea v-model="shot.catBlocking.initialState" data-detail-target="cat" /></label><label v-if="!shot.actionBeats?.length">运动路径<textarea v-model="shot.catBlocking.movementPath" /></label><label>结束状态<textarea v-model="shot.catBlocking.endState" /></label><div v-if="!shot.actionBeats?.length" class="micro-motion-editor"><b>微动作</b><div v-for="(_, index) in shot.catBlocking.microMotions" :key="`cat-motion-${index}`"><textarea v-model="shot.catBlocking.microMotions[index]" :aria-label="`猫咪微动作 ${index + 1}`" rows="2" /><button type="button" class="quiet" :aria-label="`移除猫咪微动作 ${index + 1}`" @click="shot.catBlocking.microMotions.splice(index, 1)">移除</button></div><span v-if="!shot.catBlocking.microMotions.length">暂无微动作</span></div></div>
                 <div class="detail-subgroup"><h4>物理变化</h4><label>对象<textarea v-model="shot.physicalChange.subject" data-detail-target="change" rows="2" /></label><label>变化前<textarea v-model="shot.physicalChange.before" /></label><label>变化后<textarea v-model="shot.physicalChange.after" /></label></div>
               </div></section>
               <section class="detail-group span-two"><h3>镜头画面</h3><div class="detail-subgrid">

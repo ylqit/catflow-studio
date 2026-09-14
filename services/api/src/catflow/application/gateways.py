@@ -87,7 +87,9 @@ class SegmentVideoGenerationRequest:
             expected
         ):
             raise ValueError("segment generation Canon roles are incomplete or out of order")
-        if self.prompt_compiler_revision != "segment-edit-v7" and expected != canonical:
+        if self.prompt_compiler_revision not in {
+            "segment-edit-v7", "segment-edit-v8-performance"
+        } and expected != canonical:
             raise ValueError("legacy segment generation requires all five Canon references")
         parsed = urlsplit(self.context_video_url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:

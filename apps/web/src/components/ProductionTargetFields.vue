@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CatReferenceSelector from "./CatReferenceSelector.vue";
 import { computed } from "vue";
 import type { StoryProductionTarget } from "../api/types";
 const props = defineProps<{ modelValue: StoryProductionTarget; label: string }>();
@@ -12,6 +13,7 @@ const keepText = computed({
 <template>
   <fieldset class="production-target">
     <legend>{{ label }}</legend>
+    <CatReferenceSelector :model-value="modelValue.canonProfileId" @update:model-value="change({ canonProfileId: $event })" />
     <label>系列长度<select :value="modelValue.lengthMode" @change="change(($event.target as HTMLSelectElement).value === 'ongoing' ? { lengthMode: 'ongoing', plannedEpisodeCount: null } : { lengthMode: 'fixed', plannedEpisodeCount: 3 })"><option value="fixed">固定集数</option><option value="ongoing">持续连载</option></select></label>
     <label v-if="modelValue.lengthMode === 'fixed'">计划集数<input :value="modelValue.plannedEpisodeCount" type="number" min="2" step="1" :aria-label="label + '计划集数'" @input="change({ plannedEpisodeCount: Number(($event.target as HTMLInputElement).value) })" /></label>
     <label>每集时长（秒）<input :value="modelValue.defaultEpisodeDurationSeconds" type="number" min="8" max="15" step="1" :aria-label="label + '每集时长'" @input="change({ defaultEpisodeDurationSeconds: Number(($event.target as HTMLInputElement).value) })" /></label>

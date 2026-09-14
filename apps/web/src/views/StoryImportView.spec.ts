@@ -7,7 +7,7 @@ import StoryImportView from "./StoryImportView.vue";
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const routeState = vi.hoisted(() => ({ params: {} as Record<string, string> }));
 const route = reactive(routeState);
-const client = vi.hoisted(() => ({
+const client = vi.hoisted(() => ({ catReferenceOptions: vi.fn(), referenceBinding: vi.fn(),
   previewStoryImport: vi.fn(),
   createStoryImport: vi.fn(),
   reanalyzeStoryImport: vi.fn(),
@@ -63,6 +63,8 @@ function mountView() {
 describe("StoryImportView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    client.catReferenceOptions.mockResolvedValue([{ key: "gray-original", label: "原版灰猫", canonProfileId: "gray-canon", available: true, fixedAssets: {}, auxiliary: [] }, { key: "white-v4", label: "V4 校色白猫", canonProfileId: "white-canon", available: true, fixedAssets: {}, auxiliary: [] }]);
+    client.referenceBinding.mockResolvedValue({ canonProfileId: "gray-canon", label: "原版灰猫", canChange: true });
     route.params = {};
     client.storySeries.mockResolvedValue([]);
     client.projects.mockResolvedValue([]);
@@ -371,4 +373,22 @@ describe("StoryImportView", () => {
     resolveRequest?.({ document: analyzedDocument, analysisJob: null, idempotencyReplayed: false });
     await flushPromises();
   });
+  it("persists a white choice per group and confirms it without another analysis", async () => {
+    route.params = { documentId: "document-1" };
+    client.storyImport.mockResolvedValue(analyzedDocument);
+    client.confirmStoryImport.mockResolvedValue({ series: { id: "white-series" }, projects: [] });
+    const wrapper = mountView();
+    await flushPromises();
+    const group = wrapper.findAll(".relation-card")[0];
+    await group.findAll(".cat-selector .choice")[1].trigger("click");
+    await group.get(".confirm-relation").trigger("click");
+    await flushPromises();
+    expect(client.updateStoryProductionTargets).toHaveBeenCalledWith("document-1", expect.objectContaining({
+      productionTargets: expect.objectContaining({ "suggestion-1": expect.objectContaining({ canonProfileId: "white-canon" }) }),
+    }));
+    expect(client.confirmStoryImport).toHaveBeenCalledWith("document-1", expect.objectContaining({ canonProfileId: "white-canon" }));
+    expect(client.createStoryImport).not.toHaveBeenCalled();
+    expect(client.reanalyzeStoryImport).not.toHaveBeenCalled();
+  });
+
 });

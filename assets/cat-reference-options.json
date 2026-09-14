@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "options": [
+    {
+      "key": "gray-original",
+      "label": "原版灰猫",
+      "cat": {
+        "identity": "固定同一只灰白虎斑猫",
+        "lockedTraits": [
+          "灰白毛色分区",
+          "虎斑",
+          "眼睛",
+          "鼻口",
+          "环纹尾巴",
+          "四足结构"
+        ]
+      },
+      "fixedAssets": {
+        "episode_child": {
+          "path": "assets/canon/v4/episode-child.png",
+          "sha256": "f36c293aaa0064daab3a82bb1ddf05e4f019ffb3441f0470708f0bf8cad5632f"
+        },
+        "style_board": {
+          "path": "assets/canon/v4/style-board.png",
+          "sha256": "2201e1771b7ba309bb9b51223704ab0f69478b035c27dfe8f35a704dbf57c4fc"
+        },
+        "episode_cat": {
+          "path": "assets/canon/v4/episode-cat.png",
+          "sha256": "ba9ff0c48cc38cc125e9e8fcf18eba0c8ccd398bb5d7497afb6550963660dd4c"
+        },
+        "pair_scale": {
+          "path": "assets/canon/v4/pair-scale.png",
+          "sha256": "fdca346beae17e000ae580cf13849bde9134fa9cd811fc676f7bbd65dcfe8037"
+        }
+      },
+      "auxiliary": []
+    },
+    {
+      "key": "white-v4",
+      "label": "V4 校色白猫",
+      "cat": {
+        "identity": "固定同一只V4白猫：圆脸、深色大眼、粉鼻、白色蓬松毛发和低饱和浅灰虎斑；白毛保持白色底色，允许自然局部暖光，不整体染成奶油黄或棕灰色",
+        "lockedTraits": [
+          "V4参考中的头身比例和圆脸",
+          "深色大眼与粉鼻",
+          "白底浅灰虎斑分区",
+          "蓬松胸毛与圆爪",
+          "有环纹的蓬松尾巴",
+          "正常四足结构与可信人猫比例"
+        ]
+      },
+      "fixedAssets": {
+        "episode_child": {
+          "path": "assets/canon/v4/episode-child.png",
+          "sha256": "f36c293aaa0064daab3a82bb1ddf05e4f019ffb3441f0470708f0bf8cad5632f"
+        },
+        "style_board": {
+          "path": "assets/canon/v4/style-board.png",
+          "sha256": "2201e1771b7ba309bb9b51223704ab0f69478b035c27dfe8f35a704dbf57c4fc"
+        },
+        "episode_cat": {
+          "path": "assets/character-previews/white-cat-v4-color-corrected/side-standing.png",
+          "sha256": "8fe143090a8212724cc1f57010c8d68aae21e6efcb77d87d7ea4d7d7f84697f4"
+        },
+        "pair_scale": {
+          "path": "assets/character-previews/white-cat-v4-color-corrected/pair-scale.png",
+          "sha256": "11556da7e75017fb3270e5129c6839e8589aff5503cfbcf67fe81c109ecb9bdb"
+        }
+      },
+      "auxiliary": [
+        {
+          "view": "front",
+          "path": "assets/character-previews/white-cat-v4-color-corrected/front-standing.png",
+          "sha256": "71aef741f913395eca6a458ef76f1a3e2e4add7cec60c36941837fb5e639c361"
+        },
+        {
+          "view": "rear",
+          "path": "assets/character-previews/white-cat-v4-color-corrected/rear-standing.png",
+          "sha256": "dc9b02d84745895bc4e8bb39a2e7d1f73e7ce40b79bec08d25277e566a637601"
+        },
+        {
+          "view": "three-view",
+          "path": "assets/character-previews/white-cat-v4-color-corrected/three-view-board.png",
+          "sha256": "825acf275ec0bb0beaf2ecd91a635fb9d6ff67a588ce6e9c494eca891ba0bdf5"
+        }
+      ]
+    }
+  ]
+}

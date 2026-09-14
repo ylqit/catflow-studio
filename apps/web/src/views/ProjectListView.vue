@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import CatReferenceSelector from "../components/CatReferenceSelector.vue";
 import { api } from "../api/client";
 import type {
   ProjectCollectionDto,
@@ -82,7 +83,8 @@ const layout = ref<ProjectLibraryLayout>(
 
 const showCreate = ref(false);
 const creating = ref(false);
-const draft = reactive({ title: "", theme: "", targetDurationSeconds: 12 });
+const draft = reactive({ title: "", theme: "", targetDurationSeconds: 12, canonProfileId: undefined as string | undefined });
+const catReady = ref(false);
 const showCollectionCreate = ref(false);
 const creatingCollection = ref(false);
 const collectionDraft = reactive<{ name: string; colorKey: ProjectCollectionDto["colorKey"] }>({
@@ -298,6 +300,7 @@ async function createProject() {
   creating.value = true;
   error.value = "";
   try {
+    if (!draft.canonProfileId || !catReady.value) throw new Error("请选择可用的猫咪参考。");
     const project = await api.createProject(draft);
     await router.push(`/projects/${project.id}/planner`);
   } catch (reason) {
@@ -577,7 +580,8 @@ onBeforeUnmount(() => {
         <div class="field"><label for="project-theme">最初的生活灵感</label><textarea id="project-theme" v-model="draft.theme" required placeholder="孩子替刚回家的猫咪擦干湿爪…" /></div>
         <div class="field"><label for="project-duration">目标时长：{{ draft.targetDurationSeconds }} 秒</label><input id="project-duration" v-model.number="draft.targetDurationSeconds" type="range" min="8" max="15" /></div>
         <p class="notice">固定 9:16。简短主题会同时作为第一个标签，之后可以在项目库中调整。</p>
-        <button class="primary modal-submit" :disabled="creating || !draft.title || !draft.theme"><span v-if="creating" class="spinner" />{{ creating ? "正在创建" : "进入故事灵感" }}</button>
+        <CatReferenceSelector v-model="draft.canonProfileId" @ready="catReady = $event" />
+        <button class="primary modal-submit" :disabled="!catReady || creating || !draft.title || !draft.theme"><span v-if="creating" class="spinner" />{{ creating ? "正在创建" : "进入故事灵感" }}</button>
       </form>
     </div>
 

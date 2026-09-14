@@ -13,6 +13,7 @@ from pydantic import Field, ValidationError, model_validator
 from catflow.application.job_execution import PaidJobCommand
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import LifeStoryProposalDraft
+from .creative_direction import CAT_PERFORMANCE_DIRECTION, NARRATIVE_DIRECTION
 
 SeriesNarrativeMode = Literal["continuous", "lightly_serialized", "anthology"]
 AdaptationPolicy = Literal["preserve_all", "condense_mainline"]
@@ -1001,11 +1002,12 @@ def compile_series_plan_preview(
     *,
     source_beats: list[SeriesSourceBeatDto] | None = None,
     canon_profile_hash: str,
+    cat_identity: str = "固定同一只灰白虎斑猫",
     provider: str,
     model: str,
     capability_revision: str,
 ) -> SeriesPlanPreviewDto:
-    prompt_revision = "catflow-series-planner-v5-contract"
+    prompt_revision = "catflow-series-planner-v6-performance"
     source_beats = source_beats or []
     requested_episode_count = min(
         series.planned_episode_count or DEFAULT_ONGOING_PLANNING_BATCH,
@@ -1051,13 +1053,16 @@ def compile_series_plan_preview(
         f"单次最多规划 {MAX_SERIES_PLANNING_BATCH} 集；这是调用批量边界，不是系列总集数上限。"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-planner-v5-condense-contract"
+        prompt_revision = "catflow-series-planner-v6-condense-performance"
         prompt += CONDENSE_PLANNING_INSTRUCTIONS
 
     if series.additional_notes:
         prompt += f"\n【补充制作约束】\n{series.additional_notes}"
         prompt_revision += "-notes"
 
+    prompt += f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，原文保留故事动作与因果，不沿用其他猫咪版本。"
+    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
+    prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
     document = {
         "seriesId": str(series.id),
@@ -1109,11 +1114,12 @@ def compile_series_plan_segment_preview(
     command: SeriesPlanSegmentCommand,
     source_beats: list[SeriesSourceBeatDto],
     canon_profile_hash: str,
+    cat_identity: str = "固定同一只灰白虎斑猫",
     provider: str,
     model: str,
     capability_revision: str,
 ) -> SeriesPlanSegmentPreviewDto:
-    prompt_revision = "catflow-series-segment-planner-v3-contract"
+    prompt_revision = "catflow-series-segment-planner-v4-contract"
     end_episode_order = command.start_episode_order + command.requested_episode_count - 1
     remaining_episode_count = (
         max((series.planned_episode_count or 0) - end_episode_order, 0)
@@ -1148,8 +1154,11 @@ def compile_series_plan_segment_preview(
         f"【用户必须保留要求】{json.dumps(series.must_keep, ensure_ascii=False)}\n"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-segment-planner-v3-condense-contract"
+        prompt_revision = "catflow-series-segment-planner-v4-condense-contract"
         prompt += CONDENSE_PLANNING_INSTRUCTIONS
+    prompt += f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，原文保留故事动作与因果，不沿用其他猫咪版本。"
+    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
+    prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
     document = {
         "seriesId": str(series.id),
@@ -1200,13 +1209,14 @@ def compile_series_episode_story_preview(
     additional_notes: str | None,
     source_segment: SeriesPlanSegmentVersionDto | None = None,
     canon_profile_hash: str,
+    cat_identity: str = "固定同一只灰白虎斑猫",
     provider: str,
     model: str,
     capability_revision: str,
 ) -> SeriesEpisodeStoryPreviewDto:
     if episode.project_id is None:
         raise ValueError("series episode must be materialized before story planning")
-    prompt_revision = "catflow-series-episode-planner-v4-spatial"
+    prompt_revision = "catflow-series-episode-planner-v5-spatial"
     outline = episode.outline
     prompt = (
         "每集写清参与者、道具数量、初始位置、动作目的和结束状态；物体移动保持同一实例。"
@@ -1232,7 +1242,7 @@ def compile_series_episode_story_preview(
         "变化过程和结束状态。保持固定儿童、猫咪身份与系列设定，不擅自改写整季路线。"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-episode-planner-v4-condense-spatial"
+        prompt_revision = "catflow-series-episode-planner-v5-condense-spatial"
         treatment_document = [
             item.model_dump(mode="json", by_alias=True)
             for item in (
@@ -1245,6 +1255,9 @@ def compile_series_episode_story_preview(
             f"来源处理：{json.dumps(treatment_document, ensure_ascii=False)}"
             f"\n来源方案：{source_segment.id if source_segment is not None else active_plan.id}"
         )
+    prompt += f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，原文保留故事动作与因果，不沿用其他猫咪版本。"
+    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
+    prompt_revision += "-canon-performance"
     output_schema = LifeStoryProposalDraft.model_json_schema(by_alias=True)
     document = {
         "seriesId": str(series.id),

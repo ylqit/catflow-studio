@@ -53,7 +53,7 @@ let editorRequest = 0;
 
 const slots: Array<{ id: AssetGenerationKind; order: string; title: string; responsibility: string }> = [
   { id: "episode_child", order: "01", title: "本集儿童设计", responsibility: "锁定 6–7 岁、约 1.2 米、约 4.5–5 头身、齐下颌短发与脸型" },
-  { id: "episode_cat", order: "02", title: "本集猫咪设计", responsibility: "锁定灰白分区、虎斑、眼鼻口、环纹尾巴与四足" },
+  { id: "episode_cat", order: "02", title: "本集猫咪设计", responsibility: "锁定所选猫咪的毛色、眼鼻口、尾巴与四足" },
   { id: "pair_scale", order: "03", title: "人猫同框比例", responsibility: "只负责可信的人猫尺寸与站位关系" },
   { id: "environment", order: "04", title: "当前环境参考", responsibility: "保持场景外观与空间关系，允许镜头重新构图；并非严格首帧" },
   { id: "style_board", order: "05", title: "固定画风板", responsibility: "只控制线条、材质、色彩与柔和暖光" },
@@ -425,7 +425,7 @@ onBeforeUnmount(() => {
       <h2>保持每条视频中的角色一致</h2>
       <p>儿童、猫咪、同框比例与画风已固定；这里只需为本条视频选择独立环境。</p>
       <div class="canon-portrait"><span class="child">⌒◡⌒</span><span class="cat">= ᵔᴗᵔ =</span></div>
-      <ul><li><b>儿童</b><span>同一位 6–7 岁、约 1.2 米短发儿童</span></li><li><b>猫咪</b><span>同一只灰白虎斑猫</span></li><li><b>画风</b><span>二维柔和数字插画</span></li><li><b>来源</b><span>只使用已经确认的画风板</span></li></ul>
+      <ul><li><b>儿童</b><span>同一位 6–7 岁、约 1.2 米短发儿童</span></li><li><b>猫咪</b><span>继承本作品选定的猫咪参考</span></li><li><b>画风</b><span>二维柔和数字插画</span></li><li><b>来源</b><span>只使用已经确认的画风板</span></li></ul>
       <p class="notice">画面检查只提供建议；只有文件损坏、无法解码或格式错误会阻止选择。</p>
     </div>
 

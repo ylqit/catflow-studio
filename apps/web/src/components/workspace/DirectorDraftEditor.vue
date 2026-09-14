@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import ActionBeatsEditor from './ActionBeatsEditor.vue';
+import type { ActionBeatDto } from '../../api/types';
 
 const props = defineProps<{ modelValue: string }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
@@ -28,6 +30,15 @@ const requiredGroups: Record<string, string[]> = {
   lighting: ['direction', 'softness', 'colorIntent'], sound: ['musicIntent'],
 };
 type Field = { path: string[]; label: string; value: string; list: boolean; missing: boolean };
+function editableBeats(shot: Record<string, unknown>): ActionBeatDto[] | undefined {
+  if (!Array.isArray(shot.actionBeats)) return undefined;
+  const readable = shot.actionBeats.every(beat => beat && typeof beat === 'object'
+    && ['childAction', 'catAction', 'visibleChange'].every(key => typeof beat[key] === 'string')
+    && typeof beat.startFrame === 'number' && typeof beat.endFrame === 'number'
+    && (!beat.catPerformance || (typeof beat.catPerformance === 'object'
+      && ['visibility', 'gazeFrom', 'gazeTo', 'eyelidAction'].every(key => typeof beat.catPerformance[key] === 'string'))));
+  return readable ? shot.actionBeats as ActionBeatDto[] : undefined;
+}
 function fields(shot: Record<string, unknown>): Field[] {
   const result: Field[] = [];
   for (const key of ['framing', 'cameraMovement', 'childAction', 'catAction', 'environmentChange', 'cameraSpatialRelation', 'interactionConstraints', 'visualExclusions', ...Object.keys(requiredGroups), 'directorIntent']) {
@@ -38,12 +49,22 @@ function fields(shot: Record<string, unknown>): Field[] {
     } else add([key], shot[key], true);
   }
   function add(path: string[], value: unknown, required: boolean) {
+    if (Array.isArray(shot.actionBeats) && shot.actionBeats.length && (
+      ['childAction', 'catAction', 'environmentChange'].includes(path[0])
+      || (['childBlocking', 'catBlocking'].includes(path[0]) && ['movementPath', 'microMotions'].includes(path[1]))
+    )) return;
     const list = Array.isArray(value) || ['interactionConstraints', 'visualExclusions'].includes(path[0]);
     result.push({ path, label: path.map(part => names[part] ?? part).join(' → '),
       value: value == null ? '' : Array.isArray(value) ? value.join('\n') : typeof value === 'object' ? JSON.stringify(value) : String(value),
       list, missing: required && (value == null || value === '') });
   }
   return result;
+}
+function updateBeats(index: number, beats: ActionBeatDto[]) {
+  if (!document.value) return;
+  const next = structuredClone(document.value);
+  next.shots[index].actionBeats = beats;
+  emit('update:modelValue', JSON.stringify(next, null, 2));
 }
 function update(index: number, path: string[], value: string, list = false) {
   if (!document.value) return;
@@ -65,6 +86,8 @@ function update(index: number, path: string[], value: string, list = false) {
     <p v-if="!document">正文暂时不能解析，请在高级编辑中检查 JSON；已有输入仍保留。</p>
     <article v-for="(shot, index) in shots" :key="index" class="draft-shot">
       <h3>镜头 {{ index + 1 }} · 已返回内容</h3>
+      <ActionBeatsEditor v-if="shot.actionBeats == null || editableBeats(shot)" :model-value="editableBeats(shot)" :duration-frames="Number(shot.durationSeconds ?? 2) * 24" :initial-child-action="String(shot.childAction ?? '')" :initial-cat-action="String(shot.catAction ?? '')" :initial-visible-change="String(shot.environmentChange ?? '')" @update:model-value="updateBeats(index, $event)" />
+      <p v-else role="alert">节拍字段结构不完整，原结果已保留，请在高级编辑中修正 actionBeats 后使用表单。</p>
       <label>时长（秒）<input type="number" min="2" max="15" :aria-label="`镜头 ${index + 1} 时长`" :value="shot.durationSeconds" @input="update(index, ['durationSeconds'], ($event.target as HTMLInputElement).value)" /></label>
       <details open><summary>动作、画面与声音</summary>
         <label v-for="field in fields(shot)" :key="field.path.join('.')" :class="{ missing: field.missing }">

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeriesCreateView from "./SeriesCreateView.vue";
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
-const client = vi.hoisted(() => ({ createStorySeries: vi.fn() }));
+const client = vi.hoisted(() => ({ catReferenceOptions: vi.fn(), referenceBinding: vi.fn(), createStorySeries: vi.fn() }));
 
 vi.mock("vue-router", async () => {
   const actual = await vi.importActual<typeof import("vue-router")>("vue-router");
@@ -21,6 +21,8 @@ function mountView() {
 describe("SeriesCreateView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    client.catReferenceOptions.mockResolvedValue([{ key: "gray-original", label: "原版灰猫", canonProfileId: "gray-canon", available: true, fixedAssets: {}, auxiliary: [] }, { key: "white-v4", label: "V4 校色白猫", canonProfileId: "white-canon", available: true, fixedAssets: {}, auxiliary: [] }]);
+    client.referenceBinding.mockResolvedValue({ canonProfileId: "gray-canon", label: "原版灰猫", canChange: true });
     client.createStorySeries.mockResolvedValue({ id: "series-1" });
   });
 

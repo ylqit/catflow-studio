@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ReferenceBindingPanel from "../components/ReferenceBindingPanel.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -127,6 +128,7 @@ onBeforeUnmount(() => {
       <p v-if="runtime?.worker.ready === false" class="worker-warning" role="status">
         后台任务暂时不可用。已经保存的任务不会丢失，{{ runtime.worker.retryingAutomatically ? "系统正在尝试恢复；" : "请到运行设置检查；" }}恢复前不能开始新的生成。
       </p>
+      <ReferenceBindingPanel scope="project" :object-id="projectId" :revision="workspace.project.updatedAt" @changed="loadWorkspace" />
       <section class="workspace-content">
         <PlannerStep v-if="step === 'planner'" :key="projectId" :project-id="projectId" :series-context="seriesContext" :runtime="runtime" @changed="loadWorkspace" />
         <AssetsStep v-else-if="step === 'assets'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="loadWorkspace" />

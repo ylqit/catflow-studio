@@ -54,6 +54,39 @@ class CanonProfileRecord(Base):
     )
 
 
+class CatReferenceOptionRecord(Base):
+    __tablename__ = "cat_reference_options"
+    __table_args__ = {"schema": SCHEMA_NAME}
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    canon_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.canon_profiles.id", ondelete="RESTRICT")
+    )
+    auxiliary_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    unavailable_reason: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class CharacterRemakeRecord(Base):
+    __tablename__ = "character_remakes"
+    __table_args__ = (
+        CheckConstraint("source_type IN ('project','series')", name="ck_character_remakes_source_type"),
+        UniqueConstraint("source_type", "target_id", name="uq_character_remake_target"),
+        {"schema": SCHEMA_NAME},
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    canon_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(f"{SCHEMA_NAME}.canon_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(96), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ProjectCollectionRecord(Base):
     __tablename__ = "project_collections"
     __table_args__ = (
@@ -90,6 +123,7 @@ class ProjectRecord(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    production_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     environment_generation_draft_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     theme: Mapped[str] = mapped_column(Text, nullable=False)
@@ -157,6 +191,7 @@ class StorySeriesRecord(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    production_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     premise: Mapped[str] = mapped_column(Text, nullable=False)
     adaptation_policy: Mapped[str] = mapped_column(

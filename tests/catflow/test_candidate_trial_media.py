@@ -22,6 +22,7 @@ from catflow.infrastructure.models import AssetRecord, JobRecord
 from catflow.infrastructure.postgres_repository import PostgresStudioRepository
 from catflow_worker.media_jobs import LocalMediaJobExecutor
 from catflow_worker.media_probe import inspect_video
+from catflow_worker.runtime_support import AssetMediaResolver
 
 
 def test_real_trial_slip_comparison_and_second_edit_preserve_audio(tmp_path, request):
@@ -127,6 +128,7 @@ def test_real_trial_slip_comparison_and_second_edit_preserve_audio(tmp_path, req
 
     def mock_candidate(parent, issue):
         inputs = dto.SegmentRepairPreviewCommand(
+            editContractVersion=2,
             baseVideoAssetId=root.id,
             baseEditVersionId=parent.id,
             editDraftId=draft.id,
@@ -136,6 +138,15 @@ def test_real_trial_slip_comparison_and_second_edit_preserve_audio(tmp_path, req
             anchorStartFrame=0,
             audioMode="generate_candidate",
         )
+        preparation = service.prepare_segment_references(
+            project.id, dto.SegmentReferencePreparationCommand(**inputs.model_dump())
+        )
+        AssetMediaResolver(sessions, store, ffmpeg_path=ffmpeg, ffprobe_path=ffprobe,
+                           timeline_renderer=executor).store_reference_preparation(preparation.id)
+        with sessions.begin() as session:
+            session.get(JobRecord, preparation.id).status = "storing"
+            session.get(JobRecord, preparation.id).status = "succeeded"
+        inputs = inputs.model_copy(update={"reference_preparation_job_id": preparation.id})
         prepared = service.preview_video_repair(project.id, inputs)
         job = service.create_video_repair_job(
             project.id,
@@ -149,6 +160,7 @@ def test_real_trial_slip_comparison_and_second_edit_preserve_audio(tmp_path, req
             job.video_repair_id, status="candidate_ready", candidate_asset_id=candidate.id
         )
         with sessions.begin() as session:
+            session.get(JobRecord, job.id).status = "storing"
             session.get(JobRecord, job.id).status = "succeeded"
         return job
 
@@ -173,18 +185,20 @@ def test_real_trial_slip_comparison_and_second_edit_preserve_audio(tmp_path, req
                 session.scalars(select(AssetRecord).where(AssetRecord.producing_job_id == local.id))
             )
             record = session.get(JobRecord, local.id)
+            record.status = "storing"
             record.status = "succeeded"
         return local, results
 
     paid = mock_candidate(base, {"startFrame": 48, "endFrame": 96})
     local, results = materialize(base, paid, 24, 72, "use_candidate")
     preview = next(asset for asset in results if asset.role == "edit_preview")
-    before = next(
-        asset for asset in results if asset.role == "edit_comparison" and asset.candidate_index == 0
-    )
-    after = next(
-        asset for asset in results if asset.role == "edit_comparison" and asset.candidate_index == 1
-    )
+    with sessions() as session:
+        comparison = session.get(JobRecord, local.id).provider_result_json["comparison"]
+    assert comparison["mode"] == "dual_player"
+    before = next(asset for asset in results if str(asset.id) == comparison["beforeAssetId"])
+    after = next(asset for asset in results if str(asset.id) == comparison["afterAssetId"])
+    assert before.role == "edit_trial_base"
+    assert after.id == preview.id
     assert preview.metadata_json["durationFrames"] == 289
     assert preview.metadata_json["audioChannels"] == 1
 
@@ -225,12 +239,12 @@ def test_real_trial_slip_comparison_and_second_edit_preserve_audio(tmp_path, req
             "-",
         )
 
-    assert picture_hash(before) == picture_hash(after)
+    assert picture_hash(before) != picture_hash(after)
     raw_pixels = run(
         "-i",
         store.resolve(after.storage_key),
         "-vf",
-        "crop=720:1280:720:0,scale=1:1",
+        "scale=1:1",
         "-pix_fmt",
         "rgb24",
         "-f",

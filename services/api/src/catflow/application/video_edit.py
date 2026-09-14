@@ -158,6 +158,8 @@ def compile_edit_prompt(
         window.generation_range,
         window.candidate_core_range,
     )
+    from .creative_direction import EDIT_PERFORMANCE_DIRECTION
+
     sections = ["【当前修改目标（用户原文，最高优先）】\n" + instruction]
     for label, value in [
         ("起始状态", options.start_state),
@@ -191,10 +193,10 @@ def compile_edit_prompt(
     duties = {
         "anchor_in": "仅提供修改起点的外观与构图；动作和状态以当前文字为准",
         "anchor_out": "用户明确选择匹配原结束状态，作为结束外观参考",
-        "first_frame": "严格起始画面",
+        "first_frame": "仅固定严格起始画面，之后的眼睑、视线和动作按本次要求自然变化",
         "last_frame": "严格结束画面（采用完整候选时有效）",
         "episode_child": "角色身份外观",
-        "episode_cat": "角色身份外观",
+        "episode_cat": "角色身份外观，不锁定逐帧睁眼状态或目光方向",
         "pair_scale": "角色间比例",
         "environment": "场景空间外观",
         "style_board": "画风与材质",
@@ -216,6 +218,7 @@ def compile_edit_prompt(
             "视频1：来源时间线上下文和未要求修改的外观；其中与当前目标冲突的动作或状态应修改。不得变速或复制参考来填充输出。",
         )
     sections.append("【实际参考职责】\n" + ("\n".join(references) or "无图片参考"))
+    sections.append("【表演与修改边界】\n" + EDIT_PERFORMANCE_DIRECTION)
     if options.end_state_policy == "follow_instruction":
         sections.append("结束状态遵循当前文字；未指定时合理延续。")
     elif options.end_state_policy == "replace":

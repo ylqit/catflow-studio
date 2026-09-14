@@ -25,6 +25,6 @@ const isWorkspace = computed(() => typeof route.params.projectId === "string");
         <span class="local-badge"><i /> 本机模式</span>
       </nav>
     </header>
-    <RouterView />
+    <RouterView :key="String(route.params.seriesId ?? route.params.projectId ?? 'shared')" />
   </div>
 </template>

@@ -1,4 +1,5 @@
 import type {
+  CatReferenceOptionDto, ReferenceBindingDto, ReferenceBindingCommand, CharacterRemakePreviewDto, CharacterRemakePreviewCommand, CharacterRemakeCommand, CharacterRemakeDto,
   ShotProductionContextDto,
   ShotMediaPreviewDto,
   AssetDto,
@@ -100,6 +101,20 @@ export class CatFlowClient {
 
   currentCanon(): Promise<CanonProfileDto> {
     return this.request("/api/v1/canon/current");
+  }
+
+  catReferenceOptions(): Promise<CatReferenceOptionDto[]> { return this.request("/api/v1/canon/options"); }
+  referenceBinding(scope: "project" | "series", id: string): Promise<ReferenceBindingDto> {
+    return this.request(`/api/v1/${scope === "series" ? "story-series" : "projects"}/${id}/reference-binding`);
+  }
+  changeReferenceBinding(scope: "project" | "series", id: string, command: ReferenceBindingCommand): Promise<ReferenceBindingDto> {
+    return this.json(`/api/v1/${scope === "series" ? "story-series" : "projects"}/${id}/reference-binding`, "PATCH", command);
+  }
+  previewCharacterRemake(command: CharacterRemakePreviewCommand): Promise<CharacterRemakePreviewDto> {
+    return this.json("/api/v1/character-remakes/preview", "POST", command);
+  }
+  createCharacterRemake(command: CharacterRemakeCommand): Promise<CharacterRemakeDto> {
+    return this.json("/api/v1/character-remakes", "POST", command);
   }
 
   uploadCanonAsset(role: "episode_child" | "episode_cat" | "pair_scale" | "style_board", file: File): Promise<AssetDto> {
@@ -398,6 +413,7 @@ export class CatFlowClient {
   confirmStoryImport(
     documentId: string,
     command: {
+      canonProfileId?: string | null;
       defaultEpisodeDurationSeconds?: number;
       adaptationPolicy?: "preserve_all" | "condense_mainline";
       narrativeMode?: import("./types").SeriesNarrativeMode;

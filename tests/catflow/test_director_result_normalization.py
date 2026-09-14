@@ -45,6 +45,12 @@ def _director_payload() -> dict[str, object]:
                 "order": 1,
                 "durationSeconds": 12,
                 "durationFrames": 288,
+                "actionBeats": [{
+                    "startFrame": 0, "endFrame": 288, "purpose": "action",
+                    "childAction": "孩子平缓浇水后放回水壶并推正托盘",
+                    "catAction": "猫咪挪步避开水滴后绕花盆迈一步",
+                    "visibleChange": "盆土颜色变深，托盘回到花盆正下方",
+                }],
                 "framing": "中景",
                 "cameraMovement": "固定观察",
                 "childAction": "孩子平缓浇水后放回水壶并推正托盘",
@@ -238,12 +244,12 @@ def test_normalizer_rejects_payload_without_a_shot_array() -> None:
 
 def test_professional_output_schema_requires_the_same_fields_as_validation() -> None:
     from catflow.domain.director_results import director_provider_output_schema
-    from catflow.domain.models import ProfessionalDirectorOutput, ShotSpec
+    from catflow.domain.models import PerformanceDirectorOutput, ShotSpec
 
-    schema = director_provider_output_schema()["$defs"]["ProfessionalShotOutput"]
+    schema = director_provider_output_schema()["$defs"]["PerformanceShotOutput"]
     for key in ("childBlocking", "catBlocking", "durationFrames", "lens", "composition",
                 "physicalChange", "continuity", "lighting", "sound", "directorIntent",
-                "cameraSpatialRelation", "interactionConstraints", "visualExclusions"):
+                "cameraSpatialRelation", "interactionConstraints", "visualExclusions", "actionBeats"):
         assert key in schema["required"]
         assert "default" not in schema["properties"][key]
         assert "anyOf" not in schema["properties"][key]
@@ -251,7 +257,7 @@ def test_professional_output_schema_requires_the_same_fields_as_validation() -> 
         payload["shots"][0].pop("blocking_note")
         payload["shots"][0][key] = None
         with pytest.raises(ValueError):
-            ProfessionalDirectorOutput.model_validate(payload)
+            PerformanceDirectorOutput.model_validate(payload)
     assert ShotSpec.model_fields["cat_blocking"].default is None
 
 

@@ -97,6 +97,7 @@ from catflow.application.story_imports import (
     StorySourceUnitDto,
     recommended_episode_count,
     story_import_confirmation_request_snapshot,
+    confirmation_request_matches,
 )
 from catflow.domain.billing import RateCardItem, rate_card_revision_signature
 from catflow.domain.models import LifeStoryProposalDraft, MicroEvent, ShotPlanDraft, ShotSpec
@@ -142,7 +143,10 @@ from .models import (
 )
 
 
-class PostgresStudioRepository:
+from .postgres_character_references import PostgresCharacterReferences, mark_reference_production, lock_reference_owner
+
+
+class PostgresStudioRepository(PostgresCharacterReferences):
     """PostgreSQL owns every durable CatFlow business fact and transaction boundary."""
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
@@ -246,7 +250,7 @@ class PostgresStudioRepository:
     def register_canon_asset(
         self,
         *,
-        role: FixedCanonRole,
+        role: str,
         sha256: str,
         storage_key: str,
         byte_size: int,
@@ -615,6 +619,7 @@ class PostgresStudioRepository:
         idempotency_key = command.idempotency_key
         input_hash = series_plan_materialization_hash(command)
         with self._sessions.begin() as session:
+            mark_reference_production(session, series_id=series_id)
             # Serialize before checking the key; concurrent replays must see the winner.
             series = session.scalar(
                 select(StorySeriesRecord).where(StorySeriesRecord.id == series_id).with_for_update()
@@ -740,6 +745,7 @@ class PostgresStudioRepository:
         idempotency_key: str,
     ) -> SeriesPlanVersionDto:
         with self._sessions.begin() as session:
+            mark_reference_production(session, series_id=series_id)
             prior = session.scalar(
                 select(SeriesPlanVersionRecord).where(
                     SeriesPlanVersionRecord.activation_idempotency_key == idempotency_key
@@ -1049,6 +1055,7 @@ class PostgresStudioRepository:
         command: SeriesPlanSegmentActivationCommand,
     ) -> SeriesPlanSegmentVersionDto:
         with self._sessions.begin() as session:
+            mark_reference_production(session, series_id=series_id)
             prior = session.scalar(
                 select(SeriesPlanSegmentVersionRecord).where(
                     SeriesPlanSegmentVersionRecord.activation_idempotency_key
@@ -1268,6 +1275,7 @@ class PostgresStudioRepository:
         idempotency_key: str,
     ) -> ProjectDto:
         with self._sessions.begin() as session:
+            lock_reference_owner(session, series_id=series_id)
             prior = session.scalar(
                 select(SeriesEpisodeRecord).where(
                     SeriesEpisodeRecord.materialization_idempotency_key == idempotency_key
@@ -1777,10 +1785,7 @@ class PostgresStudioRepository:
             )
             if prior is not None:
                 if prior.confirmation_request_snapshot_json is not None:
-                    input_conflicts = (
-                        prior.confirmation_request_snapshot_json
-                        != story_import_confirmation_request_snapshot(command)
-                    )
+                    input_conflicts = not confirmation_request_matches(prior.confirmation_request_snapshot_json, command)
                 else:
                     prior_series = (
                         session.get(StorySeriesRecord, prior.series_id)
@@ -1856,7 +1861,7 @@ class PostgresStudioRepository:
                     must_keep_json=command.must_keep,
                     must_avoid_json=["不得无依据改写来源事实"],
                     additional_notes=f"来源文档 {document.id}",
-                    canon_profile_id=ensure_canon_v4(session).id,
+                    canon_profile_id=command.canon_profile_id or ensure_canon_v4(session).id,
                 )
                 session.add(series_record)
                 session.flush()
@@ -1867,7 +1872,7 @@ class PostgresStudioRepository:
                 if series_record is None:
                     raise StudioNotFoundError("target story series not found")
             elif command.target == "independent":
-                canon_profile_id = ensure_canon_v4(session).id
+                canon_profile_id = command.canon_profile_id or ensure_canon_v4(session).id
                 stories = (
                     [(suggestion.title, "\n".join(unit.raw_text for unit in units))]
                     if command.adaptation_policy == "condense_mainline"
@@ -1894,6 +1899,11 @@ class PostgresStudioRepository:
                     raise StudioNotFoundError("target project not found")
             else:
                 raise StudioConflictError("story relationship target is missing")
+            if command.target in {"append_series", "revision", "reference"}:
+                owner_series, owner_projects = lock_reference_owner(session, series_id=command.target_series_id, project_id=command.target_project_id)
+                owner = owner_series or owner_projects[0]
+                if command.canon_profile_id is not None and command.canon_profile_id != owner.canon_profile_id:
+                    raise StudioConflictError("导入必须继承目标作品的猫咪参考。")
             suggestion.status = "accepted"
             record = StorySourceMaterializationRecord(
                 suggestion_id=suggestion.id,
@@ -2092,6 +2102,7 @@ class PostgresStudioRepository:
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
 
+            mark_reference_production(session, project_id=project_id, job=job)
             planner_session = session.scalar(
                 select(LifePlannerSessionRecord)
                 .where(LifePlannerSessionRecord.project_id == project_id)
@@ -2191,6 +2202,7 @@ class PostgresStudioRepository:
 
     def adopt_proposal(self, project_id: uuid.UUID, proposal_id: uuid.UUID) -> StoryVersionDto:
         with self._sessions.begin() as session:
+            mark_reference_production(session, project_id=project_id)
             session.scalar(
                 select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
             )
@@ -2258,6 +2270,7 @@ class PostgresStudioRepository:
 
     def create_story(self, project_id: uuid.UUID, command: StoryCreateCommand) -> StoryVersionDto:
         with self._sessions.begin() as session:
+            mark_reference_production(session, project_id=project_id)
             project = session.scalar(
                 select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
             )
@@ -2418,6 +2431,7 @@ class PostgresStudioRepository:
         expected_active_shot_plan_version_id: uuid.UUID | None,
     ) -> ShotPlanVersionDto:
         with self._sessions.begin() as session:
+            mark_reference_production(session, project_id=project_id)
             session.scalar(
                 select(ProjectRecord).where(ProjectRecord.id == project_id).with_for_update()
             )
@@ -2487,6 +2501,7 @@ class PostgresStudioRepository:
         metadata: dict[str, object] | None = None,
     ) -> AssetDto:
         with self._sessions.begin() as session:
+            mark_reference_production(session, project_id=project_id)
             existing = session.scalar(
                 select(AssetRecord).where(
                     AssetRecord.project_id == project_id,
@@ -2693,6 +2708,11 @@ class PostgresStudioRepository:
 
     def create_job(self, job: JobDto) -> JobDto:
         with self._sessions.begin() as session:
+            existing = _job_by_idempotency(session, job.idempotency_key)
+            if existing is not None:
+                _require_same_input(existing, job.input_hash)
+                return _job_dto(session, existing)
+            mark_reference_production(session, project_id=job.project_id, series_id=job.series_id, job=job)
             shot_media = (
                 job.frozen_input.get("purpose") in {"shot_frame", "shot_video"}
                 and job.provider != "local_ffmpeg"

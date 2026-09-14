@@ -38,6 +38,7 @@ class StoryImportPreviewCommand(ContractModel):
 
 
 class StoryProductionTarget(ContractModel):
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
     length_mode: SeriesLengthMode = Field(alias="lengthMode", default="fixed")
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=3, ge=2)
     default_episode_duration_seconds: int = Field(
@@ -220,6 +221,7 @@ class StoryImportCreateResultDto(ContractModel):
 
 
 class StoryImportConfirmCommand(ContractModel):
+    canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
     suggestion_id: uuid.UUID = Field(alias="suggestionId")
     target: StorySourceRelationType
     target_series_id: uuid.UUID | None = Field(alias="targetSeriesId", default=None)
@@ -271,11 +273,18 @@ def story_import_confirmation_request_snapshot(
 ) -> dict[str, Any]:
     """Return the versioned immutable request used for idempotency comparison."""
     return {
-        "version": 1,
+        "version": 2,
         "request": command.model_dump(
             mode="json", by_alias=True, exclude={"idempotency_key"}
         ),
     }
+
+
+def confirmation_request_matches(saved: dict[str, Any], command: StoryImportConfirmCommand) -> bool:
+    prior = dict(saved.get("request", {}))
+    if saved.get("version") == 1:
+        prior.setdefault("canonProfileId", None)
+    return prior == story_import_confirmation_request_snapshot(command)["request"]
 
 
 class StoryImportMaterializationDto(ContractModel):

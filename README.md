@@ -2,14 +2,16 @@
 
 CatFlow 是本机单用户的一人一猫原创生活短片工作室。正式界面只有浏览器 Web 页面；FastAPI 在 `127.0.0.1:8877` 同源提供 Vue SPA、REST、SSE 和媒体内容，PostgreSQL 是唯一业务状态源，Python Worker 负责 durable planning、Ark 媒体和 FFmpeg 成片。
 
-首版产品边界固定为：
+当前产品范围：
 
 - 一个项目对应一条独立的 8–15 秒生活短片。
-- 9:16、720×1280、无对白或极少对白。
-- 固定同一位 6–7 岁、约 1.2 米、约 4.5–5 头身的齐下颌短发儿童，以及同一只灰白虎斑猫。
-- Canon v4 柔和数字插画；`style_source` 永不进入图片或视频 Provider 输入。
+- 请求 9:16、24 fps、480p 档；交付记录使用提供方实际尺寸。声音按分镜或编辑要求。
+- 固定同一位 6–7 岁、约 1.2 米、约 4.5–5 头身的齐下颌短发儿童，猫咪可选择原版灰猫或 V4 校色白猫，同套主图、比例和身份说明绑定。
+- 固定柔和数字插画风格；`style_source` 永不进入图片或视频 Provider 输入。
 - 不使用 Electron、Toonflow-app、Express、SQLite、Socket.IO、Nginx 或第二业务状态源。
 - 不复制 Sowii 的具体角色、画面、台词、故事或品牌元素，只采用“日常微事件、低对白、人猫互动、温暖结尾”的原创内容语法。
+
+整片、逐镜和局部编辑均保留；新建、导入与系列共用灰猫／白猫选择。当前文档入口见 [文档索引](docs/README.md)，节拍与眼神表演改进见 [本轮说明](docs/PERFORMANCE_AND_CLEANUP.md)。
 
 ## 五步工作流
 
@@ -68,7 +70,7 @@ catflow_studio
 .\scripts\configure-existing-postgres.ps1
 ```
 
-脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。当前实例中的 `catflow_studio` 使用独立 Alembic 迁移链；当前迁移 head 为 `0020_shot_plan_review_workflow`。数据库表和接口的现状汇总见 [当前架构与开发交接](docs/CURRENT_ARCHITECTURE_AND_HANDOFF.md)。
+脚本只生成被 Git 忽略的 `.env`，把数据库名改为 `catflow_studio`，不会打印密码，也不会修改旧 `vedio-appdb`。业务库名以 `.env` 为准，恢复库可以与历史默认库分开保存。CatFlow 使用独立 Alembic 迁移链；当前迁移 head 为 `0035_character_references`。数据库表和接口的现状汇总见 [当前架构与开发交接](docs/CURRENT_ARCHITECTURE_AND_HANDOFF.md)。
 
 ## 本机启动
 
@@ -106,7 +108,7 @@ npm run build
 
 ## 备份、恢复与维护清理
 
-创建包含业务表和 `CATFLOW_MEDIA_ROOT` 所指相对媒体目录的本机备份：
+早期 v1 备份脚本保留兼容，但只覆盖固定的旧表集合，不适合作为当前系列、导入和恢复库的完整备份。当前数据应使用完整 PostgreSQL 备份或包含 catflow 全表、迁移版本和引用媒体的快照。以下命令仅适用于该早期格式：
 
 ```powershell
 .\scripts\backup-local.ps1
@@ -128,16 +130,9 @@ npm run build
 
 执行命令会拒绝运行中的 API、Worker 和活跃任务；它先创建完整逻辑数据库/媒体备份，再逐文件校验并隔离待删媒体。隔离副本至少保留 7 天，`purge-quarantine` 会再次检查数据库引用后才删除清单中的精确文件。
 
-### 遗留资产迁移（临时兼容）
+### 历史迁移
 
-旧数据导入器已收敛到 `scripts/legacy/`，只为尚未完成的一次性资产迁移保留，计划在下一次清理版本移除。它默认只做只读 dry-run：
-
-```powershell
-.\scripts\import-legacy-assets.ps1
-.\scripts\import-legacy-assets.ps1 -Apply
-```
-
-导入器只读取旧库中 `approved` 的 Canon、已选角色设计、环境、视频和成片，按 SHA256 校验及去重后复制媒体。它不导入 Scene、ShotCard、Generation Plan、Production Recipe、Canvas、Review、Workflow Step 或 Provider 任务历史。`style_source` 即使被归档导入也会带 `providerEligible=false`，不会进入新生成请求。
+旧工程单向导入器已退出日常脚本入口，源码和适用范围在 [历史档案](docs/archive/2026-09-14/README.md)。已导入资产和来源信息保留。
 
 ## 安全与付费边界
 
@@ -170,7 +165,7 @@ npm --workspace apps/web run build
 git diff --check
 ```
 
-媒体测试使用当前 `.env` 中已配置的 FFmpeg/ffprobe，并在临时媒体目录生成 720×1280、8–15 秒 MP4。所有测试都固定连接数据库名 `catflow_studio`，并只清理自己创建的精确项目 ID。
+媒体测试使用当前 `.env` 中已配置的 FFmpeg/ffprobe，并在临时媒体目录生成 720×1280、8–15 秒 MP4。测试由 tests/conftest.py 创建带明确 test 标记的独立数据库并应用迁移，测试结束后只删除它创建的测试库；不连接业务库执行测试清理。
 
 ## 关键不变量
 

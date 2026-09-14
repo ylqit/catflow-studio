@@ -8,10 +8,10 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from .models import DirectorPlanPayload, ProfessionalDirectorOutput
+from .models import DirectorPlanPayload, PerformanceDirectorOutput, ProfessionalDirectorOutput
 
-DIRECTOR_OUTPUT_CONTRACT = "professional-director-v3"
-DIRECTOR_NORMALIZATION_REVISION = "director-normalizer-v3"
+DIRECTOR_OUTPUT_CONTRACT = "professional-director-v4-performance"
+DIRECTOR_NORMALIZATION_REVISION = "director-normalizer-v4-performance"
 
 DirectorResultDisposition = Literal["candidate_ready", "needs_input", "invalid"]
 DirectorValidationSeverity = Literal["fatal", "blocking", "warning"]
@@ -24,12 +24,19 @@ def completed_director_text(provider_result: dict[str, Any] | None) -> str | Non
         return None
     parts = [
         content["text"]
-        for item in response.get("output", []) if isinstance(item, dict) and item.get("type") == "message"
+        for item in response.get("output", [])
+        if isinstance(item, dict) and item.get("type") == "message"
         for content in item.get("content", [])
-        if isinstance(content, dict) and content.get("type") == "output_text" and isinstance(content.get("text"), str)
+        if isinstance(content, dict)
+        and content.get("type") == "output_text"
+        and isinstance(content.get("text"), str)
     ]
     text = "".join(parts) or response.get("output_text")
-    return text if isinstance(text, str) and text.strip() and len(text.encode()) <= 2 * 1024 * 1024 else None
+    return (
+        text
+        if isinstance(text, str) and text.strip() and len(text.encode()) <= 2 * 1024 * 1024
+        else None
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,13 +81,22 @@ class DirectorNormalizationResult:
             "recoverable": self.recoverable,
             "issues": [issue.as_dict() for issue in self.issues],
             "normalizationRevision": self.normalization_revision,
-            "rawPayloadHash": hashlib.sha256(json.dumps(
-                self.raw_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            ).encode()).hexdigest(),
-            "adjustments": [issue.as_dict() for issue in self.issues if issue.code in (
-                "blocking_path_normalized", "blocking_duplicate_normalized",
-                "single_string_normalized", "empty_placeholder_ignored",
-            )],
+            "rawPayloadHash": hashlib.sha256(
+                json.dumps(
+                    self.raw_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
+            "adjustments": [
+                issue.as_dict()
+                for issue in self.issues
+                if issue.code
+                in (
+                    "blocking_path_normalized",
+                    "blocking_duplicate_normalized",
+                    "single_string_normalized",
+                    "empty_placeholder_ignored",
+                )
+            ],
         }
         if self.normalized_payload is not None:
             value["normalizedPayload"] = self.normalized_payload
@@ -275,27 +291,39 @@ def _normalize_blocking_paths(
         if isinstance(value, dict) and (canonical is None or canonical == value):
             shot[field] = value
             del container[field]
-            issues.append(DirectorValidationIssue(
-                code=("blocking_path_normalized" if canonical is None
-                      else "blocking_duplicate_normalized"),
-                severity="warning", path=target,
-                message="已整理字段位置，内容未改动。",
-                provider_value={"sourcePath": source, "targetPath": target},
-            ))
+            issues.append(
+                DirectorValidationIssue(
+                    code=(
+                        "blocking_path_normalized"
+                        if canonical is None
+                        else "blocking_duplicate_normalized"
+                    ),
+                    severity="warning",
+                    path=target,
+                    message="已整理字段位置，内容未改动。",
+                    provider_value={"sourcePath": source, "targetPath": target},
+                )
+            )
         else:
-            issues.append(DirectorValidationIssue(
-                code="blocking_path_conflict", severity="blocking", path=target,
-                message="动作字段存在冲突或类型错误，请核对两处原文后明确修订。",
-                provider_value={"canonical": deepcopy(canonical), "nested": deepcopy(value)},
-                suggested_action="在动作表单中明确保留的内容；两处原文保留在此记录中。",
-            ))
+            issues.append(
+                DirectorValidationIssue(
+                    code="blocking_path_conflict",
+                    severity="blocking",
+                    path=target,
+                    message="动作字段存在冲突或类型错误，请核对两处原文后明确修订。",
+                    provider_value={"canonical": deepcopy(canonical), "nested": deepcopy(value)},
+                    suggested_action="在动作表单中明确保留的内容；两处原文保留在此记录中。",
+                )
+            )
     if not container:
         del shot["blocking"]
     return issues
 
 
 def normalize_director_result(
-    payload: object, *, legacy: bool = False,
+    payload: object,
+    *,
+    legacy: bool = False,
     output_contract_revision: str = DIRECTOR_OUTPUT_CONTRACT,
 ) -> DirectorNormalizationResult:
     """Normalize the untrusted Provider boundary without weakening saved ShotPlan DTOs."""
@@ -403,20 +431,25 @@ def normalize_director_result(
     # retained as an adoption-blocking issue.
     while True:
         try:
-            contract = (
-                DirectorPlanPayload
-                if legacy or output_contract_revision == "professional-director-v2"
-                else ProfessionalDirectorOutput
-            )
+            if legacy or output_contract_revision == "professional-director-v2":
+                contract = DirectorPlanPayload
+            elif output_contract_revision == "professional-director-v3":
+                contract = ProfessionalDirectorOutput
+            elif output_contract_revision == DIRECTOR_OUTPUT_CONTRACT:
+                contract = PerformanceDirectorOutput
+            else:
+                raise ValueError(f"unsupported director contract: {output_contract_revision}")
             plan = contract.model_validate(normalized)
-            issues.append(DirectorValidationIssue(
-                code="ending_review",
-                severity="warning",
-                path=f"shots.{len(plan.shots) - 1}.continuity.finalFrame",
-                message="结尾已按原文保留；文字结构校验不能判断最终画面的动作是否自然可见。",
-                suggested_action="结合末镜走位、微动作、物理变化与最终画面复核，并在成片中确认结尾效果。",
-                provider_value=plan.shots[-1].continuity.final_frame,
-            ))
+            issues.append(
+                DirectorValidationIssue(
+                    code="ending_review",
+                    severity="warning",
+                    path=f"shots.{len(plan.shots) - 1}.continuity.finalFrame",
+                    message="结尾已按原文保留；文字结构校验不能判断最终画面的动作是否自然可见。",
+                    suggested_action="结合末镜走位、微动作、物理变化与最终画面复核，并在成片中确认结尾效果。",
+                    provider_value=plan.shots[-1].continuity.final_frame,
+                )
+            )
             blocked = any(issue.severity != "warning" for issue in issues)
             return DirectorNormalizationResult(
                 raw_payload=raw_payload,
@@ -424,8 +457,9 @@ def normalize_director_result(
                 disposition="needs_input" if blocked else "candidate_ready",
                 issues=tuple(issues),
                 plan=None if blocked else plan,
-                normalization_revision=("director-normalizer-v1" if legacy
-                                        else DIRECTOR_NORMALIZATION_REVISION),
+                normalization_revision=(
+                    "director-normalizer-v1" if legacy else DIRECTOR_NORMALIZATION_REVISION
+                ),
             )
         except ValidationError as exc:
             extra_errors = [
@@ -452,7 +486,8 @@ def normalize_director_result(
                 continue
             conflicts = {issue.path for issue in issues if issue.severity == "blocking"}
             blocking = tuple(
-                _blocking_issue(error) for error in exc.errors(include_url=False)
+                _blocking_issue(error)
+                for error in exc.errors(include_url=False)
                 if _path_text(tuple(error["loc"])) not in conflicts
             )
             return DirectorNormalizationResult(
@@ -460,17 +495,16 @@ def normalize_director_result(
                 normalized_payload=normalized,
                 disposition="needs_input",
                 issues=tuple(issues) + blocking,
-                normalization_revision=("director-normalizer-v1" if legacy
-                                        else DIRECTOR_NORMALIZATION_REVISION),
+                normalization_revision=(
+                    "director-normalizer-v1" if legacy else DIRECTOR_NORMALIZATION_REVISION
+                ),
             )
 
 
 def director_provider_output_schema() -> dict[str, object]:
     """Describe parseable Provider output without encoding creative-density limits."""
 
-    schema: dict[str, object] = deepcopy(
-        ProfessionalDirectorOutput.model_json_schema(by_alias=True)
-    )
+    schema: dict[str, object] = deepcopy(PerformanceDirectorOutput.model_json_schema(by_alias=True))
 
     def visit(node: object, field_name: str | None = None) -> None:
         if isinstance(node, dict):

@@ -108,6 +108,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/canon/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cat Reference Options */
+        get: operations["cat_reference_options_api_v1_canon_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/reference-binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Reference Binding */
+        get: operations["project_reference_binding_api_v1_projects__project_id__reference_binding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change Project Reference Binding */
+        patch: operations["change_project_reference_binding_api_v1_projects__project_id__reference_binding_patch"];
+        trace?: never;
+    };
+    "/api/v1/story-series/{series_id}/reference-binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series Reference Binding */
+        get: operations["series_reference_binding_api_v1_story_series__series_id__reference_binding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change Series Reference Binding */
+        patch: operations["change_series_reference_binding_api_v1_story_series__series_id__reference_binding_patch"];
+        trace?: never;
+    };
+    "/api/v1/character-remakes/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Character Remake */
+        post: operations["preview_character_remake_api_v1_character_remakes_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/character-remakes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Character Remake */
+        post: operations["create_character_remake_api_v1_character_remakes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/canon/profiles/{profile_id}": {
         parameters: {
             query?: never;
@@ -1963,6 +2050,25 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActionBeat */
+        ActionBeat: {
+            /** Startframe */
+            startFrame: number;
+            /** Endframe */
+            endFrame: number;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "trigger" | "action" | "reaction" | "payoff";
+            /** Childaction */
+            childAction: string;
+            /** Cataction */
+            catAction: string;
+            /** Visiblechange */
+            visibleChange: string;
+            catPerformance?: components["schemas"]["CatPerformance"] | null;
+        };
         /** AdaptationRiskDraft */
         AdaptationRiskDraft: {
             /** Message */
@@ -2084,6 +2190,12 @@ export interface components {
                 [key: string]: string;
             }[];
         };
+        /** AuxiliaryCatReferenceDto */
+        AuxiliaryCatReferenceDto: {
+            /** View */
+            view: string;
+            asset: components["schemas"]["AssetDto"];
+        };
         /** BlockingDesign */
         BlockingDesign: {
             /** Initialstate */
@@ -2178,6 +2290,163 @@ export interface components {
              */
             activate: boolean;
             cat?: components["schemas"]["CanonCatIdentity"] | null;
+        };
+        /** CatPerformance */
+        CatPerformance: {
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "visible" | "partial" | "hidden";
+            /** Gazefrom */
+            gazeFrom: string;
+            /** Gazeto */
+            gazeTo: string;
+            /**
+             * Eyelidaction
+             * @enum {string}
+             */
+            eyelidAction: "none" | "blink" | "slow_blink" | "squint_release";
+        };
+        /** CatReferenceOptionDto */
+        CatReferenceOptionDto: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Canonprofileid */
+            canonProfileId?: string | null;
+            /** Profilehash */
+            profileHash?: string | null;
+            /** Version */
+            version?: number | null;
+            /**
+             * Catidentity
+             * @default
+             */
+            catIdentity: string;
+            /** Fixedassets */
+            fixedAssets?: {
+                [key: string]: components["schemas"]["AssetDto"];
+            };
+            /** Auxiliary */
+            auxiliary?: components["schemas"]["AuxiliaryCatReferenceDto"][];
+            /**
+             * Available
+             * @default true
+             */
+            available: boolean;
+            /** Unavailablereason */
+            unavailableReason?: string | null;
+        };
+        /** CharacterRemakeCommand */
+        CharacterRemakeCommand: {
+            /**
+             * Sourcetype
+             * @enum {string}
+             */
+            sourceType: "project" | "series";
+            /**
+             * Sourceid
+             * Format: uuid
+             */
+            sourceId: string;
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /** Title */
+            title?: string | null;
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** CharacterRemakeDto */
+        CharacterRemakeDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Sourcetype
+             * @enum {string}
+             */
+            sourceType: "project" | "series";
+            /**
+             * Sourceid
+             * Format: uuid
+             */
+            sourceId: string;
+            /**
+             * Targetid
+             * Format: uuid
+             */
+            targetId: string;
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** CharacterRemakePreviewCommand */
+        CharacterRemakePreviewCommand: {
+            /**
+             * Sourcetype
+             * @enum {string}
+             */
+            sourceType: "project" | "series";
+            /**
+             * Sourceid
+             * Format: uuid
+             */
+            sourceId: string;
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** CharacterRemakePreviewDto */
+        CharacterRemakePreviewDto: {
+            /**
+             * Sourcetype
+             * @enum {string}
+             */
+            sourceType: "project" | "series";
+            /**
+             * Sourceid
+             * Format: uuid
+             */
+            sourceId: string;
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /** Title */
+            title: string;
+            /** Inputhash */
+            inputHash: string;
+            /** Targetlabel */
+            targetLabel: string;
+            /** Sourcesnapshot */
+            sourceSnapshot: {
+                [key: string]: unknown;
+            };
+            /** Included */
+            included?: string[];
+            /** Excluded */
+            excluded?: string[];
         };
         /** CompiledReference */
         CompiledReference: {
@@ -3785,6 +4054,8 @@ export interface components {
         };
         /** ProjectCreate */
         ProjectCreate: {
+            /** Canonprofileid */
+            canonProfileId?: string | null;
             /** Title */
             title: string;
             /** Theme */
@@ -4199,6 +4470,49 @@ export interface components {
              * @default
              */
             continuityRule: string;
+        };
+        /** ReferenceBindingCommand */
+        ReferenceBindingCommand: {
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /**
+             * Expectedcanonprofileid
+             * Format: uuid
+             */
+            expectedCanonProfileId: string;
+        };
+        /** ReferenceBindingDto */
+        ReferenceBindingDto: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "project" | "series";
+            /**
+             * Objectid
+             * Format: uuid
+             */
+            objectId: string;
+            /**
+             * Canonprofileid
+             * Format: uuid
+             */
+            canonProfileId: string;
+            /** Label */
+            label: string;
+            /** Catidentity */
+            catIdentity: string;
+            /** Canchange */
+            canChange: boolean;
+            /** Blockedreason */
+            blockedReason?: string | null;
+            /** Ownerseriesid */
+            ownerSeriesId?: string | null;
+            /** Productionstartedat */
+            productionStartedAt?: string | null;
         };
         /** ReplacementGenerationCommand */
         ReplacementGenerationCommand: {
@@ -5885,6 +6199,8 @@ export interface components {
              */
             environmentUse: "recompose" | "preserve_layout";
             confirmedFrame?: components["schemas"]["ConfirmedShotFrame"] | null;
+            /** Actionbeats */
+            actionBeats?: components["schemas"]["ActionBeat"][] | null;
         };
         /** ShotTake */
         ShotTake: {
@@ -5989,6 +6305,8 @@ export interface components {
         };
         /** StoryImportConfirmCommand */
         StoryImportConfirmCommand: {
+            /** Canonprofileid */
+            canonProfileId?: string | null;
             /**
              * Suggestionid
              * Format: uuid
@@ -6150,6 +6468,8 @@ export interface components {
         };
         /** StoryProductionTarget */
         StoryProductionTarget: {
+            /** Canonprofileid */
+            canonProfileId?: string | null;
             /**
              * Lengthmode
              * @default fixed
@@ -7234,6 +7554,224 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CanonProfileDto"];
+                };
+            };
+        };
+    };
+    cat_reference_options_api_v1_canon_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatReferenceOptionDto"][];
+                };
+            };
+        };
+    };
+    project_reference_binding_api_v1_projects__project_id__reference_binding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceBindingDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_project_reference_binding_api_v1_projects__project_id__reference_binding_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceBindingCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceBindingDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_reference_binding_api_v1_story_series__series_id__reference_binding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceBindingDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_series_reference_binding_api_v1_story_series__series_id__reference_binding_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceBindingCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceBindingDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_character_remake_api_v1_character_remakes_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterRemakePreviewCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRemakePreviewDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_character_remake_api_v1_character_remakes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterRemakeCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRemakeDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

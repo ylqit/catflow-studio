@@ -503,7 +503,12 @@ describe("StoryboardStep", () => {
       ...accepted,
       id: "plan-2",
       revision: 2,
-      shots: [{ ...professionalShot, cameraMovement: "缓慢推近" }],
+      shots: [{ ...professionalShot, cameraMovement: "缓慢推近", actionBeats: [{
+        startFrame: 0, endFrame: 288, purpose: "reaction" as const,
+        childAction: "孩子等猫回应", catAction: "猫抬头看孩子", visibleChange: "猫闭眼后重新睁开",
+        catPerformance: { visibility: "visible" as const, gazeFrom: "毛巾", gazeTo: "孩子",
+          eyelidAction: "slow_blink" as const },
+      }] }],
       reviewStatus: "candidate" as const,
       producingJobId: "director-job-2",
       baseShotPlanVersionId: "plan-1",
@@ -521,6 +526,9 @@ describe("StoryboardStep", () => {
     await wrapper.get('[data-testid="compare-shot-plan"]').trigger("click");
     expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).toContain("缓慢推近");
     expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).toContain("缓慢跟随");
+    expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).toContain("0.00–12.00秒");
+    expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).toContain("缓慢闭合再睁开");
+    expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').text()).not.toContain("[object Object]");
     expect(wrapper.get('[data-testid="shot-plan-compare-drawer"]').find("pre").exists()).toBe(false);
     client.activateShotPlan.mockResolvedValue({ ...candidate, reviewStatus: "accepted", active: true });
     await wrapper.get(".head-actions .primary").trigger("click");
