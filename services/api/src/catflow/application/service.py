@@ -3001,7 +3001,7 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v7-performance",
+            "directorPromptRevision": "catflow-director-v8-performance",
             "storyUserDirections": user_directions,
             "outputContractRevision": DIRECTOR_OUTPUT_CONTRACT,
             "normalizationRevision": DIRECTOR_NORMALIZATION_REVISION,
@@ -3461,6 +3461,21 @@ class StudioService:
                     "issues": [{"code": "invalid_structured_output", "severity": "blocking", "path": "$",
                                 "message": f"完整正文已返回，JSON 格式需要修订：{error.get('message', '')}"}],
                 }
+            # 解析层确定性修复审计:worker 自动转义过未转义引号时,以 warning 提示创作者核对
+            text_repairs = (job.provider_result or {}).get("textRepairs")
+            if validation is not None and isinstance(text_repairs, list) and text_repairs:
+                validation = dict(validation)
+                validation["issues"] = [
+                    *(validation.get("issues") or []),
+                    {
+                        "code": "auto_text_repair",
+                        "severity": "warning",
+                        "path": "$",
+                        "message": "模型正文含未转义引号，已自动转义后解析；"
+                        "请核对分镜内容与原意一致。",
+                        "suggestedAction": "核对无误后可直接创建待确认版本。",
+                    },
+                ]
             result_plan = plans_by_job.get(job.id)
             result_plan_id = result_plan.id if result_plan else None
             generation_result = None
@@ -6736,7 +6751,8 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
     return (
         f"你是CatFlow专业短片导演。把已采用故事《{story.title}》设计为"
         f"{project.target_duration_seconds}秒、24fps、9:16的一人一猫生活短片。"
-        "只允许1至4个镜头，单镜头至少2秒，总帧数必须精确等于目标秒数乘24。"
+        "只允许1至4个镜头，单镜头至少2秒；各镜头durationSeconds之和必须精确等于"
+        "目标秒数，durationFrames必须等于durationSeconds乘24。"
         "shots数组只能包含最终采用且内容完整的镜头；不得输出空占位镜头、备用镜头或修订镜头，"
         "不得在数组末尾追加用于解释、自我纠正或替换前文的条目。"
         f"场景意图：{story.environment_intent}。故事原文：{story.body}。"
@@ -6764,6 +6780,7 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
         "不把后续动作或最终效果写进起始状态、构图和机位字段。"
         "明确画面左右与角色自身左右，涉及遮挡、容器、门窗、反射时写清主体在哪一侧、"
         "可见身体部分、支撑面和从何处进入画面，不让相邻镜头无解释地反转空间。"
+        "相邻镜头screenDirection的水平运动方向必须保持同轴，不得无解释反转。"
         "interactionConstraints只写可执行的正向关系：动作主体→身体部位或工具→接触对象"
         "→运动方向→可见结果。手臂连接到明确角色，身体有可见承托，接触效果在接触位置发生；"
         "明确同一物体的数量、归属和移动前后位置，遮挡不能使物体复制或肢体脱离主体。"
@@ -6779,6 +6796,7 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
         "结尾及风险意见是否一致。能确定的关系直接写进正式设计；仍不确定的冲突放入"
         "feasibilityWarnings或generationRisks，明确冲突来源和需要确认的事实，不擅改已采用剧情。"
         "评语独立于执行约束；字段内容写自然语言，不嵌套JSON、字段名、未解析占位符或内部角色标识。"
+        "JSON字符串值内引用台词或术语时使用中文引号，不得出现未转义的英文双引号。"
         "只返回符合Schema的JSON，不生成多冲突、多转折或依赖对白解释的长剧结构。"
     )
 

@@ -669,6 +669,7 @@ class ArkTypedGateway:
                     request_document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 ).encode()
             ).hexdigest(),
+            text_repairs=tuple(parsed.get("textRepairs") or ()),
         )
 
     def retrieve_response(self, response_id: str) -> dict[str, Any]:

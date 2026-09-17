@@ -264,11 +264,16 @@ def _blocking_issue(error: dict[str, Any]) -> DirectorValidationIssue:
             message="分镜包含超过 4 个有内容的镜头，需要在采用前精简。",
             suggested_action="保留 1–4 个有意义镜头，并确保总时长闭合。",
         )
+    message = str(error.get("msg", "该字段需要补充或修正。"))
+    if error_type == "value_error" and message.startswith("Value error, "):
+        # 契约校验器已改为抛出中文 ValueError;去掉 pydantic 的英文包装前缀,
+        # 让创作者看到纯净的中文说明。
+        message = message.removeprefix("Value error, ")
     return DirectorValidationIssue(
         code="required_content_invalid",
         severity="blocking",
         path=path,
-        message=str(error.get("msg", "该字段需要补充或修正。")),
+        message=message,
         suggested_action="在分镜草稿中补充或修正此项后，再创建待确认版本。",
     )
 

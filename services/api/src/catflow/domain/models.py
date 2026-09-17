@@ -198,7 +198,7 @@ class ShotSpec(ContractModel):
     @model_validator(mode="after")
     def validate_frame_duration(self) -> ShotSpec:
         if self.duration_frames is not None and self.duration_frames != self.duration_seconds * 24:
-            raise ValueError("durationFrames must equal durationSeconds at the 24 fps edit rate")
+            raise ValueError("镜头帧数必须等于秒数乘24（24fps剪辑帧率）。")
         previous_end = 0
         for beat in self.action_beats or []:
             if beat.start_frame < previous_end or beat.end_frame > self.duration_seconds * 24:
@@ -224,7 +224,7 @@ def _validate_professional_semantics(shots: list[ShotSpec]) -> None:
             and shot.physical_change.before.strip() == shot.physical_change.after.strip()
         ):
             raise ValueError(
-                f"professional shot {shot.order} requires a visible physical state change"
+                f"第{shot.order}镜缺少可见的物理状态变化，需明确前后差异或补充动作节拍。"
             )
 
     for previous, current in zip(shots, shots[1:], strict=False):
@@ -238,8 +238,8 @@ def _validate_professional_semantics(shots: list[ShotSpec]) -> None:
             and outgoing_direction != incoming_direction
         ):
             raise ValueError(
-                f"screen direction conflict between professional shots "
-                f"{previous.order} and {current.order}"
+                f"第{previous.order}镜与第{current.order}镜的画面水平运动方向相反"
+                "（180度轴线冲突），请统一方向或在连续性说明中给出合理反转。"
             )
 
     # Ending quality needs the full shot design and visual review; substrings in a
@@ -350,9 +350,11 @@ class DirectorPlanPayload(ContractModel):
     @model_validator(mode="after")
     def validate_professional_timeline(self) -> DirectorPlanPayload:
         if [shot.order for shot in self.shots] != list(range(1, len(self.shots) + 1)):
-            raise ValueError("professional shot order must start at one and remain continuous")
+            raise ValueError("镜头序号必须从1开始连续编号。")
         if sum(shot.duration_seconds for shot in self.shots) != self.target_duration_seconds:
-            raise ValueError("professional shot durations must equal targetDurationSeconds")
+            raise ValueError(
+                f"各镜头秒数之和必须精确等于目标时长{self.target_duration_seconds}秒。"
+            )
         required = (
             "lens",
             "composition",
@@ -369,7 +371,7 @@ class DirectorPlanPayload(ContractModel):
             if shot.duration_frames is None:
                 missing.append("duration_frames")
             if missing:
-                raise ValueError(f"professional shot {shot.order} is missing: {', '.join(missing)}")
+                raise ValueError(f"第{shot.order}镜缺少必填内容：{', '.join(missing)}")
         _validate_professional_semantics(self.shots)
         return self
 
@@ -412,9 +414,9 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
             if shot.duration_frames is None:
                 missing.append("duration_frames")
             if missing:
-                raise ValueError(f"professional shot {shot.order} is missing: {', '.join(missing)}")
+                raise ValueError(f"第{shot.order}镜缺少必填内容：{', '.join(missing)}")
         if sum(shot.duration_frames or 0 for shot in self.shots) != self.clip.duration_seconds * 24:
-            raise ValueError("professional shot frames must equal the target duration at 24 fps")
+            raise ValueError("各镜头帧数之和必须等于目标时长乘24的总帧数。")
         _validate_professional_semantics(self.shots)
         safety_content = self.model_dump(mode="json", by_alias=True)
         treatment = safety_content.get("directorTreatment")
@@ -427,5 +429,5 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
         serialized = str(safety_content)
         prohibited = ("8–9岁", "8-9岁", "青少年脸型", "成人化身体", "成人化表情")
         if any(term in serialized for term in prohibited):
-            raise ValueError("professional shot plan contains an adult or older-child description")
+            raise ValueError("分镜包含成人化或超龄描述，请按角色设定修正。")
         return self

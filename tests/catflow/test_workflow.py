@@ -454,7 +454,7 @@ def test_director_planner_job_freezes_story_canon_assets_and_professional_schema
     assert job.kind == "plan_shots"
     assert service.workspace(project.id)["latestDirectorJob"]["id"] == str(job.id)
     assert job.frozen_input["storyVersionId"] == str(story.id)
-    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v7-performance"
+    assert job.frozen_input["directorPromptRevision"] == "catflow-director-v8-performance"
     assert job.frozen_input["outputContractRevision"] == "professional-director-v4-performance"
     assert job.frozen_input["normalizationRevision"] == "director-normalizer-v4-performance"
     assert "规划分镜" in job.frozen_input["inputInstruction"]
@@ -790,6 +790,56 @@ def test_incomplete_director_draft_can_be_corrected_without_another_provider_job
     assert repeated.id == candidate.id
     assert len(repository._job_events) == before_events
     assert service.get_job(job.id).provider_result == saved
+
+
+def test_auto_text_repair_audit_is_surfaced_as_a_warning_issue() -> None:
+    repository = MemoryStudioRepository()
+    service = StudioService(
+        repository,
+        provider_runtime=replace(
+            ProviderRuntime.from_env(segment_reference_publishing_ready=False),
+            paid_calls_enabled=True,
+        ),
+    )
+    project = _project(service)
+    planner_job = service.enqueue_planner_message(
+        project.id,
+        PlannerMessageCommand(
+            text="雨天擦爪",
+            expectedContextRevision=1,
+            idempotencyKey="materialize-source-story",
+        ),
+    )
+    proposal = service.complete_planner_job(planner_job.id, _proposal())
+    service.adopt_proposal(project.id, proposal.id)
+    environment = service.register_asset(project.id, role="environment", sha256="2" * 64)
+    service.select_asset(project.id, slot="environment", asset_id=environment.id)
+    job = service.create_shot_plan_generation_job(
+        project.id,
+        ShotPlanGenerationCommand(idempotencyKey="salvage-audit-warning"),
+    )
+    payload = _director_payload().model_dump(mode="json", by_alias=True)
+    repository._jobs[job.id] = job.model_copy(  # noqa: SLF001 - fixture controls persistence.
+        update={
+            "status": "succeeded",
+            "provider_result": {
+                "payload": payload,
+                "responseId": "response-salvaged",
+                "textRepairs": ["escaped_unstructured_quotes:2"],
+            },
+            "error": None,
+        }
+    )
+
+    attempt = service.list_shot_plan_generation_attempts(project.id)[0]
+    assert attempt.result is not None
+    warnings = [issue for issue in attempt.result.issues if issue.code == "auto_text_repair"]
+    assert len(warnings) == 1
+    assert warnings[0].severity == "warning"
+    assert "未转义引号" in warnings[0].message
+    assert warnings[0].suggested_action
+    # 读取路径只合成提示,不改动已存回执
+    assert "validation" not in service.get_job(job.id).provider_result
 
 
 def test_running_director_job_blocks_a_second_paid_submission() -> None:

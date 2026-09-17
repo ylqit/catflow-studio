@@ -532,15 +532,16 @@ class ArkProviderJobGateway:
 
 
 def _structured_submission(result: StructuredProviderResult) -> ProviderSubmission:
-    return ProviderSubmission(
-        result={
-            "payload": result.payload,
-            "responseId": result.response_id,
-            "model": result.model,
-            "requestHash": result.request_hash,
-        },
-        usage=result.usage,
-    )
+    document: dict[str, object] = {
+        "payload": result.payload,
+        "responseId": result.response_id,
+        "model": result.model,
+        "requestHash": result.request_hash,
+    }
+    # 解析层确定性修复审计:仅在确有修复时落库,保持严格解析回执形状不变
+    if result.text_repairs:
+        document["textRepairs"] = list(result.text_repairs)
+    return ProviderSubmission(result=document, usage=result.usage)
 
 
 def _required_string(

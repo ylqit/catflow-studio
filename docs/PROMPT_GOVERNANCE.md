@@ -17,7 +17,7 @@
 
 | 内容 | 当前版本 |
 | --- | --- |
-| 导演提示词 | `catflow-director-v7-performance` |
+| 导演提示词 | `catflow-director-v8-performance` |
 | 导演输出契约 | `professional-director-v4-performance` |
 | 整集视频编译 | `seedance-professional-v9-performance` |
 | 镜头媒体编译 | `catflow-shot-production-v3-performance` |

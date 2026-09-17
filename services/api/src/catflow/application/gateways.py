@@ -32,12 +32,15 @@ class StructuredProviderResult:
         model: 实际调用的模型 ID(可能与请求不同,如 fallback)
         usage: token 消耗统计
         request_hash: SHA256(冻结输入哈希,用于 Receipt 对账)
+        text_repairs: 解析层确定性文本修复审计(如 escaped_unstructured_quotes:N);
+            空表示正文严格解析通过,未做任何修复
     """
     payload: dict[str, object]
     response_id: str
     model: str
     usage: dict[str, int]
     request_hash: str
+    text_repairs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

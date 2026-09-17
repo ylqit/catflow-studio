@@ -324,13 +324,13 @@ def test_director_plan_rejects_direction_conflicts_and_no_state_change() -> None
 
     conflicting = _professional_director_payload()
     conflicting["shots"][1]["composition"]["screenDirection"] = "从右向左"  # type: ignore[index]
-    with pytest.raises(ValidationError, match="screen direction conflict"):
+    with pytest.raises(ValidationError, match="180度轴线冲突"):
         DirectorPlanPayload.model_validate(conflicting)
 
     unchanged = _professional_director_payload()
     before = unchanged["shots"][0]["physicalChange"]["before"]  # type: ignore[index]
     unchanged["shots"][0]["physicalChange"]["after"] = before  # type: ignore[index]
-    with pytest.raises(ValidationError, match="visible physical state change"):
+    with pytest.raises(ValidationError, match="可见的物理状态变化"):
         DirectorPlanPayload.model_validate(unchanged)
 
 
@@ -379,7 +379,7 @@ def test_professional_draft_distinguishes_visual_exclusions_from_positive_descri
     assert payload["shots"][0]["visualExclusions"] == [f"不出现{phrase}"]
 
     payload["shots"][0]["childAction"] = f"孩子呈现{phrase}"
-    with pytest.raises(ValidationError, match="adult or older-child description"):
+    with pytest.raises(ValidationError, match="成人化或超龄描述"):
         ProfessionalShotPlanDraft.model_validate(draft_data)
 
 

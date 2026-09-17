@@ -13,7 +13,7 @@
 ## 场景与分镜
 
 - 新环境图输入只有画风板与空场景描述，保留空间、家具、光照及稳定道具事实；不再额外发送儿童、猫咪图片来匹配画风。
-- 新分镜任务使用 `catflow-director-v7-performance`、`referenceInputMode=vision`，实际发送冻结的五张图片，同时明确编译环境意图、故事原文和因果链。空间冲突使用原有风险字段，在同一次规划输出中返回。
+- 新分镜任务使用 `catflow-director-v8-performance`、`referenceInputMode=vision`，实际发送冻结的五张图片，同时明确编译环境意图、故事原文和因果链。空间冲突使用原有风险字段，在同一次规划输出中返回。
 - 旧分镜任务仍执行原文本路径。界面区分来源规划方式，手工保存不被当作新的模型读图。
 - 每个 ShotSpec 可保存 `sceneAssetId`、`environmentUse`（`recompose` / `preserve_layout`）和 `confirmedFrame`。这些值保存在现有不可变分镜版本的 JSON 中，无须新数据库表。
 

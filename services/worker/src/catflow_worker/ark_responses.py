@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
@@ -13,6 +12,7 @@ import httpx
 
 from catflow.application.gateways import ProviderGatewayError
 
+from .json_salvage import parse_json_object
 from .provider_receipts import provider_call, receipt_document, receive_receipt
 
 
@@ -202,9 +202,9 @@ def parse_response(document: dict[str, Any]) -> dict[str, Any]:
             response_id=document.get("id"),
         )
     try:
-        payload = json.loads(text)
-        if not isinstance(payload, dict):
-            raise ValueError("expected JSON object")
+        # 确定性 salvage:未转义引号自动修复(textRepairs 审计);
+        # 不可修复时仍抛原始解析错误,语义与修复前完全一致。
+        payload, text_repairs = parse_json_object(text)
         pending = [(payload, 0)]
         while pending:
             node, depth = pending.pop()
@@ -226,4 +226,7 @@ def parse_response(document: dict[str, Any]) -> dict[str, Any]:
             retryable=False,
             response_id=document.get("id"),
         ) from exc
-    return {"payload": payload, "responseId": document.get("id"), "model": document.get("model")}
+    result = {"payload": payload, "responseId": document.get("id"), "model": document.get("model")}
+    if text_repairs:
+        result["textRepairs"] = text_repairs
+    return result
