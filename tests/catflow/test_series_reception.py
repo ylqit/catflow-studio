@@ -165,7 +165,7 @@ def test_planning_preview_separates_empty_user_requirements_and_freezes_revision
         "must_keep": [], "adaptation_policy": "condense_mainline",
     }))
     preview = service.preview_series_plan(series.id)
-    assert "【用户必须保留要求】[]" in preview.prompt
+    assert "【用户必须保留要求】无" in preview.prompt
     assert "【通用创作规则】" in preview.prompt
     assert "不要把故事全文" in preview.prompt
     assert len(preview.settings_input_hash) == 64

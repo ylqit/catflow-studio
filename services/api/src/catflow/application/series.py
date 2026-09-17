@@ -13,7 +13,15 @@ from pydantic import Field, ValidationError, model_validator
 from catflow.application.job_execution import PaidJobCommand
 from catflow.domain.contract import ContractModel
 from catflow.domain.models import LifeStoryProposalDraft
+
 from .creative_direction import CAT_PERFORMANCE_DIRECTION, NARRATIVE_DIRECTION
+from .series_prompt_text import (
+    render_length_mode,
+    render_must_keep,
+    render_narrative_mode,
+    render_series_bible,
+    render_source_treatments,
+)
 
 SeriesNarrativeMode = Literal["continuous", "lightly_serialized", "anthology"]
 AdaptationPolicy = Literal["preserve_all", "condense_mainline"]
@@ -1007,7 +1015,7 @@ def compile_series_plan_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesPlanPreviewDto:
-    prompt_revision = "catflow-series-planner-v6-performance"
+    prompt_revision = "catflow-series-planner-v7-performance"
     source_beats = source_beats or []
     requested_episode_count = min(
         series.planned_episode_count or DEFAULT_ONGOING_PLANNING_BATCH,
@@ -1038,14 +1046,15 @@ def compile_series_plan_preview(
         "不把携带物额外复制进背景，不把动作结果提前冻结为陈设。"
         "你是 CatFlow 系列策划。只规划整季系列圣经和逐集简纲，不生成完整剧本、分镜或媒体。\n"
         f"系列：{series.title}\n核心构想：{series.premise}\n"
-        f"叙事模式：{series.narrative_mode}\n系列长度：{series.length_mode}\n"
+        f"叙事模式：{render_narrative_mode(series.narrative_mode)}\n"
+        f"系列长度：{render_length_mode(series.length_mode)}\n"
         f"本次规划集数：{requested_episode_count}\n"
         f"每集时长：{series.default_episode_duration_seconds} 秒，9:16，24 fps。\n"
         f"世界设定：{series.world_setting}\n情绪方向：{series.emotional_direction}\n"
         f"结局目标：{series.ending_goal or '由整季路线自然收束'}\n"
         f"贯穿元素：{'、'.join(series.recurring_elements) or '无额外指定'}\n"
         "【通用创作规则】保留来源核心因果与结局，保持既定儿童、猫咪身份和画风。\n"
-        f"【用户必须保留要求】{json.dumps(series.must_keep, ensure_ascii=False)}\n"
+        f"【用户必须保留要求】{render_must_keep(series.must_keep)}\n"
         f"必须避免：{'、'.join(series.must_avoid) or '危险动作和身份漂移'}\n"
         "每集必须能在 8–15 秒内完成一个可见事件，包含开场状态、触发、儿童动作、"
         "猫咪反应、可见变化和结尾状态。连续模式必须写清相邻剧集承接点。"
@@ -1053,14 +1062,17 @@ def compile_series_plan_preview(
         f"单次最多规划 {MAX_SERIES_PLANNING_BATCH} 集；这是调用批量边界，不是系列总集数上限。"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-planner-v6-condense-performance"
+        prompt_revision = "catflow-series-planner-v7-condense-performance"
         prompt += CONDENSE_PLANNING_INSTRUCTIONS
 
     if series.additional_notes:
         prompt += f"\n【补充制作约束】\n{series.additional_notes}"
         prompt_revision += "-notes"
 
-    prompt += f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，原文保留故事动作与因果，不沿用其他猫咪版本。"
+    prompt += (
+        f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，"
+        "原文保留故事动作与因果，不沿用其他猫咪版本。"
+    )
     prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
     prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
@@ -1119,7 +1131,7 @@ def compile_series_plan_segment_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesPlanSegmentPreviewDto:
-    prompt_revision = "catflow-series-segment-planner-v4-contract"
+    prompt_revision = "catflow-series-segment-planner-v5-contract"
     end_episode_order = command.start_episode_order + command.requested_episode_count - 1
     remaining_episode_count = (
         max((series.planned_episode_count or 0) - end_episode_order, 0)
@@ -1143,20 +1155,22 @@ def compile_series_plan_segment_preview(
         f"本次范围：第 {command.start_episode_order}–{end_episode_order} 集，"
         f"共 {command.requested_episode_count} 集。\n"
         f"每集约 {series.default_episode_duration_seconds} 秒；"
-        f"叙事模式：{series.narrative_mode}。\n"
-        "【系列圣经】\n"
-        f"{active_plan.plan.series_bible.model_dump_json(by_alias=True)}\n"
+        f"叙事模式：{render_narrative_mode(series.narrative_mode)}。\n"
+        f"【系列圣经】\n{render_series_bible(active_plan.plan.series_bible)}\n"
         "【来源剧情节拍】\n"
         f"{source_section}\n"
         "剧集 order 必须与本次范围逐一对应。sourceCoverage 只能引用上述安全序号；"
         "允许组合相邻节拍或把过长节拍拆到连续剧集，并明确 whole、partial 或 continuation。"
         "\n【通用创作规则】保留来源核心因果与结局，保持既定儿童、猫咪身份和画风。\n"
-        f"【用户必须保留要求】{json.dumps(series.must_keep, ensure_ascii=False)}\n"
+        f"【用户必须保留要求】{render_must_keep(series.must_keep)}\n"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-segment-planner-v4-condense-contract"
+        prompt_revision = "catflow-series-segment-planner-v5-condense-contract"
         prompt += CONDENSE_PLANNING_INSTRUCTIONS
-    prompt += f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，原文保留故事动作与因果，不沿用其他猫咪版本。"
+    prompt += (
+        f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，"
+        "原文保留故事动作与因果，不沿用其他猫咪版本。"
+    )
     prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
     prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
@@ -1216,7 +1230,7 @@ def compile_series_episode_story_preview(
 ) -> SeriesEpisodeStoryPreviewDto:
     if episode.project_id is None:
         raise ValueError("series episode must be materialized before story planning")
-    prompt_revision = "catflow-series-episode-planner-v5-spatial"
+    prompt_revision = "catflow-series-episode-planner-v6-spatial"
     outline = episode.outline
     prompt = (
         "每集写清参与者、道具数量、初始位置、动作目的和结束状态；物体移动保持同一实例。"
@@ -1227,8 +1241,8 @@ def compile_series_episode_story_preview(
         "不把携带物额外复制进背景，不把动作结果提前冻结为陈设。"
         "你是 CatFlow 单集故事策划。根据已经采用的整季路线，只扩写当前这一集，"
         "不得生成其他集、分镜、图片或视频。\n"
-        f"系列：{series.title}\n整季核心：{active_plan.plan.series_bible.logline}\n"
-        f"整季设定：{active_plan.plan.series_bible.model_dump_json(by_alias=True)}\n"
+        f"系列：{series.title}\n"
+        f"整季设定：\n{render_series_bible(active_plan.plan.series_bible)}\n"
         f"本集：第 {episode.order} 集《{outline.title}》，"
         f"目标 {outline.target_duration_seconds} 秒。\n"
         f"本集简纲：{outline.premise}\n开场状态：{outline.opening_state}\n"
@@ -1242,20 +1256,20 @@ def compile_series_episode_story_preview(
         "变化过程和结束状态。保持固定儿童、猫咪身份与系列设定，不擅自改写整季路线。"
     )
     if series.adaptation_policy == "condense_mainline":
-        prompt_revision = "catflow-series-episode-planner-v5-condense-spatial"
-        treatment_document = [
-            item.model_dump(mode="json", by_alias=True)
-            for item in (
-                source_segment.plan if source_segment is not None else active_plan.plan
-            ).source_treatments
-        ]
+        prompt_revision = "catflow-series-episode-planner-v6-condense-spatial"
+        source_treatments = (
+            source_segment.plan if source_segment is not None else active_plan.plan
+        ).source_treatments
         prompt += (
             "\n【已确认缩编决定】遵守本集简纲的动作数量和目标时长，不把原文已省略的动作重新加回。"
-            f"必须保留：{json.dumps(series.must_keep, ensure_ascii=False)}。"
-            f"来源处理：{json.dumps(treatment_document, ensure_ascii=False)}"
+            f"必须保留：{render_must_keep(series.must_keep)}。"
+            f"来源处理：\n{render_source_treatments(source_treatments)}"
             f"\n来源方案：{source_segment.id if source_segment is not None else active_plan.id}"
         )
-    prompt += f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，原文保留故事动作与因果，不沿用其他猫咪版本。"
+    prompt += (
+        f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，"
+        "原文保留故事动作与因果，不沿用其他猫咪版本。"
+    )
     prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
     prompt_revision += "-canon-performance"
     output_schema = LifeStoryProposalDraft.model_json_schema(by_alias=True)
