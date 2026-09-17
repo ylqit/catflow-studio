@@ -1,4 +1,20 @@
-"""Character binding and remake contracts shared by the production repositories."""
+"""角色参考绑定与重制契约 —— Canon / CatReference 的 DTO 与工具函数。
+
+文件职责:
+1. 定义 ReferenceBindingDto / CharacterRemakeCommand 等 Pydantic DTO(给前端 / API 用)
+2. 提供 remake_preview / remake_request_hash / remake_story_context 工具函数
+3. 通过 CharacterRemakeRecord(source_id / target_id)记录"哪个 series 重制自哪个"
+
+注意:
+- 本文件只定义 DTO + 纯函数,不与数据库直接交互
+- Repository 在 catflow.infrastructure.postgres_repository 中
+- Worker 在 catflow_worker 中调用以实际执行重制
+
+调用方:
+- application/service.py::preview_character_remake —— 重制 preview
+- application/service.py::create_character_remake —— 实际重制
+- worker/catflow_worker/character_remake.py —— 执行重制任务
+"""
 
 from __future__ import annotations
 
@@ -69,6 +85,22 @@ class CharacterRemakeDto(ContractModel):
 def remake_preview(
     command: CharacterRemakePreviewCommand, snapshot: dict[str, Any], *, canon_hash: str, label: str
 ) -> CharacterRemakePreviewDto:
+    """生成重制 preview DTO。
+
+    流程:
+    1. 构造 frozen_input 文档(含 source / canon / title / sourceSnapshot)
+    2. SHA256 算 input_hash(防止 caller 改 source 后悄悄重制)
+    3. 返回 DTO 供前端展示
+
+    Args:
+        command: 重制 preview 命令(source_type / source_id / canon_profile_id / 可选 title)
+        snapshot: 源 series 的快照(输入 / 资产 / 连续性 / jobs)
+        canon_hash: Canon profile 的 SHA256(冻结到 input 文档)
+        label: 重制标签(如 "V4 白猫重制"),用在默认 title
+
+    Returns:
+        CharacterRemakePreviewDto,含 input_hash / sourceSnapshot / included / excluded
+    """
     title = command.title or f"{snapshot['input']['title']} · {label}重制"[:160]
     document = {
         "sourceType": command.source_type,
@@ -91,6 +123,10 @@ def remake_preview(
 
 
 def remake_request_hash(command: CharacterRemakeCommand) -> str:
+    """计算 CharacterRemakeCommand 的 SHA256,用作 frozen input 校验。
+
+    排除 idempotency_key(防重放 —— 同一指令两次的 idempotency_key 可能相同)。
+    """
     document = command.model_dump(mode="json", by_alias=True, exclude={"idempotency_key"})
     return hashlib.sha256(
         json.dumps(document, ensure_ascii=False, sort_keys=True).encode()
@@ -98,6 +134,10 @@ def remake_request_hash(command: CharacterRemakeCommand) -> str:
 
 
 def remake_story_context(snapshot: dict[str, Any] | None) -> str:
+    """从源 snapshot 拼接"重制继承的原始输入"段,嵌入重制 prompt。
+
+    CatFlow 的关键约束:原文保持原样,本次猫咪外观以所选 Canon 为准,保留故事动作因果。
+    """
     if not snapshot:
         return ""
     texts = [item["rawText"] for item in snapshot.get("sources", [])]

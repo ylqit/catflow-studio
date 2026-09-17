@@ -1,3 +1,43 @@
+<!--
+  StoryboardStep.vue —— 分镜画布 UI
+
+  职责:
+  1. 让用户查看 / 编辑 / 重新生成 / 接受 ShotPlanVersion
+  2. 显示 shot 列表(可展开镜头详情)
+  3. 通过 SSE 订阅 plan_shots job 状态
+
+  核心数据流:
+    Mount               →  load()                →  API 调 4 个端点
+                          shotPlans + attempts    ←
+                          + workspace + assets
+
+    点击镜头         →   selectedShotId        (本地状态)
+                          shot expanded          (UI 折叠展开)
+
+    点 "重新生成"    →   submitted=JobDto       →  POST /shot-plans/generations
+                          jobId                 ←
+    SSE 推送         →   shotPlans 重新拉取    →  GET /shot-plans
+
+    点 "接受"        →   activateShotPlan      →  POST /shot-plans/{id}/activate
+                          savedPlan             ←
+
+    点 "拒绝"        →   rejectShotPlan        →  POST /shot-plans/{id}/reject
+
+  ShotSpec 数据结构(每个 shot):
+    - id / order / durationSeconds / durationFrames
+    - framing / cameraMovement / transition
+    - childAction / catAction / environmentChange
+    - lens / composition / childBlocking / catBlocking / lighting / sound
+
+  24fps 区间: [startFrame, endFrame) 左闭右开,每帧 = 1/24 秒
+
+  关联组件:
+    - ShotProduction.vue:逐镜生成的子组件
+    - ActionBeatsEditor.vue:节拍编辑(在 StoryboardStep 内)
+    - DirectorDraftEditor.vue:导演方案编辑
+    - GenerationStep.vue:后续步骤(视频生成)
+    - JobStatusCard.vue:任务状态显示
+-->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
@@ -25,6 +65,7 @@ const versionsError = ref("");
 const plans = ref<ShotPlanVersionDto[]>([]);
 const sceneAssets = ref<AssetDto[]>([]);
 const attempts = ref<ShotPlanGenerationAttemptDto[]>([]);
+// failedAttemptCount 仅统计 "failed 且 disposition != candidate_ready" 的失败任务
 const failedAttemptCount = computed(() => attempts.value.filter((attempt) => (
   attempt.status === "failed" && attempt.result?.disposition !== "candidate_ready"
 )).length);
@@ -40,13 +81,16 @@ const storyboardRoot = ref<HTMLElement | null>(null);
 const now = ref(Date.now());
 const shots = reactive<ShotSpecDto[]>([]);
 const totalDuration = computed(() => shots.reduce((sum, shot) => sum + shot.durationSeconds, 0));
+// availablePlans: 优先用本地 plans;若为空则从 workspace 兜底一个 activeShotPlan
 const availablePlans = computed(() => {
   if (plans.value.length) return plans.value;
   return props.workspace.activeShotPlan ? [props.workspace.activeShotPlan] : [];
 });
+// activePlan: 三级兜底 —— workspace prop → 本地 active plans → null
 const activePlan = computed(() => props.workspace.activeShotPlan
   ?? availablePlans.value.find((plan) => plan.active)
   ?? null);
+// selectedPlan: 四级兜底 —— 选中 → active → 第一个 → null
 const selectedPlan = computed(() => availablePlans.value.find((plan) => plan.id === selectedPlanId.value)
   ?? activePlan.value
   ?? availablePlans.value[0]

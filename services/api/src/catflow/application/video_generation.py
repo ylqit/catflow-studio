@@ -1,3 +1,17 @@
+"""视频生成的 Prompt 编译 —— 把"导演 + 整片 + 逐镜"折叠成 Seedance 视频 prompt。
+
+文件职责:
+1. 定义视频 Prompt 模板常量(VIDEO_PROMPT_COMPILER_REVISION / _BASE_VIDEO_EXCLUSIONS)
+2. 提供 generate_director_treatment_prompt / compile_whole_video_prompt 等函数
+3. 与 creative_direction / media_prompt 协作,产出最终 Ark SDK frozen 文本
+
+调用方:
+- application/service.py::preview_video_generation —— 整片 / 逐镜 preview
+- application/service.py::create_video_job —— 入队视频任务
+- application/service.py::create_shot_plan_generation_job —— 分镜生成
+- worker/ark_gateway.py —— 消费 frozen_input_json,提交 Ark
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,6 +25,8 @@ from .media_prompt import validate_system_prompt
 
 VIDEO_PROMPT_COMPILER_REVISION = "seedance-professional-v9-performance"
 
+# 视频生成通用禁用规则(任何视频都禁止,不分集数)
+# 与分镜级别的镜 1 / 镜 2 禁用叠加
 _BASE_VIDEO_EXCLUSIONS = (
     "真实摄影",
     "3D塑料质感",

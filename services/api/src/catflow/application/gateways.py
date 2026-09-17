@@ -1,3 +1,19 @@
+"""Provider 抽象 —— CatFlow 应用层只依赖接口,不依赖具体 Ark 实现。
+
+设计原则:
+- 接口与实现分离:应用层 (service.py) 只调 provider_gateway.plan_story(...) 等抽象方法
+- Worker 层 (worker/ark_gateway.py) 提供 ArkTypedGateway 实现
+- 通过 catflow.infrastructure.postgres_repository 注入
+
+即使只有 Ark 一个实现,也保留 Protocol 接口 —— 便于将来扩展其他 Provider
+(如 OpenAI / 自研模型),且便于测试时用 MockProviderGateway。
+
+调用方:
+- application/service.py —— 调用 self._gateway.plan_story / submit_video / poll_video
+- worker/ark_gateway.py —— 实现 ArkTypedGateway
+- tests/catflow/ —— MockProviderGateway 测试实现
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +24,15 @@ from urllib.parse import urlsplit
 
 @dataclass(frozen=True, slots=True)
 class StructuredProviderResult:
+    """规划类调用结果(plan_story / plan_shots / analyze_source 等 JSON-Schema 调用)。
+
+    Attributes:
+        payload: 已解析的 JSON 字典(对应 Ark 返回的 JSON-Schema 响应)
+        response_id: Ark Response ID(可重读用)
+        model: 实际调用的模型 ID(可能与请求不同,如 fallback)
+        usage: token 消耗统计
+        request_hash: SHA256(冻结输入哈希,用于 Receipt 对账)
+    """
     payload: dict[str, object]
     response_id: str
     model: str

@@ -1,3 +1,28 @@
+<!--
+  GenerationStep.vue —— 视频生成步骤 UI
+
+  职责:
+  1. 让用户预览、调整、提交视频生成任务(整片 / 逐镜 / 局部编辑)
+  2. 显示 preview 数据(费用 / prompt / 参考图 / 视频候选)
+  3. 通过 SSE 订阅 job 状态,实时更新 UI
+
+  核心数据流:
+    User Action          Component State             API Call
+    ──────────────────────────────────────────────────────────────
+    点 "预览"        →   loadingPreview=true     →   POST /video-generations/preview
+                       preview=PreviewDto          ←
+    点击 prompt 展开  →   showDetails=true         (本地状态)
+    点 "提交生成"    →   submitting=true         →   POST /video-generations
+                       currentJob=JobDto           ←
+    SSE 推送(订阅中) →   job.status 更新         →   GET /jobs/{id}
+    job.status=succeeded → 写入 project_selections.video
+
+  关联组件:
+    - ProviderPrompt.vue:折叠的 prompt 详情展示
+    - JobStatusCard.vue:单个 job 状态卡片
+    - ShotSequenceProduction.vue:逐镜生成子组件
+    - DeliveryStep.vue:后续步骤(剪辑 / 导出)
+-->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -21,6 +46,7 @@ const savingReview = ref(false);
 const confirmEditReferences = ref(false);
 const store = useUiStore();
 const preview = ref<GenerationPreviewDto | null>(null);
+// currentJob 初始值优先取 workspace.latestVideoJob —— 避免 SSE 推送前的空白态
 const currentJob = ref<JobDto | null>(props.workspace.latestVideoJob ?? null);
 const reviewVideoJob = ref<JobDto | null>(null);
 const diagnosisJob = ref<JobDto | null>(null);
@@ -34,6 +60,7 @@ const loadingPreview = ref(false);
 const submitting = ref(false);
 const error = ref("");
 const errorDetail = ref("");
+// continuityRequired:检测后端错误消息中是否包含 "confirm the episode's incoming continuity"
 const continuityRequired = computed(() => errorDetail.value.includes("confirm the episode's incoming continuity"));
 const reviewAssetId = ref<string | null>(null);
 const reviewNotes = ref("");
