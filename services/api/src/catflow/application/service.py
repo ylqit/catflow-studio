@@ -1,3 +1,22 @@
+"""CatFlow 应用服务层 —— 全部业务编排与 LLM Prompt 编译入口。
+
+本文件是应用层核心(StudioService),按生产阶段组织:
+- 项目 / 剧情:project、story 版本、planner 提案(prompt 见 _planner_prompt,
+  输出契约见 _planner_output_schema);
+- 分镜:create_shot_plan_generation_job 编译导演 prompt(_director_prompt),
+  模型输出由 domain/director_results.py 解析与归一化;
+- 生图:资产图与背景图 prompt(_asset_prompt / _environment_asset_prompt 及对应
+  negative prompt),最终折叠为 Ark 单一字段由 image_generation / media_prompt 承担;
+- 视频生成:整片 / 逐镜编译在 video_generation.py,片段修复 prompt 见
+  _segment_edit_prompt 与 video_edit.py;
+- 诊断:资产 / 环境 / 视频三个 *_diagnostic_output_schema 定义体检输出契约。
+
+Prompt 治理:共享方向常量来自 creative_direction.py,各 prompt 版本号与验收规则见
+docs/PROMPT_GOVERNANCE.md。LLM 调用统一走 application/gateways.py 的 Provider
+Protocol,worker 侧实现在 catflow_worker/ark_gateway.py;付费调用一律先 preview
+冻结输入并计算 input hash,再入队由 worker 提交。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -598,6 +617,11 @@ class CanonProfileDto(ContractModel):
 
     @property
     def cat_identity_prompt(self) -> str:
+        """Canon 猫咪身份 prompt 文本 —— 注入策划 / 导演 / 资产图 prompt 的身份段。
+
+        由 profile["cat"] 的身份描述 + 锁定特征(locked_traits)拼成;
+        Canon 缺少猫咪档案时回退到默认灰白虎斑猫身份,保证 prompt 永远有明确身份约束。
+        """
         cat = self.profile.get("cat")
         if not cat:
             return "固定同一只灰白虎斑猫，保持毛色分区、眼睛、鼻口、环纹尾巴和正常四足结构"
@@ -2750,6 +2774,8 @@ class StudioService:
             )
         self._require_paid_calls_enabled()
         canon = self.get_canon(project.canon_profile_id)
+        # 剧情分析/提案:编译 planner prompt(Canon 猫咪身份 + 重制故事上下文),
+        # 连同输出 Schema 冻结进 input_hash;用户付费确认后由 worker 提交 LLM。
         prompt = _planner_prompt(project, command.text, canon.cat_identity_prompt)
         prompt += remake_story_context(self._repository.remake_input_context(project_id))
         output_schema = _planner_output_schema(project.target_duration_seconds)
@@ -2960,9 +2986,10 @@ class StudioService:
             dialoguePolicy=story.dialogue_policy,
             environmentIntent=story.environment_intent,
         )
+        # 分镜生成:编译导演 prompt(要求模型实际观察 5 张固定参考图,输出 v4 契约的分镜 JSON)
         prompt = _director_prompt(project, story, self.get_canon(project.canon_profile_id).cat_identity_prompt)
-        # Carry only the adopted proposal's frozen user directions. A later, unadopted
-        # planner conversation must not silently change this story's director input.
+        # 只携带"已采用提案"冻结时的用户补充指令;之后未采用的策划对话
+        # 不得悄悄改变本故事的导演输入。
         planner = self._repository.planner_snapshot(project_id)
         source_proposal = next(
             (item for item in planner.proposals if item.id == story.source_proposal_id), None
@@ -4196,6 +4223,8 @@ class StudioService:
                 maximum_references=1,
                 role_order=("style_board",),
             )
+            # 背景图生成:custom 模式直接使用用户冻结的自定义正文/负面文本(原样保留);
+            # 否则编译系统环境 prompt(空场景、严禁角色入画),参考图仅画风板一张。
             if environment_draft and environment_draft.mode == "custom":
                 prompt = environment_draft.prompt
                 negative_prompt = environment_draft.negative_prompt or ""
@@ -4203,6 +4232,8 @@ class StudioService:
                 prompt = _environment_asset_prompt(project, story, environment_draft.description if environment_draft else None)
                 negative_prompt = _environment_negative_prompt()
         else:
+            # 资产图生成:儿童/猫咪/人猫比例/画风板等资产,正向文本按 kind 职责编译,
+            # 负面文本用资产默认禁令(比例漂移/融脸/文字水印等)。
             compiled = compile_references(references, maximum_references=4)
             prompt = _asset_prompt(project, command.kind, self.get_canon(project.canon_profile_id).cat_identity_prompt)
             negative_prompt = _default_asset_negative_prompt()
@@ -5631,6 +5662,9 @@ class StudioService:
         warnings = []
         if len(image_references) > self._provider_runtime.maximum_segment_image_references:
             raise StudioConflictError("所选参考图片超过当前接口支持数量，请减少参考。")
+        # 片段修复 prompt 按编辑契约版本二选一编译:
+        # v2(现代契约)→ compile_edit_prompt(segment-edit-v8-performance),正文即最终冻结文本;
+        # v1(旧创建契约)→ _segment_edit_prompt(segment-edit-v6-performance),负面约束单独成字段。
         if command.edit_contract_version == 2:
             compiler_revision = "segment-edit-v8-performance"
             negative_prompt = command.avoid_problems
@@ -6690,6 +6724,15 @@ def _hash_document(document: object) -> str:
 
 
 def _planner_output_schema(target_duration_seconds: int) -> dict[str, Any]:
+    """剧情策划(planner)LLM 的输出 JSON Schema —— 单集结构化提案的字段契约。
+
+    约束要点:
+    - 目标时长只允许 8–15 秒,并以 const 锁死为项目设定值,模型无法更改;
+    - title 限 4–12 个汉字,summary 不超过 60 字;
+    - dialoguePolicy 仅 none / minimal(无对白或极少对白);
+    - 其余叙事字段(trigger / childAction / catResponse / visibleChange /
+      warmEnding / environmentIntent 等)全部必填且不得为空串。
+    """
     if not 8 <= target_duration_seconds <= 15:
         raise ValueError("story duration must be between 8 and 15 seconds")
     required = [
@@ -6724,6 +6767,17 @@ def _planner_output_schema(target_duration_seconds: int) -> dict[str, Any]:
 
 
 def _planner_prompt(project: ProjectDto, user_text: str, cat_identity: str = "固定同一只灰白虎斑猫") -> str:
+    """剧情分析/策划 prompt —— 为一人一猫生活短片生成一条结构化提案。
+
+    与 _planner_output_schema 配套使用,指令要点(与正文一一对应):
+    - 猫咪身份由 cat_identity 注入;来源文字只保留动作与因果,保持原创不复制现有 IP;
+    - 只允许一个主要生活事件,必须讲清触发→孩子动作→猫咪反应→可见变化→温暖结尾;
+    - 引用 creative_direction 的 NARRATIVE_DIRECTION / CAT_PERFORMANCE_DIRECTION 共享常量;
+    - 反空泛套话:禁止"围绕……展开""营造……氛围"等,字段必须写可观察的动作与状态变化;
+    - environmentIntent 只写空间/天气/家具/道具/构图/光线,角色动作不得混入
+      (与背景图职责分离,见 _environment_asset_prompt);
+    - 道具沿用同一实例、接触动作写清部位与可见结果,区分固定环境/可移动道具/角色携带物。
+    """
     return (
         f"【本次猫咪身份】{cat_identity}。本次所选身份决定猫咪外观，来源文字保留动作与因果。\n"
         f"为原创一人一猫生活短片《{project.title}》生成一条结构化提案。"
@@ -6747,6 +6801,22 @@ def _planner_prompt(project: ProjectDto, user_text: str, cat_identity: str = "�
 
 
 def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: str) -> str:
+    """分镜生成(导演)prompt —— 把已采用故事设计为 1–4 个镜头,输出 director-v4 契约 JSON。
+
+    由 create_shot_plan_generation_job 调用(directorPromptRevision: catflow-director-v8-performance)。
+    指令结构:
+    - 硬约束:目标秒数、24fps、9:16;durationFrames = durationSeconds × 24;
+      shots 数组只含最终采用且完整的镜头,不得追加占位/备用/自我纠正条目;
+    - 5 张参考图按固定顺序声明职责(图一儿童、图二猫咪、图三人猫比例、图四环境、图五画风),
+      要求模型实际观察图片;环境图不是每镜严格首帧,允许逐镜重新构图;
+    - 唯一因果链:触发→孩子动作→猫咪回应→可见变化→主动结尾,取自已采用故事的 micro_event;
+    - 四大契约段落:【空间与交互契约】(cameraSpatialRelation / interactionConstraints /
+      visualExclusions)、【参考图核对】、【动作与声音】(actionBeats 是时间与动作顺序的
+      唯一来源)、【输出前自检】;
+    - 与故事或参考图冲突且无法确定的事实写入 feasibilityWarnings / generationRisks,
+      不擅改已采用剧情,也不自动触发付费诊断;
+    - JSON 字符串值内引用台词用中文引号,避免未转义英文双引号破坏解析。
+    """
     event = story.micro_event
     return (
         f"你是CatFlow专业短片导演。把已采用故事《{story.title}》设计为"
@@ -6802,6 +6872,11 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
 
 
 def _diagnostic_output_schema() -> dict[str, Any]:
+    """资产图诊断 LLM 的输出 Schema —— 对生成的儿童/猫咪/比例等资产图做结构化体检。
+
+    identity 按角色分项(各自 pass/warning/fail),style / anatomy / technical
+    为整图级判定,warnings 收集 code + message 明细供创作者核对。
+    """
     verdict = {"type": "string", "enum": ["pass", "warning", "fail"]}
     return {
         "type": "object",
@@ -6828,6 +6903,12 @@ def _diagnostic_output_schema() -> dict[str, Any]:
 
 
 def _environment_diagnostic_output_schema() -> dict[str, Any]:
+    """背景图(环境图)诊断 LLM 的输出 Schema —— 与 _environment_asset_prompt 的禁令对应。
+
+    检查项:intentMatch(符合环境意图)、characterFree(无任何角色/动物/倒影)、
+    styleMatch(画风一致)、stagingSpace(为角色预留落脚点与活动空间)、technical(技术质量);
+    warnings 带 code + message 明细。
+    """
     verdict = {"type": "string", "enum": ["pass", "warning", "fail"]}
     required = [
         "intentMatch",
@@ -6860,6 +6941,13 @@ def _environment_diagnostic_output_schema() -> dict[str, Any]:
 
 
 def _video_diagnostic_output_schema() -> dict[str, Any]:
+    """成片视频诊断 LLM 的输出 Schema —— 对生成视频做结构化体检。
+
+    检查项:childIdentity / catIdentity(角色身份不漂移)、pairScale(人猫比例)、
+    styleConsistency(画风一致)、anatomy(解剖结构)、technical(技术质量)、
+    causalChainAndActiveEnding(因果链与主动结尾完成);
+    warnings 额外带 timestampSeconds,把问题定位到视频时间点。
+    """
     verdict = {"type": "string", "enum": ["pass", "warning", "fail"]}
     required = [
         "childIdentity",
@@ -6902,6 +6990,17 @@ def _segment_edit_prompt(
     end_state_policy: str = "match_original",
     desired_end_state: str = "",
 ) -> str:
+    """视频片段修复(segment edit)prompt —— 只替换选区内容,选区外保持原样。
+
+    时间坐标:把全局帧区间(issue_range)换算为片段内相对秒(以 generation_range
+    起点为 0 秒,24fps,结束点不包含),与 video_edit.compile_edit_prompt 的
+    左闭右开约定一致。
+    职责划分:视频1 提供机位/构图/光线与未指定修改的内容,但其中错误的动作与道具
+    状态不得照搬;入点参考负责起始衔接。
+    结束状态策略:end_state_policy == "replace" 时以 desired_end_state 覆盖原结尾
+    且不继承冲突道具状态;否则("match_original")由出点参考负责与原片结束状态衔接。
+    眼部表演边界:固定基础眼型,只允许闭合/重睁/视线转移,且仅作用于本次选区。
+    """
     fps = frame_rate.numerator / frame_rate.denominator
     issue_start = (issue_range.start_frame - generation_range.start_frame) / fps
     issue_end = (issue_range.end_frame - generation_range.start_frame) / fps
@@ -7077,6 +7176,14 @@ def _segment_generation_input_snapshot(
 
 
 def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind, cat_identity: str) -> str:
+    """生图(资产图)正向 prompt —— 按 5 类固定资产 kind 生成对应职责文本。
+
+    kind → 职责:episode_child(本集儿童设计:6–7 岁、约 1.2 米、4.5–5 头身)、
+    episode_cat(注入 cat_identity 身份文本)、pair_scale(一人一猫同框比例)、
+    environment(当前生活环境,只控制空间结构与柔和暖光)、style_board(Canon v4 画风板)。
+    统一尾部约束:9:16、原创猫咪 IP、项目主题;禁摄影写实/文字/水印/叶片微距/身份漂移。
+    最终由 image_generation.compile_provider_image_prompt 折叠成 Ark 单一 prompt 字段。
+    """
     responsibilities = {
         "episode_child": (
             "生成本集儿童设计：固定同一位6至7岁儿童，身高约1.2米，齐下颌短发，"
@@ -7099,6 +7206,17 @@ def _asset_prompt(project: ProjectDto, kind: AssetGenerationKind, cat_identity: 
 
 
 def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto, description: str | None = None) -> str:
+    """背景图(环境设计板)prompt —— 生成 9:16、2K PNG 的空场景环境图。
+
+    关键规则(与环境诊断 _environment_diagnostic_output_schema 的检查项一一对应):
+    - 环境意图来源:description 显式传入(用户编辑稿)优先,否则用故事的 environment_intent;
+    - 只提取空间/天气/家具/道具/构图/光线;即使原文提到角色或动作,也严禁画出人物、
+      动物、身体局部或倒影(characterFree);
+    - 区分固定环境/可移动道具/角色携带物:携带物不得在背景复制一份,可移动道具遵守
+      指定数量与初始状态,不把动作结果提前冻结为陈设;
+    - 为后续约 1.2 米的 6–7 岁儿童和参考中的同一只猫预留前景、落脚点与动作空间(stagingSpace);
+    - 图一固定画风板只负责色彩/柔和漫射光/材质/轮廓线;这是空间关系参考,后续镜头允许重新构图。
+    """
     environment_intent = (description if description is not None else story.environment_intent).rstrip("。！？!?；; \t\r\n")
     return (
         f"为《{project.title}》生成一张9:16、2K PNG的空场景环境设计图。"
@@ -7116,6 +7234,11 @@ def _environment_asset_prompt(project: ProjectDto, story: StoryVersionDto, descr
 
 
 def _environment_negative_prompt() -> str:
+    """背景图负面 prompt —— 与 _environment_asset_prompt 的禁令一一对应。
+
+    排除:任何人物/动物/身体局部/倒影(保证空场景)、真实摄影与 3D 塑料质感、
+    叶片微距素材污染、文字/Logo/水印、过度橙黄、错误透视、无法容纳角色活动的拥挤空间。
+    """
     return (
         "儿童、成年人、任何人物、人物局部、猫咪、其他动物、人物或动物倒影，"
         "真实摄影、照片质感、3D塑料质感、叶片微距摄影、枝条露珠素材污染，"
@@ -7124,6 +7247,12 @@ def _environment_negative_prompt() -> str:
 
 
 def _default_asset_negative_prompt() -> str:
+    """资产图默认负面 prompt —— 5 类资产图共用(环境图另用 _environment_negative_prompt)。
+
+    排除:摄影写实/3D 塑料质感/额外肢体/融脸/文字水印/叶片微距素材,
+    以及儿童比例漂移(8 岁以上修长比例、青少年或成人脸型、过长四肢、超约 5 头身、
+    儿童身高与猫咪比例失真)。
+    """
     return (
         "摄影写实，3D塑料质感，额外肢体，融脸，文字，Logo，水印，"
         "叶片、枝条、露珠、绿色微距摄影，禁止8岁以上的修长儿童比例，"

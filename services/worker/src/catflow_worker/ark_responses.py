@@ -1,4 +1,14 @@
-"""Ark Responses streaming reception and receipt parsing; no implicit creation retry."""
+"""Ark Responses streaming reception and receipt parsing; no implicit creation retry.
+
+Ark Responses 的流式接收与保存:
+- 保存期限校验(1 秒~3 天):store=True 把响应保存在 Ark 侧,断线后可按
+  Response ID 重读,创建请求绝不隐式重发;
+- 正文 2MiB 上限:流式累计或解析时超限即中止,已接收内容保留在回执记录里;
+- 降级语义:流内 error 事件与"连接结束但无完成回执"都折叠为
+  submission_unknown=True 的 ProviderGatewayError,由上层按已保存编号核实;
+- 解析层做确定性 JSON 修复(json_salvage):修复计入 textRepairs 审计,
+  不可修复时仍抛原始解析错误,语义与修复前完全一致。
+"""
 
 from __future__ import annotations
 
@@ -17,6 +27,7 @@ from .provider_receipts import provider_call, receipt_document, receive_receipt
 
 
 def response_usage(document: dict[str, Any]) -> dict[str, int]:
+    """从响应文档提取 token 用量并转为公开字段名;非 int(含 bool)与未知字段跳过。"""
     names = {
         "input_tokens": "inputTokens",
         "output_tokens": "outputTokens",
@@ -31,6 +42,12 @@ def response_usage(document: dict[str, Any]) -> dict[str, int]:
 
 
 def save_response(response: Any, *, complete: bool | None = None) -> dict[str, Any]:
+    """把响应/流事件对象转为回执文档,写入持久接收记录后原样返回。
+
+    回执含 Response ID、Provider 状态、错误、用量、store 标记与保存期限
+    (expire_at 转 ISO 时间);complete 缺省时按 status=="completed" 判定,
+    调用方可显式覆盖(如流式中途保存未完成正文)。
+    """
     document = receipt_document(response)
     status = document.get("status")
     receive_receipt(
@@ -57,6 +74,17 @@ def save_response(response: Any, *, complete: bool | None = None) -> dict[str, A
 
 
 def receive_response_stream(client: Any, request: dict[str, Any]) -> dict[str, Any]:
+    """契约 v2 的流式接收主路径:store=True 提交并逐事件消费,返回终态回执文档。
+
+    持久化:提交前记录 clientRequestId 与保存期限(retentionSeconds,必须在
+    1 秒~3 天内);后台线程每 0.5 秒把增量正文 checkpoint 落回执,增量累计
+    ≥16KiB 时也立即落盘;watchdog 到 streamTotalTimeoutSeconds 强制关流。
+    失败语义:正文累计超 2MiB→structured_output_too_large;流内 error 事件→
+    response_stream_error;连接结束但没有 completed/failed/incomplete 终态→
+    response_stream_interrupted。后两者均标记 submission_unknown=True,
+    由上层按已保存的 response_id 核实,绝不重发创建请求;checkpoint 落盘
+    失败会关流并原样重抛该异常。
+    """
     call = provider_call.get()
     if call is None:
         raise RuntimeError("streaming response requires a durable job context")
@@ -176,6 +204,14 @@ def receive_response_stream(client: Any, request: dict[str, Any]) -> dict[str, A
 
 
 def parse_response(document: dict[str, Any]) -> dict[str, Any]:
+    """把完成回执解析为结构化结果 {payload, responseId, model[, textRepairs]}。
+
+    校验链:status 必须为 completed(否则 response_not_completed,附
+    incomplete_reason 与用量)→正文 ≤2MiB(structured_output_too_large)
+    →json_salvage 确定性解析:修复计入 textRepairs,不可修复抛
+    invalid_structured_output 并保留原始错误文本→嵌套深度 ≤40
+    (structured_output_too_deep,独立于解析错误单独抛出)。
+    """
     status = document.get("status")
     if status != "completed":
         raise ProviderGatewayError(

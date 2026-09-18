@@ -1,3 +1,12 @@
+"""按 job 类型分发的 Ark 任务网关 —— 冻结输入与类型化 Ark 调用之间的路由层。
+
+读取任务的冻结输入(frozen_input_json),按 kind 路由到对应的提交路径
+(规划/分镜/图片/视频/片段修复/诊断),并处理回执与结果解析的对接:
+提交结果归一化为 runner 使用的 ProviderSubmission / ProviderPoll,
+恢复路径(restore_result)把已保存的回执文档重新解析为任务结果。
+本模块不生成 prompt、不改冻结输入,只做取值、校验、媒体准备与分发。
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -66,6 +75,17 @@ class ArkProviderJobGateway:
     def prepare_submission(
         self, *, job_id: uuid.UUID, kind: str, frozen_input: dict[str, object]
     ) -> None:
+        """提交前准备:校验执行契约,并按 kind 预生成/发布所需媒体(结果按 job_id 缓存)。
+
+        - plan_video_edit:抽取时间线帧(未配置抽帧器直接抛 ValueError);
+        - generate_video:冻结输入带上一集成片时,把它发布为 HTTPS 参考视频
+          (未配置发布器抛 video_reference_publisher_unavailable);
+        - regenerate_video_segment:存在 referencePreparationJobId 时直接解析冻结的
+          imageReferences 派生帧,否则由 prepare_segment_media 现场切帧;非 from_frame
+          模式还需把上下文视频发布为 HTTPS URL(严格首帧模式绝不发视频)。
+        发布失败(ObjectPublisherError)折叠为不可重试的 ProviderGatewayError;
+        其余 kind 无需准备,直接返回。
+        """
         contract = frozen_input.get("executionContract", {})
         if contract.get("apiBaseUrl"):
             self._gateway.validate_execution_contract(contract, kind)
@@ -178,6 +198,14 @@ class ArkProviderJobGateway:
         kind: str,
         frozen_input: dict[str, object],
     ) -> ProviderSubmission:
+        """按 job kind 分发到对应的 Gateway 方法,返回归一化的 ProviderSubmission。
+
+        全部输入取自冻结 frozen_input(prompt/Schema/资产 ID/时长/分辨率等),
+        资产 ID 解析为本地路径后提交;文本类返回结构化结果(_structured_submission),
+        视频类返回 taskId + metadata(requestId/publicationId)。
+        generate_video / regenerate_video_segment 若未先经 prepare_submission,
+        会在此补做准备;未知 kind 抛 ValueError(Ark 不拥有该任务类型)。
+        """
         if kind == "plan_video_edit":
             if self._prepare_edit_plan_frames is None:
                 raise ValueError("edit plan timeline frame extraction is not configured")
@@ -188,6 +216,8 @@ class ArkProviderJobGateway:
                 prompt=_required_string(frozen_input, "prompt"),
                 output_schema=_required_dict(frozen_input, "outputSchema"),
                 image_paths=frames,
+                # frameSamples 输入指令:声明图片与冻结的时间线帧采样一一对应,
+                # 并要求模型区分"观察事实"与"不确定建议"后,再按当前文字提出修改建议
                 input_instruction="图片依次对应冻结的 frameSamples；区分观察事实和不确定建议，按当前文字提出修改建议。",
             )
             return _structured_submission(result)
@@ -204,6 +234,8 @@ class ArkProviderJobGateway:
                 input_instruction=str(
                     frozen_input.get(
                         "inputInstruction",
+                        # 冻结输入未带指令时的默认值:vision 参考模式要求按顺序比较全部
+                        # 图片再下诊断结论;纯文本模式只强调返回符合 Schema 的 JSON 对象
                         "按顺序比较所有图片并返回诊断。"
                         if frozen_input.get("referenceInputMode") == "vision"
                         else "只返回符合 Schema 的 JSON 对象。",
@@ -453,6 +485,11 @@ class ArkProviderJobGateway:
         raise ValueError(f"Ark does not own CatFlow job kind: {kind}")
 
     def poll(self, provider_task_id: str) -> ProviderPoll:
+        """轮询视频任务:把 VideoPollResult 归一化为 runner 使用的 ProviderPoll。
+
+        running/unknown/failed 原样透传(含 provider_status 与 error);
+        succeeded 时把 videoUrl/lastFrameUrl/模型/时长/画幅/分辨率装入 result。
+        """
         result = self._gateway.poll_video(provider_task_id)
         if result.status in {"running", "unknown"}:
             return ProviderPoll(
@@ -477,6 +514,13 @@ class ArkProviderJobGateway:
         )
 
     def poll_response(self, response_id: str) -> ProviderPoll:
+        """按 Response ID 重读结构化响应,归一化为 ProviderPoll。
+
+        queued/in_progress→running;completed→succeeded(只透传原始文档 ——
+        JSON 解析是本地工作,查询成功不因正文坏 JSON 而失败);
+        failed/incomplete/cancelled/expired→failed(优先用回执自带 error);
+        其余→unknown(provider_state_unrecognized)。
+        """
         from .ark_responses import response_usage
 
         document = self._gateway.retrieve_response(response_id)
@@ -507,6 +551,12 @@ class ArkProviderJobGateway:
         )
 
     def restore_result(self, kind: str, document: dict[str, object]) -> dict[str, object]:
+        """恢复路径:把已保存的回执文档按 kind 重新解析为任务结果。
+
+        文本类走 parse_response(与在线路径同一解析语义,含确定性 JSON 修复);
+        视频类要求回执含 video_url,图片类要求恰好一张可下载图,
+        缺失时抛中文 ValueError(外部已生成但回执不完整)。
+        """
         from catflow.application.job_execution import TEXT_JOB_KINDS, VIDEO_JOB_KINDS
 
         from .ark_responses import parse_response
@@ -532,6 +582,7 @@ class ArkProviderJobGateway:
 
 
 def _structured_submission(result: StructuredProviderResult) -> ProviderSubmission:
+    """把结构化规划结果打包为提交回执(payload/responseId/model/requestHash + 用量)。"""
     document: dict[str, object] = {
         "payload": result.payload,
         "responseId": result.response_id,
@@ -547,6 +598,11 @@ def _structured_submission(result: StructuredProviderResult) -> ProviderSubmissi
 def _required_string(
     document: dict[str, object], key: str, *, preserve_whitespace: bool = False
 ) -> str:
+    """读取冻结输入的必需字符串:缺失或去空白后为空即抛 ValueError。
+
+    preserve_whitespace=True(编辑契约 v2)时要求原值本身就是字符串并保留原文
+    空白 —— prompt 冻结成什么样就发什么样;否则返回 strip 后的值。
+    """
     value = document.get(key, "")
     if preserve_whitespace and not isinstance(value, str):
         raise ValueError(f"frozen Ark input requires string {key}")
@@ -557,6 +613,7 @@ def _required_string(
 
 
 def _required_dict(document: dict[str, object], key: str) -> dict[str, object]:
+    """读取冻结输入的必需对象字段(如 outputSchema);非 dict 抛 ValueError。"""
     value = document.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"frozen Ark input requires object {key}")
@@ -564,12 +621,14 @@ def _required_dict(document: dict[str, object], key: str) -> dict[str, object]:
 
 
 def _uuid_tuple(value: object) -> tuple[uuid.UUID, ...]:
+    """把冻结输入的资产 ID 数组转为 UUID 元组;非数组或非法 UUID 抛 ValueError。"""
     if not isinstance(value, list | tuple):
         raise ValueError("frozen Ark asset IDs must be an array")
     return tuple(uuid.UUID(str(item)) for item in value)
 
 
 def _required_frame_range(document: dict[str, object], key: str) -> tuple[int, int]:
+    """读取冻结输入的帧区间(startFrame/endFrame):要求整数、start≥0 且 end>start。"""
     value = document.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"frozen Ark input requires object {key}")

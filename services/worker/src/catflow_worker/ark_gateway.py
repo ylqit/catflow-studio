@@ -1,3 +1,16 @@
+"""Worker 侧 Ark SDK 网关 —— 实现 api 层 gateways.py 定义的 Provider Protocol。
+
+职责:
+- 把冻结输入(frozen_input_json / compiled provider prompt)提交给 Ark 的
+  规划(结构化 JSON)、图片、视频、片段修复与诊断接口;
+- 模型与密钥配置来自 ArkGatewaySettings(环境变量);
+- 带 providerPromptVersion 新标记的任务直接发送冻结文本,不再追加隐藏说明。
+
+失败语义:所有传输/协议异常统一折叠为 ProviderGatewayError(见 _provider_error);
+付费提交结果未知时以 submission_unknown=True 标记,是否重试由 CatFlow 上层决定,
+网关自身永不重试提交(SDK max_retries=0),也永不改写 CatFlow 业务状态。
+"""
+
 from __future__ import annotations
 
 import base64
@@ -31,6 +44,11 @@ from .provider_receipts import provider_call, read_http_receipt, receipt_documen
 
 @dataclass(frozen=True, slots=True)
 class ArkGatewaySettings:
+    """Ark 网关配置(冻结数据类):密钥、Base URL、四类模型与请求超时。
+
+    构造时校验:api_key 去空白后非空,base_url 必须使用 HTTPS。
+    """
+
     api_key: str
     base_url: str
     planning_model: str
@@ -47,6 +65,7 @@ class ArkGatewaySettings:
 
     @classmethod
     def from_env(cls) -> ArkGatewaySettings:
+        """从环境变量读取配置;未设置时用默认端点与模型,诊断模型默认回落到规划模型。"""
         import os
 
         return cls(
@@ -129,6 +148,7 @@ class ArkTypedGateway:
     def plan_story(
         self, *, prompt: str, output_schema: dict[str, object]
     ) -> StructuredProviderResult:
+        """规划故事:纯文本冻结 prompt + JSON Schema,走结构化 JSON 通道(正文上限 4000 token)。"""
         return self._structured_response(
             model=self._settings.planning_model,
             prompt=prompt,
@@ -143,8 +163,14 @@ class ArkTypedGateway:
         prompt: str,
         output_schema: dict[str, object],
         image_paths: tuple[Path, ...] = (),
+        # 多模态输入的首条文字指令默认值:告知模型参考图按顺序承担各自职责,规划分镜时须遵守
         input_instruction: str = "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
     ) -> StructuredProviderResult:
+        """规划分镜:冻结 prompt + 可选参考图,结构化 JSON 输出(正文上限 8000 token)。
+
+        图片按传入顺序编号发送(见 _structured_response);
+        传输/解析失败抛 ProviderGatewayError,不返回半成品结果。
+        """
         return self._structured_response(
             model=self._settings.planning_model,
             prompt=prompt,
@@ -157,6 +183,7 @@ class ArkTypedGateway:
     def plan_series(
         self, *, prompt: str, output_schema: dict[str, object]
     ) -> StructuredProviderResult:
+        """规划系列(多集大纲):结构化 JSON 输出;系列篇幅最长,正文上限 16000 token。"""
         return self._structured_response(
             model=self._settings.planning_model,
             prompt=prompt,
@@ -168,6 +195,7 @@ class ArkTypedGateway:
     def plan_series_episode(
         self, *, prompt: str, output_schema: dict[str, object]
     ) -> StructuredProviderResult:
+        """规划单集剧情:结构化 JSON 输出(正文上限 4000 token)。"""
         return self._structured_response(
             model=self._settings.planning_model,
             prompt=prompt,
@@ -179,6 +207,7 @@ class ArkTypedGateway:
     def analyze_story_source(
         self, *, prompt: str, output_schema: dict[str, object]
     ) -> StructuredProviderResult:
+        """解析原作素材:结构化 JSON 输出(正文上限 12000 token)。"""
         return self._structured_response(
             model=self._settings.planning_model,
             prompt=prompt,
@@ -194,6 +223,11 @@ class ArkTypedGateway:
         image_paths: tuple[Path, ...],
         output_schema: dict[str, object],
     ) -> StructuredProviderResult:
+        """图片诊断:候选图与参考图按传入顺序一并发给诊断模型,结构化 JSON 输出(上限 4000 token)。
+
+        无图直接抛 ValueError(本地输入问题,不是 Provider 故障);
+        传输/解析失败抛 ProviderGatewayError。
+        """
         if not image_paths:
             raise ValueError("diagnosis requires at least one image")
         return self._structured_response(
@@ -202,6 +236,7 @@ class ArkTypedGateway:
             image_paths=image_paths,
             output_schema=output_schema,
             max_output_tokens=4000,
+            # 诊断输入指令:要求模型按发送顺序逐张比较全部图片后,再给出诊断结论
             input_instruction="按顺序比较所有图片并返回诊断。",
         )
 
@@ -214,6 +249,15 @@ class ArkTypedGateway:
         reference_roles: tuple[str, ...],
         compiled_provider_prompt: str | None = None,
     ) -> ImageProviderResult:
+        """图片生成(Seedream images.generate),返回单张可下载图片的 URL 与用量。
+
+        正文优先使用 compiled_provider_prompt(新版冻结全文,原样发送),否则由
+        prompt + negative_prompt 现场编译;参考图转 base64 data URL 附带。
+        契约 v2 时经 raw HTTP 响应先落持久回执再解析结果。
+        失败语义:本地校验抛 ValueError;传输异常折叠为 ProviderGatewayError
+        (submission=True);响应含 error→image_generation_failed;
+        非恰好一张带 URL 的图→invalid_image_result(均不可重试)。
+        """
         if len(reference_paths) != len(reference_roles):
             raise ValueError("image reference paths and roles must have the same length")
         request: dict[str, object] = {
@@ -302,6 +346,15 @@ class ArkTypedGateway:
         generation_mode: str = "references",
         provider_prompt_version: int = 0,
     ) -> VideoSubmissionResult:
+        """整片视频生成提交(Seedance content_generation.tasks.create),返回任务 ID。
+
+        本地校验:from_frame 严格模式只收一张首帧、不带其他参考与参考视频;
+        参考图 ≤9 且路径/角色数量一致;参考视频必须是无凭证的 HTTPS URL。
+        provider_prompt_version==1 时 prompt 已是冻结全文,原样发送;
+        旧版本才在 prompt 后追加参考图职责顺序与成片连续性说明。
+        失败语义:校验失败抛 ValueError;提交异常折叠为 ProviderGatewayError,
+        结果未知时 submission_unknown=True(是否重试由上层决定,网关不重试)。
+        """
         if generation_mode == "from_frame" and (
             len(reference_paths) != 1
             or reference_roles != ("first_frame",)
@@ -326,6 +379,8 @@ class ArkTypedGateway:
             ):
                 raise ValueError("video reference must use an HTTPS URL without credentials")
         role_sequence = " → ".join(reference_roles)
+        # 上一集成片参考的职责边界:只提供服装/道具/空间位置/时间/光线与直接接镜状态
+        # 等连续性线索,不取代前五张固定参考图(儿童、猫咪、比例、当前环境、画风)的约束职责
         video_guidance = (
             "\n上一集成片只负责服装、道具、空间位置、时间、光线与直接接镜状态；"
             "不得取代前五张图片对儿童、猫咪、比例、当前环境和画风的约束。"
@@ -335,6 +390,8 @@ class ArkTypedGateway:
         content: list[dict[str, object]] = [
             {
                 "type": "text",
+                # provider_prompt_version==1:prompt 即编译好的冻结全文,不再追加任何隐藏说明;
+                # 旧版本:在冻结 prompt 后追加参考图职责顺序(存在成片参考时再追加 video_guidance)
                 "text": (
                     prompt
                     if provider_prompt_version == 1
@@ -367,6 +424,14 @@ class ArkTypedGateway:
         )
 
     def poll_video(self, task_id: str) -> VideoPollResult:
+        """按任务 ID 查询视频生成状态,归一化为 VideoPollResult。
+
+        状态映射:queued/running→running;succeeded→提取 video_url 与 last_frame_url
+        (缺 video_url 时以 missing_video_url 错误返回);failed/cancelled/expired→failed
+        (附 Provider 错误码);其余→unknown(provider_state_unrecognized)。
+        契约 v2 时先落 HTTP 回执再解析;查询异常折叠为
+        ProviderGatewayError(submission=False,轮询不产生新的付费提交)。
+        """
         if call := provider_call.get():
             self.validate_execution_contract(call.contract)
         try:
@@ -456,6 +521,13 @@ class ArkTypedGateway:
         )
 
     def submit_segment_video(self, request: SegmentVideoGenerationRequest) -> VideoSubmissionResult:
+        """片段修复提交:重生成问题区间对应的短视频,返回任务 ID。
+
+        图片顺序 = 入锚帧(可选)→出锚帧(可选)→Canon 参考图;edit_existing 模式
+        在图片前附带上下文视频(HTTPS URL),from_frame 模式只发首/末帧、绝不发视频。
+        请求合法性(时长、角色顺序、URL 形态等)由 SegmentVideoGenerationRequest
+        的 __post_init__ 保证;提交失败语义同 submit_video。
+        """
         image_paths = (
             *((request.anchor_in_path,) if request.anchor_in_path is not None else ()),
             *((request.anchor_out_path,) if request.anchor_out_path is not None else ()),
@@ -470,6 +542,9 @@ class ArkTypedGateway:
         content: list[dict[str, object]] = [
             {
                 "type": "text",
+                # 修复正文三级回退:compiled_provider_prompt(新版冻结全文,原样发送)
+                # → segment-edit-v3/v4/v5 的"prompt + 需要避免的问题"简化拼接
+                # → 最早版本的完整拼接(修改目标/精确问题时间/负面约束/媒体职责)
                 "text": (
                     request.compiled_provider_prompt
                     if request.compiled_provider_prompt is not None
@@ -481,6 +556,8 @@ class ArkTypedGateway:
                         f"精确问题时间：{request.issue_start_seconds:.3f}–"
                         f"{request.issue_end_seconds:.3f}秒。\n{request.prompt}\n"
                         f"负面约束：{request.negative_prompt}\n"
+                        # 媒体职责切分:视频1(上下文视频)只负责原动作、机位、节奏与前后连续性,
+                        # 各图片按 role_sequence 顺序承担锚帧与 Canon 参考的约束职责
                         "视频1只负责原动作、机位、节奏和前后连续性；"
                         f"图片职责按顺序为：{role_sequence}。"
                     )
@@ -607,8 +684,19 @@ class ArkTypedGateway:
         image_paths: tuple[Path, ...],
         output_schema: dict[str, object],
         max_output_tokens: int,
+        # 用户输入首条文字的默认值:纯文本调用时它就是全部用户输入,有图片时排在图片之前
         input_instruction: str = "只返回符合 Schema 的 JSON 对象。",
     ) -> StructuredProviderResult:
+        """结构化 JSON 调用通道:所有规划/诊断方法共用的 Responses 提交与解析。
+
+        有图片时组装多模态 input:指令在前,每张图前插入"有序图片N"标签保证顺序语义;
+        request_hash 是冻结请求文档(模型/prompt/Schema/图片 SHA256/指令)的
+        SHA256,供 Receipt 对账;解析经 parse_response 完成(含确定性 JSON 修复,
+        修复计数以 text_repairs 透传)。契约 v2 走流式接收(receive_response_stream),
+        否则同步 create 后 save_response。
+        失败语义:传输/流式异常折叠为 ProviderGatewayError(submission=True);
+        解析失败抛 ProviderGatewayError 并附 max_output_tokens 供上层判断是否截断。
+        """
         input_content: object = input_instruction
         if image_paths:
             content: list[dict[str, str]] = [{"type": "input_text", "text": input_instruction}]
@@ -621,6 +709,8 @@ class ArkTypedGateway:
         # schema remains explicit in the instruction and is validated again at
         # the typed result boundary before business state is changed.
         text_format = {"type": "json_object"}
+        # Schema 指令 = 冻结 prompt + 输出契约:只返回一个 JSON 对象、不要 Markdown,
+        # 且必须严格符合随附的 JSON Schema(sort_keys 序列化,保证同输入得到同指令文本)
         schema_instruction = (
             f"{prompt}\n\n只返回一个 JSON 对象，不要 Markdown。必须严格符合以下 JSON Schema：\n"
             + json.dumps(output_schema, ensure_ascii=False, sort_keys=True)
@@ -673,6 +763,11 @@ class ArkTypedGateway:
         )
 
     def retrieve_response(self, response_id: str) -> dict[str, Any]:
+        """按 Response ID 重读已保存的 Ark 响应(恢复/核实路径),并落持久回执。
+
+        先校验执行契约(不得跨环境重读冻结任务);查询异常折叠为
+        ProviderGatewayError(submission=False,重读不产生新的付费提交)。
+        """
         if call := provider_call.get():
             self.validate_execution_contract(call.contract)
         try:
@@ -688,6 +783,16 @@ class ArkTypedGateway:
 def _provider_error(
     exc: Exception, *, submission: bool, diagnostics: dict[str, Any] | None = None
 ) -> ProviderGatewayError:
+    """把任意 SDK/传输异常折叠为统一的 ProviderGatewayError,并落脱敏后的错误回执。
+
+    证据提取:超时分类、请求体大小、客户端/服务端请求 ID、retry-after
+    (兼容秒数与 HTTP 日期两种格式);错误文本经 redact_transport_error 脱敏,
+    避免签名 URL 等敏感内容落库。
+    失败语义:submission=True 且非明确 4xx 拒绝时 submission_unknown=True
+    (付费提交结果未知,是否重试由 CatFlow 决定);仅结果已知且 429/5xx 才标
+    retryable;AttributeError/TypeError 且无 HTTP 状态视为 local_adapter_error
+    (本地 SDK 适配问题,未触达 Provider)。
+    """
     if isinstance(exc, ProviderGatewayError):
         return exc
     evidence = {**(diagnostics or {}), **timeout_evidence(exc)}
@@ -757,6 +862,11 @@ def _provider_error(
 
 
 def _image_data_url(path: Path) -> str:
+    """把参考图编码为 base64 data URL,发送前完成本地校验。
+
+    要求:文件存在、≤20MiB、可被 PIL 解码且格式为 PNG/JPEG/WEBP;
+    不满足抛 ValueError —— 属本地输入问题,不是 Provider 故障。
+    """
     if not path.is_file():
         raise ValueError(f"reference image not found: {path}")
     if path.stat().st_size > 20 * 1024 * 1024:
@@ -772,6 +882,7 @@ def _image_data_url(path: Path) -> str:
 
 
 def _usage_document(usage: object | None) -> dict[str, int]:
+    """把 Provider usage(dict 或 SDK 对象)归一化为公开字段名的整型字典;缺失字段跳过。"""
     if usage is None:
         return {}
     fields = (

@@ -1,3 +1,24 @@
+"""系列(整季)→续段→单集 三级策划的应用层 —— DTO、方案规范化与 LLM 策划 prompt 编译。
+
+本文件承载三部分职责:
+
+1. 三级策划的命令 / DTO / 草稿模型(ContractModel):既是前后端 JSON 契约,
+   也是 Provider(模型)输出契约 —— SeriesPlanDraft / SeriesBibleDraft /
+   SeriesEpisodeOutlineDraft 等直接作为 outputSchema 发给模型;
+2. 模型方案的规范化(normalize_series_plan_result:保留付费输出、形状清洗、
+   解析校验与采用校验分离)和各类一致性 hash(settings hash 绑定可编辑设定、
+   materialization hash 幂等物化、input hash 冻结生成输入);
+3. 三个 LLM 策划 prompt 的编译:
+   - compile_series_plan_preview          → 整季方案(catflow-series-planner-v7-performance)
+   - compile_series_plan_segment_preview  → 长系列续段方案(catflow-series-segment-planner-v5-contract)
+   - compile_series_episode_story_preview → 单集故事扩写(catflow-series-episode-planner-v6-spatial)
+
+调用方为 application/service.py(编译预览、对账 input hash 后提交付费任务)与
+worker(ark_results.py 取回 Provider 结果后调用 normalize_series_plan_result 规范化入库)。
+prompt 中系列圣经、必须保留要求、来源处理决定等中文分项渲染委托给 series_prompt_text.py;
+叙事与表演方向常量(NARRATIVE_DIRECTION / CAT_PERFORMANCE_DIRECTION)来自 creative_direction.py。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -23,18 +44,31 @@ from .series_prompt_text import (
     render_source_treatments,
 )
 
+# 叙事模式:连续剧情 / 轻连续 / 单元故事(中文标签见 series_prompt_text 的映射)
 SeriesNarrativeMode = Literal["continuous", "lightly_serialized", "anthology"]
+# 改编策略:preserve_all=完整保留来源;condense_mainline=按生产目标缩编主线
 AdaptationPolicy = Literal["preserve_all", "condense_mainline"]
+# 系列长度:fixed=固定集数(必须给 plannedEpisodeCount);ongoing=持续连载(不设总集数)
 SeriesLengthMode = Literal["fixed", "ongoing"]
+# 方案版本生命周期状态
 SeriesPlanStatus = Literal["candidate", "accepted", "rejected", "superseded"]
+# 规范化后的处置结论:可作为候选 / 需人工补充后再采用 / 无法解析
 SeriesPlanDisposition = Literal["candidate_ready", "needs_input", "invalid"]
+# 单集对来源剧情节拍的覆盖程度:完整覆盖 / 部分覆盖 / 承接前集的延续
 SourceCoverageMode = Literal["whole", "partial", "continuation"]
+# 单次 LLM 调用最多规划的集数 —— 调用批量边界,不是系列总集数上限
 MAX_SERIES_PLANNING_BATCH = 30
+# 持续连载(未设总集数)时首批默认规划集数
 DEFAULT_ONGOING_PLANNING_BATCH = 12
+# 方案规范化算法版本 —— 写入 input hash 文档与校验记录,保证旧结果可复现、对账一致
 SERIES_NORMALIZATION_REVISION = "series-plan-normalization-v2"
 
 
 class SeriesCreateCommand(ContractModel):
+    """创建系列命令 —— 用户在策划页确认的系列设定:标题/核心构想/叙事与长度模式/
+    每集时长/世界设定/情绪方向/结局目标,以及 must_keep(必须保留)、must_avoid(必须避免)
+    与 additional_notes(补充制作约束);后续所有策划 prompt 都从这里取材。"""
+
     canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
     adaptation_policy: AdaptationPolicy = Field(alias="adaptationPolicy", default="preserve_all")
     title: str = Field(min_length=1, max_length=160)
@@ -66,6 +100,8 @@ class SeriesCreateCommand(ContractModel):
 
 
 class SeriesPatchCommand(ContractModel):
+    """系列设定局部更新命令 —— 所有字段可选但至少提供一项(require_change 校验)。"""
+
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None, ge=2)
     default_episode_duration_seconds: int | None = Field(
         alias="defaultEpisodeDurationSeconds", default=None, ge=8, le=15
@@ -89,6 +125,9 @@ class SeriesPatchCommand(ContractModel):
 
 
 class StorySeriesDto(SeriesCreateCommand):
+    """系列完整 DTO —— 创建设定之外附加 id、规范角色档案、当前激活方案版本与集数统计
+    (planned/materialized/completed)。"""
+
     id: uuid.UUID
     canon_profile_id: uuid.UUID = Field(alias="canonProfileId")
     active_plan_version_id: uuid.UUID | None = Field(alias="activePlanVersionId", default=None)
@@ -100,18 +139,24 @@ class StorySeriesDto(SeriesCreateCommand):
 
 
 class RecurringLocationDraft(ContractModel):
+    """常驻场景草稿 —— key 是单集大纲 recurringLocationKeys 必须引用的标识符。"""
+
     key: str = Field(default="", max_length=80)
     name: str = Field(default="", max_length=160)
     description: str = Field(default="", max_length=800)
 
 
 class RecurringPropDraft(ContractModel):
+    """常驻道具草稿 —— key 供单集大纲 recurringPropKeys 引用;continuityRule 写跨集一致性要求。"""
+
     key: str = Field(default="", max_length=80)
     name: str = Field(default="", max_length=160)
     continuity_rule: str = Field(alias="continuityRule", default="", max_length=800)
 
 
 class SeriesEmotionalArcDraft(ContractModel):
+    """整季情绪弧线 —— 开场 / 发展 / 高潮 / 收束四段,采用前均为必填(validate 检查)。"""
+
     opening: str = Field(default="", max_length=600)
     development: str = Field(default="", max_length=600)
     climax: str = Field(default="", max_length=600)
@@ -119,6 +164,10 @@ class SeriesEmotionalArcDraft(ContractModel):
 
 
 class SeriesBibleDraft(ContractModel):
+    """整季系列圣经草稿 —— LLM 策划输出的整季核心设定(核心一句话/主题/世界规则/
+    情绪弧线/常驻场景与道具/服装与连续性规则/视听母题/禁止改动)。
+    prompt 内嵌与界面展示时由 series_prompt_text.render_series_bible 渲染成中文分项。"""
+
     logline: str = Field(default="", max_length=800)
     central_theme: str = Field(alias="centralTheme", default="", max_length=300)
     narrative_mode: SeriesNarrativeMode | None = Field(alias="narrativeMode", default=None)
@@ -138,12 +187,19 @@ class SeriesBibleDraft(ContractModel):
 
 
 class EpisodeSourceCoverageDto(ContractModel):
+    """单集对一个来源剧情节拍的覆盖声明 —— sourceUnitOrdinal 只能引用系列绑定的
+    安全序号(validate_series_plan 会拦截越界与非连续复用)。"""
+
     source_unit_ordinal: int = Field(alias="sourceUnitOrdinal", ge=1)
     coverage: SourceCoverageMode
     coverage_note: str = Field(alias="coverageNote", min_length=1, max_length=1_000)
 
 
 class SeriesEpisodeOutlineDraft(ContractModel):
+    """单集大纲草稿 —— LLM 策划为每集输出的一条可在目标时长内完成的可见事件:
+    开场状态→触发→儿童目标/动作→猫咪回应→可见变化→结尾状态的因果链,
+    附带来源节拍覆盖声明(sourceCoverage)与常驻场景/道具 key 引用。"""
+
     order: int = Field(default=0, ge=0)
     title: str = Field(default="", max_length=160)
     target_duration_seconds: int = Field(alias="targetDurationSeconds", default=0, ge=0)
@@ -165,6 +221,9 @@ class SeriesEpisodeOutlineDraft(ContractModel):
 
 
 class SourceTreatmentDraft(ContractModel):
+    """缩编主线下对一个来源事件的处理决定 —— retained/merged/simplified/omitted,
+    每个来源必须恰好一份,列出实际使用它的集数与理由(与 sourceCoverage 交叉校验)。"""
+
     source_unit_ordinal: int = Field(alias="sourceUnitOrdinal", ge=1)
     treatment: Literal["retained", "merged", "simplified", "omitted"]
     episode_orders: list[int] = Field(alias="episodeOrders", default_factory=list)
@@ -172,17 +231,26 @@ class SourceTreatmentDraft(ContractModel):
 
 
 class AdaptationRiskDraft(ContractModel):
+    """改编风险声明 —— blocking=True 时作为阻塞问题,方案需人工调整后才能采用。"""
+
     message: str = Field(min_length=1, max_length=2000)
     blocking: bool = True
 
 
 class PreservedRequirementDraft(ContractModel):
+    """用户"必须保留要求"的落实说明 —— 每条 must_keep 须恰好对应一份,
+    写明处理方式(handling)与落实到的集数(校验时逐条对账)。"""
+
     requirement: str = Field(min_length=1)
     handling: str = Field(min_length=1)
     episode_orders: list[int] = Field(alias="episodeOrders", default_factory=list)
 
 
 class SeriesPlanDraft(ContractModel):
+    """系列方案完整草稿 —— 整季/续段策划 LLM 的输出契约(series_plan_output_schema
+    即由它生成):系列圣经 + 逐集大纲(至少一集),缩编路线下另附来源处理决定、
+    改编风险与必须保留要求的落实说明。"""
+
     source_treatments: list[SourceTreatmentDraft] = Field(
         alias="sourceTreatments", default_factory=list
     )
@@ -198,6 +266,9 @@ class SeriesPlanDraft(ContractModel):
 
 
 class SeriesValidationIssueDto(ContractModel):
+    """单条校验/规范化问题 —— code 标识规则、path 指向字段、severity 决定处置结论;
+    规范化产生的问题额外带 beforeValue/afterValue 供界面展示改动。"""
+
     code: str
     severity: Literal["fatal", "blocking", "warning"]
     path: str
@@ -210,6 +281,13 @@ class SeriesValidationIssueDto(ContractModel):
 
 @dataclass(frozen=True, slots=True)
 class SeriesPlanNormalizationResult:
+    """付费模型方案的规范化结果 —— 原始 payload 无条件保留(付费输出不丢),
+    同时给出形状清洗后的 payload、处置结论与问题列表。
+
+    recoverable 表示方案可继续采用或人工修补;validation_document() 生成
+    持久化到方案版本的校验文档。
+    """
+
     raw_payload: dict[str, object]
     normalized_payload: dict[str, object] | None
     disposition: SeriesPlanDisposition
@@ -234,6 +312,9 @@ class SeriesPlanNormalizationResult:
 
 
 class SeriesPlanVersionDto(ContractModel):
+    """方案版本 DTO —— 每次生成/编辑保存为一个不可变版本;inputHash 冻结生成时的
+    prompt+schema 输入,active 标记当前被系列采用的版本。"""
+
     id: uuid.UUID
     series_id: uuid.UUID = Field(alias="seriesId")
     revision: int
@@ -251,6 +332,9 @@ class SeriesPlanVersionDto(ContractModel):
 
 
 class SeriesEpisodeDto(ContractModel):
+    """系列单集 DTO —— order 在系列内全局递增;status 覆盖从大纲到成片的生产管线;
+    project_id 在物化(materialize)后指向单集制作项目,outline 为当前激活大纲版本。"""
+
     id: uuid.UUID
     series_id: uuid.UUID = Field(alias="seriesId")
     order: int
@@ -275,12 +359,18 @@ class SeriesEpisodeDto(ContractModel):
 
 
 class ProjectSeriesContextDto(ContractModel):
+    """项目所属系列上下文 —— 供单集制作页读取系列设定、当前集与全部兄弟剧集。"""
+
     series: StorySeriesDto
     episode: SeriesEpisodeDto
     episodes: list[SeriesEpisodeDto]
 
 
 class SeriesSourceBeatDto(ContractModel):
+    """系列绑定的来源剧情节拍 DTO(来自故事导入的 source unit)——
+    binding_order 是 prompt 与 sourceCoverage 唯一允许引用的"安全序号",
+    raw_text 为该节拍的来源原文。"""
+
     id: uuid.UUID
     series_id: uuid.UUID = Field(alias="seriesId")
     source_unit_id: uuid.UUID = Field(alias="sourceUnitId")
@@ -293,6 +383,10 @@ class SeriesSourceBeatDto(ContractModel):
 
 
 class SeriesPlanPreviewDto(ContractModel):
+    """整季方案生成预览 DTO —— 返回冻结的 prompt/schema 与 inputHash(worker 提交
+    付费任务时对账,保证所见即所付),settingsInputHash 绑定可编辑设定供本地重校验,
+    并给出本批集数 / 系列总集数 / 剩余集数。"""
+
     series_id: uuid.UUID = Field(alias="seriesId")
     provider: str
     model: str
@@ -310,11 +404,17 @@ class SeriesPlanPreviewDto(ContractModel):
 
 
 class SeriesPlanGenerationCommand(PaidJobCommand):
+    """提交整季方案生成命令 —— expectedInputHash 必须等于预览返回的 inputHash,
+    配合幂等键防止重复付费。"""
+
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
 class SeriesPlanSegmentCommand(ContractModel):
+    """长系列续段策划请求 —— 指定起始集号与本批集数,并携带期望的整季方案版本与
+    上一续段版本(乐观并发:两者任一变化即拒绝,防止基于过期基线续写)。"""
+
     start_episode_order: int = Field(alias="startEpisodeOrder", ge=1)
     requested_episode_count: int = Field(
         alias="requestedEpisodeCount", ge=1, le=MAX_SERIES_PLANNING_BATCH
@@ -326,11 +426,16 @@ class SeriesPlanSegmentCommand(ContractModel):
 
 
 class SeriesPlanSegmentGenerationCommand(SeriesPlanSegmentCommand, PaidJobCommand):
+    """提交续段生成命令 —— 在续段请求之上对账预览冻结的 input hash,防止重复付费。"""
+
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
 class SeriesPlanSegmentPreviewDto(ContractModel):
+    """续段方案生成预览 DTO —— 冻结的 prompt/schema 与 inputHash,并回显期望的
+    整季方案版本 / 上一续段版本与剩余集数(仅固定集数模式)。"""
+
     series_id: uuid.UUID = Field(alias="seriesId")
     start_episode_order: int = Field(alias="startEpisodeOrder")
     requested_episode_count: int = Field(alias="requestedEpisodeCount")
@@ -349,6 +454,9 @@ class SeriesPlanSegmentPreviewDto(ContractModel):
 
 
 class SeriesPlanSegmentVersionDto(ContractModel):
+    """续段方案版本 DTO —— 记录段范围(起始集号/集数)、处置结论与期望基线版本链,
+    inputHash 冻结生成输入,激活后其大纲用于物化对应区间的单集。"""
+
     id: uuid.UUID
     segment_id: uuid.UUID = Field(alias="segmentId")
     series_id: uuid.UUID = Field(alias="seriesId")
@@ -372,6 +480,8 @@ class SeriesPlanSegmentVersionDto(ContractModel):
 
 
 class SeriesPlanSegmentActivationCommand(ContractModel):
+    """激活续段方案命令 —— 校验期望的整季方案版本与上一续段版本未变后再置为 active。"""
+
     expected_series_plan_version_id: uuid.UUID = Field(alias="expectedSeriesPlanVersionId")
     expected_previous_segment_version_id: uuid.UUID | None = Field(
         alias="expectedPreviousSegmentVersionId", default=None
@@ -380,6 +490,8 @@ class SeriesPlanSegmentActivationCommand(ContractModel):
 
 
 class SeriesPlanActivationCommand(ContractModel):
+    """激活整季方案命令 —— 期望的当前激活版本(首次激活为空)防止并发覆盖。"""
+
     expected_active_plan_version_id: uuid.UUID | None = Field(
         alias="expectedActivePlanVersionId", default=None
     )
@@ -387,6 +499,10 @@ class SeriesPlanActivationCommand(ContractModel):
 
 
 class SeriesPlanMaterializeCommand(ContractModel):
+    """物化方案为新候选版本的命令 —— source=saved_result 基于已保存结果重放
+    (以 expectedSettingsHash 对账设定未漂移);source=edited 提交用户编辑后的 plan;
+    两条路径互斥(validate_source 强制)。"""
+
     base_plan_version_id: uuid.UUID = Field(alias="basePlanVersionId")
     source: Literal["edited", "saved_result"] = "edited"
     plan: SeriesPlanDraft | None = None
@@ -406,20 +522,29 @@ class SeriesPlanMaterializeCommand(ContractModel):
 
 
 class SeriesEpisodeMaterializeCommand(ContractModel):
+    """物化单集命令 —— 为该集创建制作项目(project),仅携带幂等键。"""
+
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
 class SeriesEpisodeStoryGenerationCommand(PaidJobCommand):
+    """提交单集故事生成命令 —— 对账预览冻结的 input hash,可携带本次扩写的用户补充。"""
+
     expected_input_hash: str = Field(alias="expectedInputHash", pattern=r"^[a-f0-9]{64}$")
     additional_notes: str | None = Field(alias="additionalNotes", default=None, max_length=4_000)
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=96)
 
 
 class SeriesEpisodeStoryPreviewCommand(ContractModel):
+    """单集故事预览命令 —— 仅携带用户补充(拼进 prompt 的"用户补充"行)。"""
+
     additional_notes: str | None = Field(alias="additionalNotes", default=None, max_length=4_000)
 
 
 class SeriesEpisodeStoryPreviewDto(ContractModel):
+    """单集故事生成预览 DTO —— 冻结的 prompt/schema、inputHash,以及系列/方案/单集/
+    大纲/项目全部版本 id 与进入本集的连续性,供 worker 提交付费任务时对账。"""
+
     series_id: uuid.UUID = Field(alias="seriesId")
     series_plan_version_id: uuid.UUID = Field(alias="seriesPlanVersionId")
     series_episode_id: uuid.UUID = Field(alias="seriesEpisodeId")
@@ -435,6 +560,8 @@ class SeriesEpisodeStoryPreviewDto(ContractModel):
     prompt_revision: str = Field(alias="promptRevision")
 
 
+# 规范化时各层允许保留的字段白名单(camelCase,与 outputSchema 一致)——
+# 模型多给的字段会被剥离并记为 provider_extra_field 警告,不进入正式方案
 _SERIES_PLAN_KEYS = {
     "seriesBible",
     "episodes",
@@ -483,6 +610,7 @@ _EPISODE_KEYS = {
 def _retain_known_fields(
     value: dict[str, object], allowed: set[str], *, path: str, extras: list[str]
 ) -> dict[str, object]:
+    """按白名单过滤一层字典;被剥离的额外字段路径收集进 extras,供生成警告。"""
     retained: dict[str, object] = {}
     for key, item in value.items():
         if key in allowed:
@@ -495,6 +623,11 @@ def _retain_known_fields(
 def _normalize_series_plan_shape(
     payload: dict[str, object], extras: list[str]
 ) -> dict[str, object] | None:
+    """递归清洗模型输出的形状:逐层剥掉白名单外字段,校验嵌套结构类型。
+
+    返回 None 表示形状不可救(缺系列圣经 / 剧集列表为空 / 嵌套类型错误),
+    由调用方记为 fatal;能清洗的部分尽量保留,不丢弃付费输出。
+    """
     normalized = _retain_known_fields(payload, _SERIES_PLAN_KEYS, path="", extras=extras)
     bible = normalized.get("seriesBible")
     episodes = normalized.get("episodes")
@@ -585,6 +718,7 @@ def normalize_series_plan_result(
         return SeriesPlanNormalizationResult(
             {}, None, "invalid", (issue,), normalization_revision=normalization_revision
         )
+    # 深拷贝存档原始付费输出 —— 后续所有清洗只作用于副本,原始结果随方案版本持久化
     raw_payload = deepcopy(payload)
     extras: list[str] = []
     normalized = _normalize_series_plan_shape(payload, extras)
@@ -615,6 +749,8 @@ def normalize_series_plan_result(
             normalization_revision=normalization_revision,
         )
 
+    # 规范化 v2:缩编主线路线下,模型已声明 merged/simplified 的来源若仍被标为
+    # whole(完整覆盖),自动降级为 partial 并记 warning —— 只修正覆盖声明,不改写剧情原文
     normalization_issues: list[SeriesValidationIssueDto] = []
     if normalization_revision == SERIES_NORMALIZATION_REVISION and (
         adaptation_policy == "condense_mainline"
@@ -665,6 +801,8 @@ def normalize_series_plan_result(
                     )
                 )
 
+    # 形状可解析 ≠ 可采用:集数/连续性/来源覆盖等采用规则单独校验,
+    # blocking 问题只会把结论降为 needs_input(可人工修补),不判 invalid
     validation_disposition, validation_issues = validate_series_plan(
         plan,
         expected_episode_count=expected_episode_count,
@@ -708,6 +846,14 @@ def validate_series_plan(
     expected_duration_seconds: int | None = None,
     must_keep: list[str] | None = None,
 ) -> tuple[SeriesPlanDisposition, list[SeriesValidationIssueDto]]:
+    """校验方案的"采用规则",返回 (处置结论, 问题列表)。
+
+    检查项:集数与序号连续、叙事模式未被改写、圣经与单集必填内容、单集时长 8–15 秒、
+    连续模式的相邻承接、sourceCoverage 安全序号与完整覆盖(缩编路线豁免)、
+    缩编路线下 sourceTreatments 逐来源对账 / must_keep 落实 / 改编风险升级。
+    任一 blocking 问题 → needs_input;否则 candidate_ready。
+    可解析性问题不在此处,由 normalize_series_plan_result 前置处理。
+    """
     issues: list[SeriesValidationIssueDto] = []
     if len(plan.episodes) != expected_episode_count:
         issues.append(
@@ -951,6 +1097,10 @@ def validate_series_plan(
     return disposition, issues
 
 
+# 缩编主线(condense_mainline)改编策略的追加策划指令 —— 整季与续段两个 compile 函数
+# 在该策略下把本段拼进 prompt 末尾,并把 revision 切换为带 -condense 的变体。
+# 核心要求:严格锁定时长与集数;每个来源事件在 sourceTreatments 恰好一份处理决定;
+# preservedRequirements 只逐条引用用户的必须保留要求;无法容纳时以 blocking 风险上报。
 CONDENSE_PLANNING_INSTRUCTIONS = (
     "\n【按生产目标保留主线并精简】每集必须严格等于指定时长，集数严格等于本次规划数量。"
     "允许合并重复动作、简化次要过程、减少支线与机位，不能只缩短文案却仍安排全部动作。"
@@ -973,6 +1123,9 @@ def series_plan_settings_hash(
     series: StorySeriesDto, source_unit_ordinals: set[int]
 ) -> str:
     """Bind local revalidation to editable settings and the source reference universe."""
+    # settings hash 只覆盖用户可编辑的系列设定(SeriesCreateCommand 全部字段加 id /
+    # 规范档案)与绑定的来源节拍序号集合 —— 任一变化,基于旧设定的本地重校验 /
+    # saved_result 物化对账即失败,提示设定或来源引用已漂移(不影响 prompt 冻结的 inputHash)
     document = {
         "series": series.model_dump(
             mode="json", by_alias=True,
@@ -986,6 +1139,8 @@ def series_plan_settings_hash(
 
 
 def series_plan_materialization_hash(command: SeriesPlanMaterializeCommand) -> str:
+    """物化命令的幂等 hash —— saved_result 以"基线版本 + settings hash + 规范化版本"
+    对账;edited 以提交的方案全文对账;同 hash 重放不重复建版本。"""
     # Keep the existing edited-version hash so historical idempotent replays remain valid.
     if command.source == "saved_result":
         document = {
@@ -1015,8 +1170,33 @@ def compile_series_plan_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesPlanPreviewDto:
+    """编译整季(首批)方案策划 prompt 并冻结为 input hash。
+
+    prompt_revision 基线为 catflow-series-planner-v7-performance。
+
+    输入来源:
+    - series:用户确认的系列设定(标题/核心构想/叙事与长度模式/世界设定/情绪方向/
+      结局目标/必须避免等),其中【用户必须保留要求】(must_keep)经 render_must_keep
+      渲染后拼进 prompt;
+    - source_beats:系列绑定的来源剧情节拍(可为空)——渲染为【来源剧情节拍】编号列表,
+      要求每集 sourceCoverage 只引用这些安全序号,并声明 whole/partial/continuation;
+    - canon_profile_hash / cat_identity:规范角色档案 hash 与本次猫咪身份说明。
+
+    改编与补充约束:
+    - adaptation_policy=condense_mainline 时追加 CONDENSE_PLANNING_INSTRUCTIONS,
+      revision 切换为 catflow-series-planner-v7-condense-performance;
+    - additional_notes 非空时拼进【补充制作约束】小节,revision 追加 -notes 后缀;
+    - 末尾统一拼入【本次猫咪身份】与【叙事与表演】(NARRATIVE_DIRECTION +
+      CAT_PERFORMANCE_DIRECTION,来自 creative_direction),revision 追加 -canon-performance。
+
+    本次批集数 = min(计划总集数或连载默认批, MAX_SERIES_PLANNING_BATCH);
+    剩余集数仅固定集数模式返回。最终 prompt + 输出 schema(SeriesPlanDraft)与全部
+    生成输入经确定性 JSON 冻结为 inputHash(sha256),worker 提交付费任务时对账,
+    保证预览与实际调用一致;settingsInputHash 另绑定可编辑设定供本地重校验。
+    """
     prompt_revision = "catflow-series-planner-v7-performance"
     source_beats = source_beats or []
+    # 本次批集数:固定集数取计划总数、持续连载取默认批,均不超过单次调用上限
     requested_episode_count = min(
         series.planned_episode_count or DEFAULT_ONGOING_PLANNING_BATCH,
         MAX_SERIES_PLANNING_BATCH,
@@ -1026,6 +1206,8 @@ def compile_series_plan_preview(
         if series.planned_episode_count is not None
         else None
     )
+    # 来源节拍渲染为"安全序号"列表(binding_order)——单集大纲只能通过 sourceCoverage
+    # 引用这些序号,防止模型虚构或改写来源;无绑定节拍时整节省略
     source_section = ""
     if source_beats:
         source_section = (
@@ -1076,6 +1258,8 @@ def compile_series_plan_preview(
     prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
     prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
+    # 冻结文档:系列设定全文、来源节拍、规范化版本与最终 prompt/schema 一起
+    # 做确定性 JSON 序列化后取 sha256 —— 即 worker 提交时对账用的 inputHash
     document = {
         "seriesId": str(series.id),
         "series": series.model_dump(mode="json", by_alias=True),
@@ -1114,6 +1298,7 @@ def compile_series_plan_preview(
 
 
 def series_plan_output_schema() -> dict[str, Any]:
+    """整季/续段策划的输出 schema(由 SeriesPlanDraft 生成,发给模型的 outputSchema)。"""
     # The Provider schema keeps only parseability constraints. Exact episode count,
     # continuity and adoption safety are checked after the paid result is preserved.
     return SeriesPlanDraft.model_json_schema(by_alias=True)
@@ -1131,8 +1316,30 @@ def compile_series_plan_segment_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesPlanSegmentPreviewDto:
+    """编译长系列续段方案策划 prompt 并冻结为 input hash。
+
+    prompt_revision 基线为 catflow-series-segment-planner-v5-contract。
+    前提:整季系列圣经与首段方案已激活(active_plan),本次只规划用户明确指定的下一段。
+
+    输入来源:
+    - series:系列设定,【用户必须保留要求】(must_keep)渲染后拼进 prompt;
+    - active_plan:已激活的整季方案版本 —— 其系列圣经经 render_series_bible
+      渲染为【系列圣经】小节,版本号写入 prompt;
+    - command:段范围(start_episode_order / requested_episode_count)与期望的
+      整季方案版本、上一续段版本 —— 乐观并发基线同时冻结进 input hash;
+    - source_beats:系列绑定的全部来源剧情节拍(无绑定时渲染占位说明),
+      剧集 order 必须与本次范围逐一对应,sourceCoverage 只能引用节拍安全序号。
+
+    adaptation_policy=condense_mainline 时追加 CONDENSE_PLANNING_INSTRUCTIONS,
+    revision 切换为 catflow-series-segment-planner-v5-condense-contract;
+    末尾统一拼入猫咪身份与叙事/表演方向(-canon-performance 后缀)。
+    续段命令本身不接受 additional_notes(区别于整季预览)。
+    最终 prompt + schema(SeriesPlanDraft)与全部输入经确定性 JSON 冻结为
+    inputHash,供 worker 提交付费任务时对账;剩余集数仅固定集数模式返回。
+    """
     prompt_revision = "catflow-series-segment-planner-v5-contract"
     end_episode_order = command.start_episode_order + command.requested_episode_count - 1
+    # 仅固定集数模式计算"规划完本段后还剩多少集";持续连载不承诺总数
     remaining_episode_count = (
         max((series.planned_episode_count or 0) - end_episode_order, 0)
         if series.length_mode == "fixed"
@@ -1228,6 +1435,29 @@ def compile_series_episode_story_preview(
     model: str,
     capability_revision: str,
 ) -> SeriesEpisodeStoryPreviewDto:
+    """编译单集故事扩写 prompt 并冻结为 input hash。
+
+    prompt_revision 基线为 catflow-series-episode-planner-v6-spatial。
+    前提:该集已物化(episode.project_id 非空),否则抛 ValueError。
+
+    输入来源:
+    - series / active_plan:系列设定与已激活整季方案 —— 系列圣经经
+      render_series_bible 渲染进 prompt,模型只扩写当前一集、不得改写整季路线;
+    - episode:本集当前激活大纲 —— 开场状态/触发/儿童目标与动作/猫咪回应/
+      可见变化/结尾状态逐项拼入,要求输出可在目标时长内完成的生活微事件;
+    - incoming_continuity:上一集确认后进入本集的连续性说明(为空时渲染为
+      "本集不依赖上一集已确认状态");
+    - additional_notes:用户本次补充,拼进"用户补充"行(整季预览才使用
+      【补充制作约束】小节,单集不使用)。
+
+    adaptation_policy=condense_mainline 时 revision 切换为
+    catflow-series-episode-planner-v6-condense-spatial,并拼入【已确认缩编决定】:
+    来源处理决定优先取 source_segment(续段方案)的 source_treatments,未提供续段时
+    回退 active_plan,经 render_source_treatments 渲染并回显 must_keep。
+    末尾统一拼入猫咪身份与叙事/表演方向(-canon-performance 后缀)。
+    输出 schema 为单集故事 LifeStoryProposalDraft;最终 prompt + schema 与
+    系列/方案/单集/大纲/项目全部版本 id 冻结为 inputHash,供 worker 提交时对账。
+    """
     if episode.project_id is None:
         raise ValueError("series episode must be materialized before story planning")
     prompt_revision = "catflow-series-episode-planner-v6-spatial"
