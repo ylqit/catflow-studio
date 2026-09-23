@@ -42,7 +42,7 @@ const issues = computed(() => {
       || beat.endFrame > props.durationFrames;
     end = beat.endFrame;
     // missing:可见变化必填;两个角色动作至少填一个(不在画面的角色可为空)
-    const missing = !beat.visibleChange.trim() || (!beat.childAction.trim() && !beat.catAction.trim());
+    const missing = !beat.visibleChange.trim() || (!beat.childAction.trim() && !beat.catAction.trim() && !beat.environmentAction?.trim());
     return invalid || missing ? [`节拍 ${index + 1}：${invalid ? '帧区间重叠、越界或顺序不正确' : '请填写动作和可见变化'}`] : [];
   });
 });
@@ -92,6 +92,7 @@ function remove(index: number) {
     <p v-if="!modelValue?.length">历史分镜尚无节拍设计，原动作仍有效。可主动添加后再编辑。</p>
     <!-- 每个节拍一张卡片:头部显示秒区间(帧 ÷ 24),下方依次是帧区间/作用/动作/可见变化/眼神表演 -->
     <article v-for="(beat, index) in modelValue" :key="index" class="beat">
+      <label>道具或环境动作（画外角色留空）<textarea :value="beat.environmentAction ?? ''" @input="update(index,{environmentAction:($event.target as HTMLTextAreaElement).value})" /></label>
       <header><b>节拍 {{ index + 1 }} · {{ (beat.startFrame / 24).toFixed(2) }}–{{ (beat.endFrame / 24).toFixed(2) }} 秒</b><button type="button" :disabled="(modelValue?.length ?? 0) < 2" @click="remove(index)">移除</button></header>
       <div class="beat-time">
         <label>开始帧<input type="number" :aria-label="`节拍 ${index + 1} 开始帧`" min="0" :max="durationFrames - 1" :value="beat.startFrame" @input="update(index, { startFrame: Number(($event.target as HTMLInputElement).value) })" /></label>

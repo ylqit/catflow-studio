@@ -117,7 +117,7 @@ class ProjectCollectionRecord(Base):
 class ProjectRecord(Base):
     __tablename__ = "projects"
     __table_args__ = (
-        CheckConstraint("target_duration_seconds BETWEEN 8 AND 15", name="ck_projects_duration"),
+        CheckConstraint("target_duration_seconds BETWEEN 8 AND 60", name="ck_projects_duration"),
         CheckConstraint("aspect_ratio = '9:16'", name="ck_projects_aspect_ratio"),
         {"schema": SCHEMA_NAME},
     )
@@ -184,7 +184,7 @@ class StorySeriesRecord(Base):
             name="ck_story_series_episode_count",
         ),
         CheckConstraint(
-            "default_episode_duration_seconds BETWEEN 8 AND 15",
+            "default_episode_duration_seconds BETWEEN 8 AND 60",
             name="ck_story_series_duration",
         ),
         {"schema": SCHEMA_NAME},
@@ -718,6 +718,7 @@ class StoryVersionRecord(Base):
         ForeignKey(f"{SCHEMA_NAME}.life_planner_proposals.id", ondelete="SET NULL"),
     )
     title: Mapped[str] = mapped_column(String(160), nullable=False)
+    narrative_design_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     micro_event_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     target_duration_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
@@ -733,7 +734,7 @@ class ShotPlanVersionRecord(Base):
     __tablename__ = "shot_plan_versions"
     __table_args__ = (
         UniqueConstraint("project_id", "revision", name="uq_shot_plan_versions_revision"),
-        CheckConstraint("total_duration_seconds BETWEEN 8 AND 15", name="ck_shot_plans_duration"),
+        CheckConstraint("total_duration_seconds BETWEEN 8 AND 60", name="ck_shot_plans_duration"),
         Index(
             "uq_shot_plan_versions_active",
             "project_id",
@@ -1405,3 +1406,7 @@ class ProviderRateCardRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+# Register cohesive production persistence in the shared metadata.
+from . import production_models  # noqa: E402,F401

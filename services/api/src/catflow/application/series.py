@@ -33,6 +33,7 @@ from pydantic import Field, ValidationError, model_validator
 
 from catflow.application.job_execution import PaidJobCommand
 from catflow.domain.contract import ContractModel
+from catflow.domain.narrative import NarrativeDesign, NARRATIVE_PLANNING
 from catflow.domain.models import LifeStoryProposalDraft
 
 from .creative_direction import CAT_PERFORMANCE_DIRECTION, NARRATIVE_DIRECTION
@@ -77,7 +78,7 @@ class SeriesCreateCommand(ContractModel):
     length_mode: SeriesLengthMode = Field(alias="lengthMode", default="fixed")
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None)
     default_episode_duration_seconds: int = Field(
-        alias="defaultEpisodeDurationSeconds", ge=8, le=15
+        alias="defaultEpisodeDurationSeconds", ge=8, le=60
     )
     world_setting: str = Field(alias="worldSetting", min_length=1, max_length=2_000)
     emotional_direction: str = Field(alias="emotionalDirection", min_length=1, max_length=1_000)
@@ -104,7 +105,7 @@ class SeriesPatchCommand(ContractModel):
 
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None, ge=2)
     default_episode_duration_seconds: int | None = Field(
-        alias="defaultEpisodeDurationSeconds", default=None, ge=8, le=15
+        alias="defaultEpisodeDurationSeconds", default=None, ge=8, le=60
     )
     must_keep: list[str] | None = Field(alias="mustKeep", default=None, max_length=30)
 
@@ -848,7 +849,7 @@ def validate_series_plan(
 ) -> tuple[SeriesPlanDisposition, list[SeriesValidationIssueDto]]:
     """校验方案的"采用规则",返回 (处置结论, 问题列表)。
 
-    检查项:集数与序号连续、叙事模式未被改写、圣经与单集必填内容、单集时长 8–15 秒、
+    检查项:集数与序号连续、叙事模式未被改写、圣经与单集必填内容、单集时长 8–60 秒、
     连续模式的相邻承接、sourceCoverage 安全序号与完整覆盖(缩编路线豁免)、
     缩编路线下 sourceTreatments 逐来源对账 / must_keep 落实 / 改编风险升级。
     任一 blocking 问题 → needs_input;否则 candidate_ready。
@@ -920,13 +921,13 @@ def validate_series_plan(
         ("endingState", lambda item: item.ending_state),
     )
     for index, episode in enumerate(plan.episodes):
-        if not 8 <= episode.target_duration_seconds <= 15:
+        if not 8 <= episode.target_duration_seconds <= 60:
             issues.append(
                 SeriesValidationIssueDto(
                     code="episode_duration_invalid",
                     severity="blocking",
                     path=f"episodes.{index}.targetDurationSeconds",
-                    message="每集时长必须为 8–15 秒。",
+                    message="每集时长必须为 8–60 秒。",
                     suggestedAction="调整本集目标时长后再采用。",
                 )
             )
@@ -1238,7 +1239,7 @@ def compile_series_plan_preview(
         "【通用创作规则】保留来源核心因果与结局，保持既定儿童、猫咪身份和画风。\n"
         f"【用户必须保留要求】{render_must_keep(series.must_keep)}\n"
         f"必须避免：{'、'.join(series.must_avoid) or '危险动作和身份漂移'}\n"
-        "每集必须能在 8–15 秒内完成一个可见事件，包含开场状态、触发、儿童动作、"
+        "每集必须能在 8–60 秒内完成一个可见事件，包含开场状态、触发、儿童动作、"
         "猫咪反应、可见变化和结尾状态。连续模式必须写清相邻剧集承接点。"
         f"{source_section}\n"
         f"单次最多规划 {MAX_SERIES_PLANNING_BATCH} 集；这是调用批量边界，不是系列总集数上限。"
@@ -1255,7 +1256,7 @@ def compile_series_plan_preview(
         f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，"
         "原文保留故事动作与因果，不沿用其他猫咪版本。"
     )
-    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
+    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION + NARRATIVE_PLANNING
     prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
     # 冻结文档:系列设定全文、来源节拍、规范化版本与最终 prompt/schema 一起
@@ -1378,7 +1379,7 @@ def compile_series_plan_segment_preview(
         f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，"
         "原文保留故事动作与因果，不沿用其他猫咪版本。"
     )
-    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
+    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION + NARRATIVE_PLANNING
     prompt_revision += "-canon-performance"
     schema = series_plan_output_schema()
     document = {
@@ -1500,9 +1501,12 @@ def compile_series_episode_story_preview(
         f"\n【本次猫咪身份】{cat_identity}。外观以本次固定参考为准，"
         "原文保留故事动作与因果，不沿用其他猫咪版本。"
     )
-    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION
+    prompt += "\n【叙事与表演】" + NARRATIVE_DIRECTION + CAT_PERFORMANCE_DIRECTION + NARRATIVE_PLANNING
     prompt_revision += "-canon-performance"
     output_schema = LifeStoryProposalDraft.model_json_schema(by_alias=True)
+    output_schema["required"].append("narrativeDesign")
+    output_schema["properties"]["narrativeDesign"] = NarrativeDesign.model_json_schema(by_alias=True)
+    output_schema["properties"]["targetDurationSeconds"]["const"] = outline.target_duration_seconds
     document = {
         "seriesId": str(series.id),
         "seriesPlanVersionId": str(active_plan.id),

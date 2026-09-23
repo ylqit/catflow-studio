@@ -3502,6 +3502,741 @@
         }
       }
     },
+    "/api/v1/projects/{project_id}/production-props/preview": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Preview Prop",
+        "operationId": "preview_prop_api_v1_projects__project_id__production_props_preview_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PropImageInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-props/generations": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Generate Prop",
+        "operationId": "generate_prop_api_v1_projects__project_id__production_props_generations_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PropImageGeneration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/jobs": {
+      "get": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Unit Jobs",
+        "operationId": "unit_jobs_api_v1_projects__project_id__production_units__unit_id__jobs_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobDto"
+                  },
+                  "title": "Response Unit Jobs Api V1 Projects  Project Id  Production Units  Unit Id  Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-plans": {
+      "get": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Plans",
+        "operationId": "plans_api_v1_projects__project_id__production_plans_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionPlanDto"
+                  },
+                  "title": "Response Plans Api V1 Projects  Project Id  Production Plans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Create Plan",
+        "operationId": "create_plan_api_v1_projects__project_id__production_plans_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionPlanDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionPlanDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-plans/preview": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Preview Plan",
+        "operationId": "preview_plan_api_v1_projects__project_id__production_plans_preview_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionPlanDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-plans/{plan_id}/activate": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Activate Plan",
+        "operationId": "activate_plan_api_v1_projects__project_id__production_plans__plan_id__activate_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionActivation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionPlanDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/preview": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Preview Unit",
+        "operationId": "preview_unit_api_v1_projects__project_id__production_units__unit_id__preview_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnitTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/generations": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Generate Unit",
+        "operationId": "generate_unit_api_v1_projects__project_id__production_units__unit_id__generations_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnitGeneration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/selections": {
+      "get": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Selections",
+        "operationId": "selections_api_v1_projects__project_id__production_units__unit_id__selections_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UnitSelectionDto"
+                  },
+                  "title": "Response Selections Api V1 Projects  Project Id  Production Units  Unit Id  Selections Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Select Unit",
+        "operationId": "select_unit_api_v1_projects__project_id__production_units__unit_id__selections_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnitSelectionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitSelectionDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/evidence": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Evidence",
+        "operationId": "evidence_api_v1_projects__project_id__production_units__unit_id__evidence_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "unit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnitEvidenceCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/production-plans/{plan_id}/assemble": {
+      "post": {
+        "tags": [
+          "production"
+        ],
+        "summary": "Assemble",
+        "operationId": "assemble_api_v1_projects__project_id__production_plans__plan_id__assemble_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionAssembly"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEditDraftDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/shot-production/context": {
       "post": {
         "summary": "Shot Production Context",
@@ -6689,6 +7424,12 @@
             "minLength": 1,
             "title": "Visiblechange"
           },
+          "environmentAction": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Environmentaction",
+            "default": ""
+          },
           "catPerformance": {
             "anyOf": [
               {
@@ -6731,7 +7472,8 @@
         "required": [
           "message"
         ],
-        "title": "AdaptationRiskDraft"
+        "title": "AdaptationRiskDraft",
+        "description": "改编风险声明 —— blocking=True 时作为阻塞问题,方案需人工调整后才能采用。"
       },
       "AssetDto": {
         "properties": {
@@ -8021,9 +8763,18 @@
       },
       "DirectorPlanPayload": {
         "properties": {
+          "formatVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Formatversion",
+            "default": 1
+          },
           "targetDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Targetdurationseconds"
           },
@@ -8035,7 +8786,7 @@
               "$ref": "#/components/schemas/ShotSpec"
             },
             "type": "array",
-            "maxItems": 4,
+            "maxItems": 24,
             "minItems": 1,
             "title": "Shots"
           }
@@ -8226,6 +8977,11 @@
           "requireAudio": {
             "type": "boolean",
             "title": "Requireaudio",
+            "default": false
+          },
+          "muted": {
+            "type": "boolean",
+            "title": "Muted",
             "default": false
           },
           "fadeInMs": {
@@ -8470,6 +9226,18 @@
           },
           "output": {
             "$ref": "#/components/schemas/EditOutputV2"
+          },
+          "productionEvidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Productionevidence"
           }
         },
         "additionalProperties": false,
@@ -8874,6 +9642,48 @@
           "resolution"
         ],
         "title": "EmotionalArc"
+      },
+      "EndState": {
+        "properties": {
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/ObservedFact"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Facts"
+          },
+          "unfinishedActions": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Unfinishedactions",
+            "default": ""
+          },
+          "evidenceFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Evidenceframe"
+          },
+          "evidenceAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Evidenceassetid"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "facts",
+          "evidenceFrame",
+          "evidenceAssetId"
+        ],
+        "title": "EndState"
       },
       "EnvironmentDraftSaveCommand": {
         "properties": {
@@ -9484,7 +10294,8 @@
           "maximumRecommended",
           "rationale"
         ],
-        "title": "EpisodeCountRecommendationDto"
+        "title": "EpisodeCountRecommendationDto",
+        "description": "非阻塞的系列集数建议 —— 最小/首选/最大三档加理由;只是建议,最终集数由用户确认。"
       },
       "EpisodeSourceCoverageDto": {
         "properties": {
@@ -9516,7 +10327,57 @@
           "coverage",
           "coverageNote"
         ],
-        "title": "EpisodeSourceCoverageDto"
+        "title": "EpisodeSourceCoverageDto",
+        "description": "单集对一个来源剧情节拍的覆盖声明 —— sourceUnitOrdinal 只能引用系列绑定的\n安全序号(validate_series_plan 会拦截越界与非连续复用)。"
+      },
+      "EventObservation": {
+        "properties": {
+          "shotId": {
+            "type": "string",
+            "title": "Shotid"
+          },
+          "eventId": {
+            "type": "string",
+            "title": "Eventid"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warning",
+              "fail",
+              "unknown",
+              "not_applicable"
+            ],
+            "title": "Verdict"
+          },
+          "sourceStartFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sourcestartframe"
+          },
+          "sourceEndFrame": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Sourceendframe"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Notes",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotId",
+          "eventId",
+          "verdict",
+          "sourceStartFrame",
+          "sourceEndFrame"
+        ],
+        "title": "EventObservation"
       },
       "ExportCommand": {
         "properties": {
@@ -10235,7 +11096,8 @@
           "title",
           "content"
         ],
-        "title": "GenerationPromptSectionDto"
+        "title": "GenerationPromptSectionDto",
+        "description": "prompt 分节 DTO —— key/title/content 三元组,供前端按小节展示与编辑预览。"
       },
       "GenerationRisk": {
         "properties": {
@@ -11373,6 +12235,103 @@
         ],
         "title": "JobUsageDto"
       },
+      "KeyEvent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "startFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Startframe"
+          },
+          "endFrame": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Endframe"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "startFrame",
+          "endFrame"
+        ],
+        "title": "KeyEvent"
+      },
+      "LayoutPoint": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "region",
+              "furniture",
+              "support",
+              "child",
+              "cat",
+              "prop",
+              "camera"
+            ],
+            "title": "Kind"
+          },
+          "x": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Y"
+          },
+          "direction": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Direction",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "kind",
+          "x",
+          "y"
+        ],
+        "title": "LayoutPoint"
+      },
       "LensDesign": {
         "properties": {
           "focalLengthEquivalent": {
@@ -11412,9 +12371,18 @@
       },
       "LifeClipSpec": {
         "properties": {
+          "formatVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Formatversion",
+            "default": 1
+          },
           "durationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Durationseconds"
           },
@@ -11497,6 +12465,16 @@
       },
       "LifeStoryProposalDto": {
         "properties": {
+          "narrativeDesign": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NarrativeDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -11663,6 +12641,99 @@
           "warmEnding"
         ],
         "title": "MicroEvent"
+      },
+      "NarrativeDesign": {
+        "properties": {
+          "characterGoal": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Charactergoal"
+          },
+          "audienceExpectation": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Audienceexpectation"
+          },
+          "smallDisruption": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Smalldisruption",
+            "default": ""
+          },
+          "reveal": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reveal",
+            "default": ""
+          },
+          "response": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Response"
+          },
+          "payoff": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Payoff"
+          },
+          "adaptationNotes": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Adaptationnotes",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "characterGoal",
+          "audienceExpectation",
+          "response",
+          "payoff"
+        ],
+        "title": "NarrativeDesign"
+      },
+      "ObservedFact": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Value"
+          },
+          "certainty": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "unobserved",
+              "uncertain"
+            ],
+            "title": "Certainty"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "value",
+          "certainty"
+        ],
+        "title": "ObservedFact"
       },
       "PhysicalChangeDesign": {
         "properties": {
@@ -12024,7 +13095,222 @@
           "requirement",
           "handling"
         ],
-        "title": "PreservedRequirementDraft"
+        "title": "PreservedRequirementDraft",
+        "description": "用户\"必须保留要求\"的落实说明 —— 每条 must_keep 须恰好对应一份,\n写明处理方式(handling)与落实到的集数(校验时逐条对账)。"
+      },
+      "ProductionActivation": {
+        "properties": {
+          "expectedActivePlanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedactiveplanid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedActivePlanId"
+        ],
+        "title": "ProductionActivation"
+      },
+      "ProductionAssembly": {
+        "properties": {
+          "expectedSelectionHashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Expectedselectionhashes"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedSelectionHashes",
+          "idempotencyKey"
+        ],
+        "title": "ProductionAssembly"
+      },
+      "ProductionPlanDraft": {
+        "properties": {
+          "shotPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shotplanversionid"
+          },
+          "scenes": {
+            "items": {
+              "$ref": "#/components/schemas/SceneBinding"
+            },
+            "type": "array",
+            "maxItems": 24,
+            "title": "Scenes"
+          },
+          "props": {
+            "items": {
+              "$ref": "#/components/schemas/PropBinding"
+            },
+            "type": "array",
+            "maxItems": 24,
+            "title": "Props"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/ProductionUnit"
+            },
+            "type": "array",
+            "maxItems": 24,
+            "title": "Units"
+          },
+          "expectedActivePlanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedactiveplanid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotPlanVersionId",
+          "idempotencyKey"
+        ],
+        "title": "ProductionPlanDraft"
+      },
+      "ProductionPlanDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "inputHash": {
+            "type": "string",
+            "title": "Inputhash"
+          },
+          "requestHash": {
+            "type": "string",
+            "title": "Requesthash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "title": "Idempotencykey"
+          },
+          "document": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Document"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "projectId",
+          "revision",
+          "active",
+          "inputHash",
+          "requestHash",
+          "idempotencyKey",
+          "document",
+          "createdAt"
+        ],
+        "title": "ProductionPlanDto"
+      },
+      "ProductionUnit": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Id"
+          },
+          "shotIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Shotids"
+          },
+          "continuity": {
+            "type": "string",
+            "enum": [
+              "inherit",
+              "reset"
+            ],
+            "title": "Continuity",
+            "default": "reset"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "default": "首个单元建立起点"
+          },
+          "generationMode": {
+            "type": "string",
+            "enum": [
+              "references",
+              "from_frame"
+            ],
+            "title": "Generationmode",
+            "default": "references"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "shotIds"
+        ],
+        "title": "ProductionUnit"
       },
       "ProjectCollectionCreate": {
         "properties": {
@@ -12189,7 +13475,7 @@
           },
           "targetDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Targetdurationseconds"
           }
@@ -12661,7 +13947,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 15.0,
+                "maximum": 60.0,
                 "minimum": 8.0
               },
               {
@@ -12751,7 +14037,8 @@
           "episode",
           "episodes"
         ],
-        "title": "ProjectSeriesContextDto"
+        "title": "ProjectSeriesContextDto",
+        "description": "项目所属系列上下文 —— 供单集制作页读取系列设定、当前集与全部兄弟剧集。"
       },
       "ProjectTagDto": {
         "properties": {
@@ -12818,6 +14105,183 @@
           "unpricedJobCount"
         ],
         "title": "ProjectUsageSummaryDto"
+      },
+      "PropBinding": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "identity": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Identity"
+          },
+          "initialState": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Initialstate"
+          },
+          "plannedChange": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Plannedchange",
+            "default": ""
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Location"
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "child",
+              "cat",
+              "environment"
+            ],
+            "title": "Owner",
+            "default": "environment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "assetId",
+          "identity",
+          "initialState",
+          "location"
+        ],
+        "title": "PropBinding"
+      },
+      "PropImageGeneration": {
+        "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "appearance": {
+            "type": "string",
+            "maxLength": 1500,
+            "minLength": 1,
+            "title": "Appearance"
+          },
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "appearance",
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "PropImageGeneration"
+      },
+      "PropImageInput": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "appearance": {
+            "type": "string",
+            "maxLength": 1500,
+            "minLength": 1,
+            "title": "Appearance"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "appearance"
+        ],
+        "title": "PropImageInput"
       },
       "PropStateChange": {
         "properties": {
@@ -13176,7 +14640,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "RecurringLocationDraft"
+        "title": "RecurringLocationDraft",
+        "description": "常驻场景草稿 —— key 是单集大纲 recurringLocationKeys 必须引用的标识符。"
       },
       "RecurringPropDraft": {
         "properties": {
@@ -13201,7 +14666,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "RecurringPropDraft"
+        "title": "RecurringPropDraft",
+        "description": "常驻道具草稿 —— key 供单集大纲 recurringPropKeys 引用;continuityRule 写跨集一致性要求。"
       },
       "ReferenceBindingCommand": {
         "properties": {
@@ -13331,6 +14797,60 @@
           "idempotencyKey"
         ],
         "title": "ReplacementGenerationCommand"
+      },
+      "SceneBinding": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "layout": {
+            "items": {
+              "$ref": "#/components/schemas/LayoutPoint"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "title": "Layout"
+          },
+          "axis": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Axis",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "assetId"
+        ],
+        "title": "SceneBinding"
       },
       "SegmentEditInputDto": {
         "properties": {
@@ -15225,7 +16745,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "SeriesBibleDraft"
+        "title": "SeriesBibleDraft",
+        "description": "整季系列圣经草稿 —— LLM 策划输出的整季核心设定(核心一句话/主题/世界规则/\n情绪弧线/常驻场景与道具/服装与连续性规则/视听母题/禁止改动)。\nprompt 内嵌与界面展示时由 series_prompt_text.render_series_bible 渲染成中文分项。"
       },
       "SeriesCreateCommand": {
         "properties": {
@@ -15293,7 +16814,7 @@
           },
           "defaultEpisodeDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Defaultepisodedurationseconds"
           },
@@ -15368,7 +16889,8 @@
           "worldSetting",
           "emotionalDirection"
         ],
-        "title": "SeriesCreateCommand"
+        "title": "SeriesCreateCommand",
+        "description": "创建系列命令 —— 用户在策划页确认的系列设定:标题/核心构想/叙事与长度模式/\n每集时长/世界设定/情绪方向/结局目标,以及 must_keep(必须保留)、must_avoid(必须避免)\n与 additional_notes(补充制作约束);后续所有策划 prompt 都从这里取材。"
       },
       "SeriesEmotionalArcDraft": {
         "properties": {
@@ -15399,7 +16921,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "SeriesEmotionalArcDraft"
+        "title": "SeriesEmotionalArcDraft",
+        "description": "整季情绪弧线 —— 开场 / 发展 / 高潮 / 收束四段,采用前均为必填(validate 检查)。"
       },
       "SeriesEpisodeDto": {
         "properties": {
@@ -15485,7 +17008,8 @@
           "createdAt",
           "updatedAt"
         ],
-        "title": "SeriesEpisodeDto"
+        "title": "SeriesEpisodeDto",
+        "description": "系列单集 DTO —— order 在系列内全局递增;status 覆盖从大纲到成片的生产管线;\nproject_id 在物化(materialize)后指向单集制作项目,outline 为当前激活大纲版本。"
       },
       "SeriesEpisodeMaterializeCommand": {
         "properties": {
@@ -15501,7 +17025,8 @@
         "required": [
           "idempotencyKey"
         ],
-        "title": "SeriesEpisodeMaterializeCommand"
+        "title": "SeriesEpisodeMaterializeCommand",
+        "description": "物化单集命令 —— 为该集创建制作项目(project),仅携带幂等键。"
       },
       "SeriesEpisodeOutlineDraft": {
         "properties": {
@@ -15609,7 +17134,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "SeriesEpisodeOutlineDraft"
+        "title": "SeriesEpisodeOutlineDraft",
+        "description": "单集大纲草稿 —— LLM 策划为每集输出的一条可在目标时长内完成的可见事件:\n开场状态→触发→儿童目标/动作→猫咪回应→可见变化→结尾状态的因果链,\n附带来源节拍覆盖声明(sourceCoverage)与常驻场景/道具 key 引用。"
       },
       "SeriesEpisodeStoryGenerationCommand": {
         "properties": {
@@ -15670,7 +17196,8 @@
           "expectedInputHash",
           "idempotencyKey"
         ],
-        "title": "SeriesEpisodeStoryGenerationCommand"
+        "title": "SeriesEpisodeStoryGenerationCommand",
+        "description": "提交单集故事生成命令 —— 对账预览冻结的 input hash,可携带本次扩写的用户补充。"
       },
       "SeriesEpisodeStoryPreviewCommand": {
         "properties": {
@@ -15689,7 +17216,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "SeriesEpisodeStoryPreviewCommand"
+        "title": "SeriesEpisodeStoryPreviewCommand",
+        "description": "单集故事预览命令 —— 仅携带用户补充(拼进 prompt 的\"用户补充\"行)。"
       },
       "SeriesEpisodeStoryPreviewDto": {
         "properties": {
@@ -15776,7 +17304,8 @@
           "outputSchema",
           "promptRevision"
         ],
-        "title": "SeriesEpisodeStoryPreviewDto"
+        "title": "SeriesEpisodeStoryPreviewDto",
+        "description": "单集故事生成预览 DTO —— 冻结的 prompt/schema、inputHash,以及系列/方案/单集/\n大纲/项目全部版本 id 与进入本集的连续性,供 worker 提交付费任务时对账。"
       },
       "SeriesPatchCommand": {
         "properties": {
@@ -15796,7 +17325,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 15.0,
+                "maximum": 60.0,
                 "minimum": 8.0
               },
               {
@@ -15897,7 +17426,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "SeriesPatchCommand"
+        "title": "SeriesPatchCommand",
+        "description": "系列设定局部更新命令 —— 所有字段可选但至少提供一项(require_change 校验)。"
       },
       "SeriesPlanActivationCommand": {
         "properties": {
@@ -15925,7 +17455,8 @@
         "required": [
           "idempotencyKey"
         ],
-        "title": "SeriesPlanActivationCommand"
+        "title": "SeriesPlanActivationCommand",
+        "description": "激活整季方案命令 —— 期望的当前激活版本(首次激活为空)防止并发覆盖。"
       },
       "SeriesPlanDraft": {
         "properties": {
@@ -15968,7 +17499,8 @@
           "seriesBible",
           "episodes"
         ],
-        "title": "SeriesPlanDraft"
+        "title": "SeriesPlanDraft",
+        "description": "系列方案完整草稿 —— 整季/续段策划 LLM 的输出契约(series_plan_output_schema\n即由它生成):系列圣经 + 逐集大纲(至少一集),缩编路线下另附来源处理决定、\n改编风险与必须保留要求的落实说明。"
       },
       "SeriesPlanGenerationCommand": {
         "properties": {
@@ -16017,7 +17549,8 @@
           "expectedInputHash",
           "idempotencyKey"
         ],
-        "title": "SeriesPlanGenerationCommand"
+        "title": "SeriesPlanGenerationCommand",
+        "description": "提交整季方案生成命令 —— expectedInputHash 必须等于预览返回的 inputHash,\n配合幂等键防止重复付费。"
       },
       "SeriesPlanMaterializeCommand": {
         "properties": {
@@ -16070,7 +17603,8 @@
           "basePlanVersionId",
           "idempotencyKey"
         ],
-        "title": "SeriesPlanMaterializeCommand"
+        "title": "SeriesPlanMaterializeCommand",
+        "description": "物化方案为新候选版本的命令 —— source=saved_result 基于已保存结果重放\n(以 expectedSettingsHash 对账设定未漂移);source=edited 提交用户编辑后的 plan;\n两条路径互斥(validate_source 强制)。"
       },
       "SeriesPlanPreviewDto": {
         "properties": {
@@ -16169,7 +17703,8 @@
           "defaultEpisodeDurationSeconds",
           "promptRevision"
         ],
-        "title": "SeriesPlanPreviewDto"
+        "title": "SeriesPlanPreviewDto",
+        "description": "整季方案生成预览 DTO —— 返回冻结的 prompt/schema 与 inputHash(worker 提交\n付费任务时对账,保证所见即所付),settingsInputHash 绑定可编辑设定供本地重校验,\n并给出本批集数 / 系列总集数 / 剩余集数。"
       },
       "SeriesPlanSegmentActivationCommand": {
         "properties": {
@@ -16203,7 +17738,8 @@
           "expectedSeriesPlanVersionId",
           "idempotencyKey"
         ],
-        "title": "SeriesPlanSegmentActivationCommand"
+        "title": "SeriesPlanSegmentActivationCommand",
+        "description": "激活续段方案命令 —— 校验期望的整季方案版本与上一续段版本未变后再置为 active。"
       },
       "SeriesPlanSegmentCommand": {
         "properties": {
@@ -16243,7 +17779,8 @@
           "requestedEpisodeCount",
           "expectedSeriesPlanVersionId"
         ],
-        "title": "SeriesPlanSegmentCommand"
+        "title": "SeriesPlanSegmentCommand",
+        "description": "长系列续段策划请求 —— 指定起始集号与本批集数,并携带期望的整季方案版本与\n上一续段版本(乐观并发:两者任一变化即拒绝,防止基于过期基线续写)。"
       },
       "SeriesPlanSegmentGenerationCommand": {
         "properties": {
@@ -16323,7 +17860,8 @@
           "expectedInputHash",
           "idempotencyKey"
         ],
-        "title": "SeriesPlanSegmentGenerationCommand"
+        "title": "SeriesPlanSegmentGenerationCommand",
+        "description": "提交续段生成命令 —— 在续段请求之上对账预览冻结的 input hash,防止重复付费。"
       },
       "SeriesPlanSegmentPreviewDto": {
         "properties": {
@@ -16414,7 +17952,8 @@
           "outputSchema",
           "promptRevision"
         ],
-        "title": "SeriesPlanSegmentPreviewDto"
+        "title": "SeriesPlanSegmentPreviewDto",
+        "description": "续段方案生成预览 DTO —— 冻结的 prompt/schema 与 inputHash,并回显期望的\n整季方案版本 / 上一续段版本与剩余集数(仅固定集数模式)。"
       },
       "SeriesPlanSegmentVersionDto": {
         "properties": {
@@ -16552,7 +18091,8 @@
           "promptRevision",
           "createdAt"
         ],
-        "title": "SeriesPlanSegmentVersionDto"
+        "title": "SeriesPlanSegmentVersionDto",
+        "description": "续段方案版本 DTO —— 记录段范围(起始集号/集数)、处置结论与期望基线版本链,\ninputHash 冻结生成输入,激活后其大纲用于物化对应区间的单集。"
       },
       "SeriesPlanVersionDto": {
         "properties": {
@@ -16668,7 +18208,8 @@
           "promptRevision",
           "createdAt"
         ],
-        "title": "SeriesPlanVersionDto"
+        "title": "SeriesPlanVersionDto",
+        "description": "方案版本 DTO —— 每次生成/编辑保存为一个不可变版本;inputHash 冻结生成时的\nprompt+schema 输入,active 标记当前被系列采用的版本。"
       },
       "SeriesSourceBeatDto": {
         "properties": {
@@ -16732,7 +18273,8 @@
           "rawText",
           "createdAt"
         ],
-        "title": "SeriesSourceBeatDto"
+        "title": "SeriesSourceBeatDto",
+        "description": "系列绑定的来源剧情节拍 DTO(来自故事导入的 source unit)——\nbinding_order 是 prompt 与 sourceCoverage 唯一允许引用的\"安全序号\",\nraw_text 为该节拍的来源原文。"
       },
       "SeriesValidationIssueDto": {
         "properties": {
@@ -16810,7 +18352,8 @@
           "path",
           "message"
         ],
-        "title": "SeriesValidationIssueDto"
+        "title": "SeriesValidationIssueDto",
+        "description": "单条校验/规范化问题 —— code 标识规则、path 指向字段、severity 决定处置结论;\n规范化产生的问题额外带 beforeValue/afterValue 供界面展示改动。"
       },
       "ShotAssemblyCommand": {
         "properties": {
@@ -16842,7 +18385,8 @@
           "takes",
           "idempotencyKey"
         ],
-        "title": "ShotAssemblyCommand"
+        "title": "ShotAssemblyCommand",
+        "description": "镜头组装命令 —— 按当前分镜顺序为每个镜头选一份素材,生成 9:16 剪辑草稿(EDL v3)。"
       },
       "ShotFrameConfirmCommand": {
         "properties": {
@@ -16893,7 +18437,8 @@
           "expectedDesignHash",
           "checks"
         ],
-        "title": "ShotFrameConfirmCommand"
+        "title": "ShotFrameConfirmCommand",
+        "description": "起始帧人工确认命令 —— 创作者核对画面后,把图片资产固定为该镜头的严格首帧。"
       },
       "ShotFrameExtractCommand": {
         "properties": {
@@ -16934,7 +18479,87 @@
           "frame",
           "idempotencyKey"
         ],
-        "title": "ShotFrameExtractCommand"
+        "title": "ShotFrameExtractCommand",
+        "description": "视频取帧命令 —— 用本地 ffmpeg 从真实镜头视频提取一帧,作为起始帧候选(不付费)。"
+      },
+      "ShotInformation": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "establish",
+              "action",
+              "reaction",
+              "reveal",
+              "payoff",
+              "transition"
+            ],
+            "title": "Role"
+          },
+          "newInformation": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Newinformation"
+          },
+          "visibleSubjects": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "child",
+                "cat",
+                "prop",
+                "environment"
+              ]
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Visiblesubjects"
+          },
+          "narrativeLink": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Narrativelink",
+            "default": ""
+          },
+          "keyEvents": {
+            "items": {
+              "$ref": "#/components/schemas/KeyEvent"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "title": "Keyevents"
+          },
+          "sceneKey": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Scenekey",
+            "default": "main"
+          },
+          "propKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "title": "Propkeys"
+          },
+          "isolateGeneration": {
+            "type": "boolean",
+            "title": "Isolategeneration",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "newInformation",
+          "visibleSubjects"
+        ],
+        "title": "ShotInformation"
       },
       "ShotMediaCommand": {
         "properties": {
@@ -17005,7 +18630,8 @@
           "expectedInputHash",
           "idempotencyKey"
         ],
-        "title": "ShotMediaCommand"
+        "title": "ShotMediaCommand",
+        "description": "镜头媒体付费提交命令 —— 在预览命令之上追加防漂移与防重复字段。"
       },
       "ShotMediaPreviewCommand": {
         "properties": {
@@ -17036,7 +18662,8 @@
           "shotId",
           "purpose"
         ],
-        "title": "ShotMediaPreviewCommand"
+        "title": "ShotMediaPreviewCommand",
+        "description": "镜头媒体预览命令(免费) —— 只编译 prompt 并冻结输入,不创建任务。"
       },
       "ShotPlanActivationCommand": {
         "properties": {
@@ -17110,7 +18737,7 @@
               "$ref": "#/components/schemas/ShotSpec"
             },
             "type": "array",
-            "maxItems": 4,
+            "maxItems": 24,
             "minItems": 1,
             "title": "Shots"
           },
@@ -17790,6 +19417,25 @@
       },
       "ShotSpec": {
         "properties": {
+          "formatVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Formatversion",
+            "default": 1
+          },
+          "information": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShotInformation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "maxLength": 80,
@@ -17798,14 +19444,14 @@
           },
           "order": {
             "type": "integer",
-            "maximum": 4.0,
+            "maximum": 24.0,
             "minimum": 1.0,
             "title": "Order"
           },
           "durationSeconds": {
-            "type": "integer",
+            "type": "number",
             "maximum": 15.0,
-            "minimum": 2.0,
+            "minimum": 1.0,
             "title": "Durationseconds"
           },
           "durationFrames": {
@@ -17813,7 +19459,7 @@
               {
                 "type": "integer",
                 "maximum": 360.0,
-                "minimum": 48.0
+                "minimum": 24.0
               },
               {
                 "type": "null"
@@ -17836,13 +19482,11 @@
           "childAction": {
             "type": "string",
             "maxLength": 500,
-            "minLength": 1,
             "title": "Childaction"
           },
           "catAction": {
             "type": "string",
             "maxLength": 500,
-            "minLength": 1,
             "title": "Cataction"
           },
           "environmentChange": {
@@ -18073,7 +19717,8 @@
           "assetId",
           "sourceInFrame"
         ],
-        "title": "ShotTake"
+        "title": "ShotTake",
+        "description": "组装素材条目 —— 一个镜头选用的一份镜头视频资产及其入点帧。"
       },
       "ShotTarget": {
         "properties": {
@@ -18095,7 +19740,8 @@
           "shotPlanVersionId",
           "shotId"
         ],
-        "title": "ShotTarget"
+        "title": "ShotTarget",
+        "description": "分镜操作定位目标 —— 当前激活分镜计划版本中的一个镜头。"
       },
       "SourceTreatmentDraft": {
         "properties": {
@@ -18135,10 +19781,21 @@
           "treatment",
           "reason"
         ],
-        "title": "SourceTreatmentDraft"
+        "title": "SourceTreatmentDraft",
+        "description": "缩编主线下对一个来源事件的处理决定 —— retained/merged/simplified/omitted,\n每个来源必须恰好一份,列出实际使用它的集数与理由(与 sourceCoverage 交叉校验)。"
       },
       "StoryCreateCommand": {
         "properties": {
+          "narrativeDesign": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NarrativeDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "title": {
             "type": "string",
             "maxLength": 160,
@@ -18156,7 +19813,7 @@
           },
           "targetDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Targetdurationseconds"
           },
@@ -18306,7 +19963,8 @@
           "createdAt",
           "updatedAt"
         ],
-        "title": "StoryImportAnalysisJobDto"
+        "title": "StoryImportAnalysisJobDto",
+        "description": "分析任务 DTO —— 执行状态机、所用 Provider/模型、实际用量与成本、计费状态。"
       },
       "StoryImportConfirmCommand": {
         "properties": {
@@ -18390,7 +20048,7 @@
           },
           "defaultEpisodeDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Defaultepisodedurationseconds",
             "default": 12
@@ -18442,7 +20100,8 @@
           "target",
           "idempotencyKey"
         ],
-        "title": "StoryImportConfirmCommand"
+        "title": "StoryImportConfirmCommand",
+        "description": "用户确认某条关系建议去向的命令 —— target 为最终关系类型:\nappend_series 必须指定既有系列;revision/reference 须指定系列或项目其一;\nnew_series/independent 不得引用既有目标,且 new_series 必须给出长度模式\n(固定集数须 ≥2 集,连载不设集数);全部组合由 validate_target 强制。"
       },
       "StoryImportCreateCommand": {
         "properties": {
@@ -18534,7 +20193,8 @@
           "expectedInputHash",
           "idempotencyKey"
         ],
-        "title": "StoryImportCreateCommand"
+        "title": "StoryImportCreateCommand",
+        "description": "创建故事来源文档并提交付费分析命令 —— expectedInputHash 对账预览冻结的\ninput hash,配合幂等键防重复付费;可随创建预置各关系建议的生产目标。"
       },
       "StoryImportCreateResultDto": {
         "properties": {
@@ -18562,7 +20222,8 @@
           "document",
           "idempotencyReplayed"
         ],
-        "title": "StoryImportCreateResultDto"
+        "title": "StoryImportCreateResultDto",
+        "description": "创建来源文档的结果 —— 文档本体、本次提交的分析任务(如有)与是否幂等重放。"
       },
       "StoryImportMaterializationDto": {
         "properties": {
@@ -18642,7 +20303,8 @@
           "target",
           "createdAt"
         ],
-        "title": "StoryImportMaterializationDto"
+        "title": "StoryImportMaterializationDto",
+        "description": "一次确认的物化记录 —— 选定的关系类型与目标,以及创建/挂接的系列或项目。"
       },
       "StoryImportPreviewCommand": {
         "properties": {
@@ -18680,7 +20342,8 @@
           "rawText",
           "sourceFormat"
         ],
-        "title": "StoryImportPreviewCommand"
+        "title": "StoryImportPreviewCommand",
+        "description": "故事导入预览命令 —— 来源原文(至多 50 万字符)加格式与文件名;\nreject_blank_text 强制原文非空白,并校验格式与文件名的搭配规则。"
       },
       "StoryImportPreviewDto": {
         "properties": {
@@ -18722,7 +20385,8 @@
           "outputSchema",
           "promptRevision"
         ],
-        "title": "StoryImportPreviewDto"
+        "title": "StoryImportPreviewDto",
+        "description": "分析预览 DTO —— contentHash 标识规范化后的原文(内容级幂等去重),\ninputHash 冻结 prompt+schema+模型配置的全部输入(worker 提交时对账),\n并返回 prompt / outputSchema / promptRevision 供界面展示。"
       },
       "StoryImportProjectDto": {
         "properties": {
@@ -18752,7 +20416,8 @@
           "theme",
           "targetDurationSeconds"
         ],
-        "title": "StoryImportProjectDto"
+        "title": "StoryImportProjectDto",
+        "description": "确认导入后创建的项目摘要(id/标题/主题/目标时长)—— 用于回显物化结果。"
       },
       "StoryImportReanalyzeCommand": {
         "properties": {
@@ -18801,7 +20466,8 @@
           "expectedInputHash",
           "idempotencyKey"
         ],
-        "title": "StoryImportReanalyzeCommand"
+        "title": "StoryImportReanalyzeCommand",
+        "description": "重新分析既有来源文档命令 —— 同样对账 input hash 并以幂等键防重复付费。"
       },
       "StoryProductionTarget": {
         "properties": {
@@ -18841,7 +20507,7 @@
           },
           "defaultEpisodeDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Defaultepisodedurationseconds",
             "default": 15
@@ -18873,7 +20539,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "StoryProductionTarget"
+        "title": "StoryProductionTarget",
+        "description": "一组来源单元落地为系列时的生产目标 —— 集数/每集时长/叙事模式等预置参数;\n改编策略固定为 condense_mainline(导入的长文本按生产目标缩编主线)。"
       },
       "StoryProductionTargetsCommand": {
         "properties": {
@@ -18896,7 +20563,8 @@
           "expectedUpdatedAt",
           "productionTargets"
         ],
-        "title": "StoryProductionTargetsCommand"
+        "title": "StoryProductionTargetsCommand",
+        "description": "批量保存生产目标命令 —— 键为 \"default\" 或关系建议 id;\nexpectedUpdatedAt 乐观并发,文档已在别处变化时拒绝保存。"
       },
       "StorySeriesDto": {
         "properties": {
@@ -18957,7 +20625,7 @@
           },
           "defaultEpisodeDurationSeconds": {
             "type": "integer",
-            "maximum": 15.0,
+            "maximum": 60.0,
             "minimum": 8.0,
             "title": "Defaultepisodedurationseconds"
           },
@@ -19078,7 +20746,8 @@
           "createdAt",
           "updatedAt"
         ],
-        "title": "StorySeriesDto"
+        "title": "StorySeriesDto",
+        "description": "系列完整 DTO —— 创建设定之外附加 id、规范角色档案、当前激活方案版本与集数统计\n(planned/materialized/completed)。"
       },
       "StorySourceDocumentDto": {
         "properties": {
@@ -19188,7 +20857,8 @@
           "createdAt",
           "updatedAt"
         ],
-        "title": "StorySourceDocumentDto"
+        "title": "StorySourceDocumentDto",
+        "description": "故事来源文档 DTO —— 原文全文与 contentHash、格式/文件名、分析状态、\n生产目标,以及解析出的全部来源单元与关系建议。"
       },
       "StorySourceRelationSuggestionDto": {
         "properties": {
@@ -19299,7 +20969,8 @@
           "status",
           "createdAt"
         ],
-        "title": "StorySourceRelationSuggestionDto"
+        "title": "StorySourceRelationSuggestionDto",
+        "description": "已持久化的关系建议 DTO —— unitOrdinals 已映射为真实单元 id,\nstatus 记录 suggested/accepted/rejected 处理状态。"
       },
       "StorySourceUnitDto": {
         "properties": {
@@ -19362,10 +21033,21 @@
           "documentId",
           "createdAt"
         ],
-        "title": "StorySourceUnitDto"
+        "title": "StorySourceUnitDto",
+        "description": "已持久化的来源单元 DTO —— 草稿之上附加 id 与所属文档 id。"
       },
       "StoryVersionDto": {
         "properties": {
+          "narrativeDesign": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NarrativeDesign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -19445,6 +21127,286 @@
           "createdAt"
         ],
         "title": "StoryVersionDto"
+      },
+      "UnitEvidenceCommand": {
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Planid"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "sourceFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sourceframe"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "planId",
+          "assetId",
+          "sourceFrame"
+        ],
+        "title": "UnitEvidenceCommand"
+      },
+      "UnitGeneration": {
+        "properties": {
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnknownJobReplacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepareOnly": {
+            "type": "boolean",
+            "title": "Prepareonly",
+            "default": false
+          },
+          "replacementJobId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacementjobid"
+          },
+          "planId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Planid"
+          },
+          "expectedInputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expectedinputhash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "planId",
+          "expectedInputHash",
+          "idempotencyKey"
+        ],
+        "title": "UnitGeneration"
+      },
+      "UnitSelectionCommand": {
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Planid"
+          },
+          "expectedDesignHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expecteddesignhash"
+          },
+          "expectedSelectionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedselectionid"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assetid"
+          },
+          "takes": {
+            "items": {
+              "$ref": "#/components/schemas/UnitTake"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Takes"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventObservation"
+            },
+            "type": "array",
+            "maxItems": 48,
+            "title": "Events"
+          },
+          "endState": {
+            "$ref": "#/components/schemas/EndState"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "accepted_with_issues",
+              "rejected"
+            ],
+            "title": "Disposition"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Notes",
+            "default": ""
+          },
+          "audioPolicy": {
+            "type": "string",
+            "enum": [
+              "native",
+              "mute"
+            ],
+            "title": "Audiopolicy",
+            "default": "native"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 8,
+            "title": "Idempotencykey"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "planId",
+          "expectedDesignHash",
+          "assetId",
+          "takes",
+          "endState",
+          "disposition",
+          "idempotencyKey"
+        ],
+        "title": "UnitSelectionCommand"
+      },
+      "UnitSelectionDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "unitId": {
+            "type": "string",
+            "title": "Unitid"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "inputHash": {
+            "type": "string",
+            "title": "Inputhash"
+          },
+          "requestHash": {
+            "type": "string",
+            "title": "Requesthash"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "title": "Idempotencykey"
+          },
+          "document": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Document"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "projectId",
+          "unitId",
+          "revision",
+          "active",
+          "inputHash",
+          "requestHash",
+          "idempotencyKey",
+          "document",
+          "createdAt"
+        ],
+        "title": "UnitSelectionDto"
+      },
+      "UnitTake": {
+        "properties": {
+          "shotId": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Shotid"
+          },
+          "sourceInFrame": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sourceinframe"
+          },
+          "durationFrames": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Durationframes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "shotId",
+          "sourceInFrame",
+          "durationFrames"
+        ],
+        "title": "UnitTake"
+      },
+      "UnitTarget": {
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Planid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "planId"
+        ],
+        "title": "UnitTarget"
       },
       "UnknownJobReplacement": {
         "properties": {
@@ -20162,7 +22124,8 @@
           "expectedRevision",
           "editingInput"
         ],
-        "title": "VideoEditDraftInputCommand"
+        "title": "VideoEditDraftInputCommand",
+        "description": "编辑草稿\"输入内容\"更新接口的命令体。\n\nexpected_revision 做乐观锁:与服务端当前草稿修订号不一致时拒绝写入,\n防止并发覆盖。editing_input 是前端维护的完整输入快照,落库前服务端会\n取其中属于 VideoEditOptions 契约的键重新校验,并核对项目 / 草稿 /\n来源任务的归属一致性。"
       },
       "VideoEditInProgressDetail": {
         "properties": {
@@ -20576,7 +22539,8 @@
           "recommendedReferenceRoles",
           "notes"
         ],
-        "title": "VideoEditPlanSuggestion"
+        "title": "VideoEditPlanSuggestion",
+        "description": "编辑规划 LLM(plan_video_edit 任务)的结构化输出 schema。\n\n本类的 JSON Schema 随 frozen input 一起下发(outputSchema 字段),LLM 必须\n按此返回:对用户修改要求的改写(instruction)、四段意图原文建议\n(preserveContent / startState / actionProcess / desiredEndState /\navoidProblems)、推荐的生成模式(edit_existing 编辑原片段 / from_frame\n从正确起始帧重生成)、推荐的结束状态策略与参考图角色,以及 notes ——\nnotes 用于按 planning_prompt 的要求明确标记\"已观察到的事实\"与\n\"不确定建议\"。所有字段均为建议,不自动执行生成。"
       },
       "VideoIssueDto": {
         "properties": {

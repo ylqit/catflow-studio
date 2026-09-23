@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkDurationInput from "../components/WorkDurationInput.vue";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -578,7 +579,7 @@ onBeforeUnmount(() => {
         <div class="modal-head"><div><h2>新建生活短片</h2><p>先写下一个很小的日常。</p></div><button type="button" class="modal-close" aria-label="关闭" @click="showCreate = false">×</button></div>
         <div class="field"><label for="project-title">短片名称</label><input id="project-title" v-model="draft.title" required maxlength="160" placeholder="雨天擦爪" /></div>
         <div class="field"><label for="project-theme">最初的生活灵感</label><textarea id="project-theme" v-model="draft.theme" required placeholder="孩子替刚回家的猫咪擦干湿爪…" /></div>
-        <div class="field"><label for="project-duration">目标时长：{{ draft.targetDurationSeconds }} 秒</label><input id="project-duration" v-model.number="draft.targetDurationSeconds" type="range" min="8" max="15" /></div>
+        <WorkDurationInput id="project-duration" v-model="draft.targetDurationSeconds" label="目标时长" />
         <p class="notice">固定 9:16。简短主题会同时作为第一个标签，之后可以在项目库中调整。</p>
         <CatReferenceSelector v-model="draft.canonProfileId" @ready="catReady = $event" />
         <button class="primary modal-submit" :disabled="!catReady || creating || !draft.title || !draft.theme"><span v-if="creating" class="spinner" />{{ creating ? "正在创建" : "进入故事灵感" }}</button>

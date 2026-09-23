@@ -40,11 +40,11 @@ class WorkerHeartbeat:
     """Maintain a fresh process-health document independently of job execution."""
 
     def __init__(
-        self,
-        path: Path,
-        *,
-        worker_id: str,
-        interval_seconds: float = 5.0,
+            self,
+            path: Path,
+            *,
+            worker_id: str,
+            interval_seconds: float = 5.0,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
@@ -66,10 +66,10 @@ class WorkerHeartbeat:
         return self
 
     def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
     ) -> None:
         self._stop.set()
         if self._thread is not None:
@@ -88,6 +88,7 @@ class WorkerHeartbeat:
             self._path,
             {
                 "schemaVersion": 2,
+                "productionRevision": "catflow-production-v1",
                 "pid": os.getpid(),
                 "workerId": self._worker_id,
                 "provider": "ark",
@@ -113,13 +114,13 @@ class WorkerSupervisor:
     """Restart the local worker process without owning or mutating business jobs."""
 
     def __init__(
-        self,
-        state_file: Path,
-        *,
-        process_factory: Callable[[], SupervisedProcess],
-        sleep: Callable[[float], None] = time.sleep,
-        monitor_interval_seconds: float = 0.5,
-        stable_seconds: float = 600.0,
+            self,
+            state_file: Path,
+            *,
+            process_factory: Callable[[], SupervisedProcess],
+            sleep: Callable[[float], None] = time.sleep,
+            monitor_interval_seconds: float = 0.5,
+            stable_seconds: float = 600.0,
     ) -> None:
         if monitor_interval_seconds <= 0 or stable_seconds <= 0:
             raise ValueError("supervisor timing values must be positive")
@@ -201,13 +202,13 @@ class WorkerSupervisor:
             process.wait(timeout=10)
 
     def _write_state(
-        self,
-        *,
-        state: str,
-        restart_count: int,
-        worker_pid: int | None = None,
-        last_exit_at: str | None = None,
-        next_restart_at: str | None = None,
+            self,
+            *,
+            state: str,
+            restart_count: int,
+            worker_pid: int | None = None,
+            last_exit_at: str | None = None,
+            next_restart_at: str | None = None,
     ) -> None:
         document: dict[str, object] = {
             "schemaVersion": 1,

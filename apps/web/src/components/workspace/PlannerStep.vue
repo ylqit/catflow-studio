@@ -177,7 +177,7 @@ onBeforeUnmount(() => { unsubscribeJobs?.(); ++previewSequence; clearTimeout(pre
           <li><b>变化</b><span>{{ proposal.microEvent.visibleChange }}</span></li>
           <li><b>结尾</b><span>{{ proposal.microEvent.warmEnding }}</span></li>
         </ol>
-        <div class="proposal-foot"><span>{{ proposal.targetDurationSeconds }} 秒 · {{ proposal.dialoguePolicy === "none" ? "无对白" : "极少对白" }}</span><button v-if="proposal.status === 'draft'" class="secondary" :disabled="adopting === proposal.id" @click="adopt(proposal.id)">{{ adopting === proposal.id ? "采用中" : "采用为故事" }}</button></div>
+        <dl v-if="proposal.narrativeDesign"><dt>观众期待</dt><dd>{{ proposal.narrativeDesign.audienceExpectation }}</dd><dt>可见揭示</dt><dd>{{ proposal.narrativeDesign.reveal || '本故事无反转' }}</dd><dt>角色回应</dt><dd>{{ proposal.narrativeDesign.response }}</dd></dl><div class="proposal-foot"><span>{{ proposal.targetDurationSeconds }} 秒 · {{ proposal.dialoguePolicy === "none" ? "无对白" : "极少对白" }}</span><button v-if="proposal.status === 'draft'" class="secondary" :disabled="adopting === proposal.id" @click="adopt(proposal.id)">{{ adopting === proposal.id ? "采用中" : "采用为故事" }}</button></div>
       </article>
     </aside>
   </section>

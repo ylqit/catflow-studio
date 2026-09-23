@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from catflow.application.production_plan import PRODUCTION_CAPABILITIES
 from catflow.application.character_references import (
     ReferenceBindingCommand, ReferenceBindingDto, CharacterRemakePreviewCommand,
     CharacterRemakeCommand, CharacterRemakePreviewDto, CharacterRemakeDto,
@@ -318,6 +319,7 @@ def create_app(
             "csrfToken": settings.csrf_token,
             "baseUrl": settings.base_url,
             "localOnly": True,
+            "production": PRODUCTION_CAPABILITIES,
             "databaseReady": True,
             "workerReady": worker["ready"],
             "worker": worker,
@@ -364,6 +366,14 @@ def create_app(
                 "retryable": True,
             },
         )
+
+    def require_production_worker() -> None:
+        require_worker_available()
+        if settings.worker_ready_file is not None:
+            heartbeat = _read_json_document(settings.worker_ready_file) or {}
+            if heartbeat.get("productionRevision") != PRODUCTION_CAPABILITIES["revision"]:
+                raise HTTPException(status_code=503, detail={"code": "worker_upgrade_required",
+                    "message": "后台版本不支持当前生产计划，请更新并重启 Worker 后提交。"})
 
     @app.post("/api/v1/runtime/object-publisher/check")
     def check_object_publisher() -> dict[str, object]:
@@ -613,7 +623,7 @@ def create_app(
         "/api/v1/story-series/{series_id}/plans/generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(require_worker_available)],
+        dependencies=[Depends(require_production_worker)],
     )
     def generate_series_plan(series_id: uuid.UUID, command: SeriesPlanGenerationCommand) -> JobDto:
         return service.create_series_plan_job(series_id, command)
@@ -671,7 +681,7 @@ def create_app(
         "/api/v1/story-series/{series_id}/plan-segments/generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(require_worker_available)],
+        dependencies=[Depends(require_production_worker)],
     )
     def generate_series_plan_segment(
         series_id: uuid.UUID, command: SeriesPlanSegmentGenerationCommand
@@ -761,7 +771,7 @@ def create_app(
         "/api/v1/story-series/{series_id}/episodes/{episode_id}/story-generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(require_worker_available)],
+        dependencies=[Depends(require_production_worker)],
     )
     def generate_series_episode_story(
         series_id: uuid.UUID,
@@ -907,7 +917,7 @@ def create_app(
         "/api/v1/projects/{project_id}/planner/messages",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(require_worker_available)],
+        dependencies=[Depends(require_production_worker)],
     )
     def planner_message(project_id: uuid.UUID, command: PlannerMessageCommand) -> JobDto:
         return service.enqueue_planner_message(project_id, command)
@@ -944,6 +954,9 @@ def create_app(
         _payload: dict[str, Any] = Body(default={}),
     ) -> StoryVersionDto:
         return service.activate_story(project_id, story_version_id)
+
+    from .production_routes import production_router
+    app.include_router(production_router(service, require_production_worker))
 
     @app.post("/api/v1/projects/{project_id}/shot-production/context")
     def shot_production_context(project_id: uuid.UUID, command: ShotTarget) -> dict[str, Any]:
@@ -996,7 +1009,7 @@ def create_app(
         "/api/v1/projects/{project_id}/shot-plans/generations",
         response_model=JobDto,
         status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(require_worker_available)],
+        dependencies=[Depends(require_production_worker)],
     )
     def generate_shot_plan(project_id: uuid.UUID, command: ShotPlanGenerationCommand) -> JobDto:
         return service.create_shot_plan_generation_job(project_id, command)

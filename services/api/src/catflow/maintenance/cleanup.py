@@ -33,6 +33,8 @@ from catflow.infrastructure.models import (
     VideoRepairRecord,
 )
 
+from catflow.infrastructure.production_models import ProductionPlanRecord, ProductionSelectionRecord
+
 ACTIVE_JOB_STATUSES = frozenset(
     {"queued", "submitting", "submitted", "polling", "storing", "cancel_requested"}
 )
@@ -344,6 +346,13 @@ class CleanupService:
         for job in jobs:
             if job.video_repair_id in repair_ids:
                 job_ids.add(job.id)
+
+        # Historical reviewed cleanup predates production plans. Require a fresh policy
+        # whenever it would remove a plan or any immutable plan/selection evidence.
+        for model in (ProductionPlanRecord, ProductionSelectionRecord):
+            for record in session.scalars(select(model)):
+                if record.project_id in project_ids or _json_mentions_any(record.document_json, asset_ids | job_ids | shot_plan_ids | set(policy.delete_canon_profile_ids)):
+                    raise RuntimeError("cleanup targets retained production plans or selection evidence; revise the audit")
 
         return {
             "project_ids": project_ids,

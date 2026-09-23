@@ -110,14 +110,17 @@ from catflow.domain.video_repairs import FrameRange
 _provider_association_lock = RLock()
 
 
+from .memory_production import MemoryProduction
 from .memory_character_references import MemoryCharacterReferences, reference_transaction
 
 
-class MemoryStudioRepository(MemoryCharacterReferences):
+class MemoryStudioRepository(MemoryProduction, MemoryCharacterReferences):
     """Deterministic test repository; production uses PostgreSQL."""
 
     def __init__(self) -> None:
         self._reference_lock = RLock()
+        self._production_plans = {}
+        self._unit_selections = {}
         self._production_started = {}
         self._character_remakes = {}
         self._cat_options = {}
@@ -1928,6 +1931,7 @@ class MemoryStudioRepository(MemoryCharacterReferences):
             targetDurationSeconds=proposal.target_duration_seconds,
             dialoguePolicy=proposal.dialogue_policy,
             environmentIntent=proposal.environment_intent,
+            narrativeDesign=proposal.narrative_design,
             propIntent=proposal.prop_intent,
             contextHash=job.input_hash,
             warnings=[],
@@ -1968,6 +1972,7 @@ class MemoryStudioRepository(MemoryCharacterReferences):
             targetDurationSeconds=proposal.target_duration_seconds,
             dialoguePolicy=proposal.dialogue_policy,
             environmentIntent=proposal.environment_intent,
+            narrativeDesign=proposal.narrative_design,
             active=True,
             createdAt=datetime.now(UTC),
         )
@@ -1998,6 +2003,7 @@ class MemoryStudioRepository(MemoryCharacterReferences):
             targetDurationSeconds=command.target_duration_seconds,
             dialoguePolicy=command.dialogue_policy,
             environmentIntent=command.environment_intent,
+            narrativeDesign=command.narrative_design,
             active=True,
             createdAt=datetime.now(UTC),
         )
@@ -2250,6 +2256,7 @@ class MemoryStudioRepository(MemoryCharacterReferences):
             if snapshot and (story is None or story.id != snapshot.source_story_version_id):
                 raise StudioConflictError("故事来源已变化，请重新预览后提交。")
         self._mark_reference_production(job)
+        self._validate_production_job(job)
         self._jobs[job.id] = job
         self._jobs_by_idempotency[job.idempotency_key] = job.id
         self._record_event(job, "job.queued")
@@ -2497,10 +2504,12 @@ class MemoryStudioRepository(MemoryCharacterReferences):
     def latest_job_event_id(self) -> int:
         return self._job_events[-1].id if self._job_events else 0
 
+    @reference_transaction
     def create_video_edit_draft(
         self,
         draft: VideoEditDraftDto,
         edit: EditVersionDto,
+        *, production_guard: dict | None = None,
     ) -> VideoEditDraftDto:
         existing = next(
             (
@@ -2514,6 +2523,8 @@ class MemoryStudioRepository(MemoryCharacterReferences):
             if existing.input_hash != draft.input_hash:
                 raise StudioIdempotencyInputConflictError("editing draft input changed")
             return existing
+        if production_guard:
+            self._validate_production_assembly(draft.project_id, production_guard)
         edits = self._edits.setdefault(draft.project_id, [])
         edits.append(edit.model_copy(update={"revision": len(edits) + 1}))
         self._edit_drafts[draft.id] = draft

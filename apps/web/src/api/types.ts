@@ -15,6 +15,7 @@ export interface ObjectPublisherRuntimeDto {
 }
 
 export interface RuntimeBootstrapDto {
+  production?: { revision: string; minimumWorkSeconds: number; maximumWorkSeconds: number; frameRate: number; minimumShotFrames: number; maximumShotFrames: number; maximumShots: number; minimumGenerationSeconds: number; maximumGenerationSeconds: number; maximumUnitShots: number };
   csrfToken: string;
   baseUrl: string;
   localOnly: true;
@@ -627,6 +628,7 @@ export interface MicroEventDto {
 }
 
 export interface LifeStoryProposalDto {
+  narrativeDesign?: import("./productionTypes").NarrativeDesign | null;
   id: string;
   projectId: string;
   status: "draft" | "adopted" | "outdated";
@@ -651,6 +653,7 @@ export interface PlannerSnapshotDto {
 }
 
 export interface StoryVersionDto {
+  narrativeDesign?: import("./productionTypes").NarrativeDesign | null;
   id: string;
   projectId: string;
   revision: number;
@@ -718,6 +721,7 @@ export interface CatPerformanceDto {
   eyelidAction: 'none' | 'blink' | 'slow_blink' | 'squint_release';
 }
 export interface ActionBeatDto {
+  environmentAction?: string;
   startFrame: number;
   endFrame: number;
   purpose: 'trigger' | 'action' | 'reaction' | 'payoff';
@@ -727,6 +731,8 @@ export interface ActionBeatDto {
   catPerformance?: CatPerformanceDto | null;
 }
 export interface ShotSpecDto {
+  formatVersion?: 1 | 2;
+  information?: import("./productionTypes").ShotInformation | null;
   actionBeats?: ActionBeatDto[] | null;
   cameraSpatialRelation?: string | null;
   interactionConstraints?: string[];

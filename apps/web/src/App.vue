@@ -17,7 +17,7 @@ const isWorkspace = computed(() => typeof route.params.projectId === "string");
         </span>
       </RouterLink>
       <div class="topbar-center" :class="{ visible: isWorkspace }">
-        原创日常 · 9:16 · 8–15 秒
+        原创日常 · 9:16 · 8–60 秒
       </div>
       <nav class="topbar-actions" aria-label="全局导航">
         <RouterLink to="/projects">项目</RouterLink>

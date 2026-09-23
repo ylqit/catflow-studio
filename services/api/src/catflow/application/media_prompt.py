@@ -83,6 +83,7 @@ _REFERENCE_DUTIES = {
     "anchor_in": "提供修改片段的入点衔接状态",
     "anchor_out": "提供修改片段的出点衔接状态",
     "previous_episode_frame": "提供上一集视觉连续性线索，仅继承本集已确认保留的状态",
+    "continuity_end": "提供上游实际结束状态的证据；依照本镜机位重新构图，不强制复制上一镜机位或静态表情",
 }
 
 
@@ -124,7 +125,8 @@ def compile_provider_media_prompt(
     references: list[str] = []
     # 2. 按 reference_roles 顺序,把每个角色映射成"图N: 职责。"
     for index, role in enumerate(reference_roles, 1):
-        duty = _REFERENCE_DUTIES.get(role)
+        duty = ("提供同一件关键道具的颜色、轮廓与结构，数量与状态按镜头设计；统一按画风板绘制，不照搬道具图的摄影质感"
+                if role.startswith("prop:") else _REFERENCE_DUTIES.get(role))
         if duty is None:
             # 兜底:支持镜头级额外参考 shot_scene_N / shot_frame_N
             match = re.fullmatch(r"shot_(scene|frame)_(\d+)", role)

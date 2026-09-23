@@ -39,6 +39,9 @@
     - JobStatusCard.vue:任务状态显示
 -->
 <script setup lang="ts">
+import NarrativeDesignEditor from "./NarrativeDesignEditor.vue";
+import ShotNarrativeEditor from "./ShotNarrativeEditor.vue";
+import StoryboardRehearsal from "./StoryboardRehearsal.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import JobStatusCard from "../JobStatusCard.vue";
@@ -743,6 +746,8 @@ async function closeComparison() {
 </script>
 
 <template>
+  <NarrativeDesignEditor v-if="workspace.activeStory" :project-id="projectId" :story="workspace.activeStory" @saved="emit('changed'); loadVersionData()" />
+  <StoryboardRehearsal :shots="shots" />
   <section v-if="!workspace.activeStory" class="card empty missing-story">
     <div>✦</div><h2>先采用一个生活故事</h2><p>分镜会根据当前故事安排镜头和动作。</p><RouterLink class="primary" :to="`/projects/${projectId}/planner`">回到故事灵感</RouterLink>
   </section>
@@ -777,7 +782,7 @@ async function closeComparison() {
     <div class="shot-editor card">
     <div v-if="!selectedPlan" class="director-empty">
       <p class="eyebrow">分镜建议</p><h2>把故事拆成可拍的镜头</h2>
-      <p>根据当前故事生成 1–4 个镜头，安排机位、构图、孩子与猫咪的动作、画面变化和前后衔接。生成后仍可逐项修改。</p>
+      <p>按作品时长安排镜头，明确每镜新增信息、动作节拍与前后衔接。新版支持单角色和道具镜头，生成后仍可逐项修改。</p>
       <div class="paid-note"><b>{{ paidBlockedReason || "本次会使用付费模型，完成后显示实际用量。" }}</b><span>离开页面后仍会继续，完成时会自动保存。</span></div>
       <button data-testid="generate-director-plan" class="primary" :disabled="generating || jobBusy || Boolean(paidBlockedReason)" @click="generateDirectorPlan"><span v-if="generating" class="spinner" />生成分镜</button>
     </div>
@@ -841,10 +846,11 @@ async function closeComparison() {
       <div class="shot-list">
         <article v-for="shot in shots" :key="shot.id" class="shot-card">
           <div class="shot-scene-controls"><label>镜头场景<select v-model="shot.sceneAssetId" :disabled="!canEditSelected"><option :value="null">当前项目环境</option><option v-for="asset in sceneAssets" :key="asset.id" :value="asset.id">环境 · {{ asset.id.slice(0, 8) }}</option></select></label><label>环境使用<select v-model="shot.environmentUse" :disabled="!canEditSelected"><option value="recompose">保持场景外观，允许重新构图</option><option value="preserve_layout">沿用此图布局</option></select></label><button v-if="shot.confirmedFrame" class="quiet" :disabled="!canEditSelected" @click="shot.confirmedFrame = null">移除当前镜头画面绑定（保存后生效）</button></div>
+          <ShotNarrativeEditor :shot="shot" :disabled="!canEditSelected" />
           <ActionBeatsEditor v-model="shot.actionBeats" :duration-frames="shot.durationSeconds * 24" :disabled="!canEditSelected" :initial-child-action="shot.childAction" :initial-cat-action="shot.catAction" :initial-visible-change="shot.environmentChange" />
           <ShotProduction v-if="selectedPlan" :project-id="projectId" :plan-id="selectedPlan.id" :shot-id="shot.id" :disabled="shotsDirty || !selectedPlan.active" :runtime="runtime" @changed="selectedPlanId = null; emit('changed'); loadVersionData()" />
           <div class="shot-summary">
-            <div class="shot-number">{{ String(shot.order).padStart(2, "0") }}<label><input v-model.number="shot.durationSeconds" type="number" min="2" max="15" :disabled="!canEditSelected" /> 秒</label></div>
+            <div class="shot-number">{{ String(shot.order).padStart(2, "0") }}<label><input v-model.number="shot.durationSeconds" type="number" min="2" max="15" :disabled="!canEditSelected || shot.formatVersion === 2" /> 秒</label></div>
             <div class="shot-fields">
               <div class="field"><label :for="`${shot.id}-framing`">景别与构图</label><textarea :id="`${shot.id}-framing`" v-model="shot.framing" rows="2" :disabled="!canEditSelected" /></div><div class="field"><label :for="`${shot.id}-camera`">运镜</label><textarea :id="`${shot.id}-camera`" v-model="shot.cameraMovement" rows="2" :disabled="!canEditSelected" /></div>
               <div data-testid="shot-child-summary" class="field wide derived-summary"><div class="summary-label"><label>人物动作</label><button v-if="shot.childBlocking" type="button" class="quiet" :disabled="!canEditSelected" @click="openShotDetails(shot.id, 'child')">编辑动作</button></div><p>人物：{{ childSummary(shot) }}</p><small v-if="shot.childBlocking?.microMotions.length">{{ shot.childBlocking.microMotions.length }} 项微动作</small></div>

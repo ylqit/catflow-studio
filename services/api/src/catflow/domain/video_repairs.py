@@ -4,7 +4,7 @@ import math
 import uuid
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from .contract import ContractModel
 
@@ -127,6 +127,14 @@ class EditAudioSegment(ContractModel):
     repair_id: uuid.UUID | None = Field(alias="repairId", default=None)
     # A source without audio represents silence only when requireAudio is false.
     require_audio: bool = Field(alias="requireAudio", default=False)
+    muted: bool = False
+
+    @model_serializer(mode="wrap")
+    def historical_serialization(self, handler):
+        result = handler(self)
+        if not self.muted:
+            result.pop("muted", None)
+        return result
     fade_in_ms: int = Field(alias="fadeInMs", default=0, ge=0)
     fade_out_ms: int = Field(alias="fadeOutMs", default=0, ge=0)
     envelope_start_frame: int = Field(alias="envelopeStartFrame", default=0, ge=0)
@@ -162,6 +170,15 @@ class EditDecisionListV3(ContractModel):
     transitions: list[EditTransitionV2] = Field(default_factory=list)
     audio: EditAudioV3
     output: EditOutputV2
+    production_evidence: dict | None = Field(alias="productionEvidence", default=None)
+
+    @model_serializer(mode="wrap")
+    def historical_serialization(self, handler):
+        result = handler(self)
+        if self.production_evidence is None:
+            result.pop("productionEvidence", None)
+            result.pop("production_evidence", None)
+        return result
 
     @property
     def total_frames(self) -> int:
@@ -460,6 +477,7 @@ def splice_repair_candidate(
         update={
             "video_segments": segments,
             "transitions": [transitions_by_index[index] for index in sorted(transitions_by_index)],
+            **({"production_evidence": None} if isinstance(timeline, EditDecisionListV3) else {}),
         }
     )
     if repaired.total_frames != timeline.total_frames:

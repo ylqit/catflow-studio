@@ -1,3 +1,4 @@
+import { productionCapabilities } from "../productionCapabilities";
 import type {
   CatReferenceOptionDto, ReferenceBindingDto, ReferenceBindingCommand, CharacterRemakePreviewDto, CharacterRemakePreviewCommand, CharacterRemakeCommand, CharacterRemakeDto,
   ShotProductionContextDto,
@@ -80,6 +81,7 @@ export class CatFlowClient {
   async bootstrap(): Promise<RuntimeBootstrapDto> {
     const bootstrap = await this.request<RuntimeBootstrapDto>("/api/v1/runtime/bootstrap");
     this.csrfToken = bootstrap.csrfToken;
+    if (bootstrap.production) Object.assign(productionCapabilities, bootstrap.production);
     return bootstrap;
   }
 
@@ -769,7 +771,7 @@ export class CatFlowClient {
     return `/api/v1/events?afterEventId=${afterEventId}`;
   }
 
-  private async json<T>(path: string, method: string, body: unknown): Promise<T> {
+  async json<T>(path: string, method: string, body: unknown): Promise<T> {
     return this.write(path, method, JSON.stringify(body), { "Content-Type": "application/json" });
   }
 
@@ -793,7 +795,7 @@ export class CatFlowClient {
     });
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  async request<T>(path: string, init?: RequestInit): Promise<T> {
     if (!path.startsWith("/api/v1/")) {
       throw new Error(`CatFlowClient only accepts /api/v1 paths: ${path}`);
     }

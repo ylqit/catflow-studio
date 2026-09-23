@@ -202,7 +202,9 @@ def production_scope(
 ) -> str:
     # One creation object may have several independent image slots or shots.
     target = (
-        frozen.get("targetShotId")
+        frozen.get("productionUnitId")
+        or frozen.get("productionPropKey")
+        or frozen.get("targetShotId")
         or frozen.get("candidateAssetId")
         or frozen.get("videoAssetId")
         or (frozen.get("editDraftId") if kind == "regenerate_video_segment" else None)

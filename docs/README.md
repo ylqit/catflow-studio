@@ -2,6 +2,8 @@
 
 当前系统为 Vue、FastAPI、PostgreSQL 和持久 Worker，以下文档对应现行代码。旧 V5 的 Scene/ShotCard 与 cvg 启动命令不适用于当前工程。
 
+- [剧情分镜、一致性与长短片统一生产](NARRATIVE_AND_PRODUCTION_ROADMAP.md)：8–60 秒作品、生成单元、选片与阶段验收。
+- [本轮工程与样片记录](NARRATIVE_PRODUCTION_DELIVERY.md)：基线、迁移、测试与实片实际进度。
 - [当前架构与开发交接](CURRENT_ARCHITECTURE_AND_HANDOFF.md)：三条生产路径、环境、Canon、冻结和恢复。
 - [猫咪参考选择](CAT_REFERENCE_OPTIONS.md)：灰猫／V4 白猫、新建、导入、系列和重制。
 - [清理、节拍与表演改进](PERFORMANCE_AND_CLEANUP.md)：本轮变更、验证和限制。

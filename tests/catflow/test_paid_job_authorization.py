@@ -60,7 +60,7 @@ def test_ark_planner_submits_without_a_validation_run_and_remains_idempotent() -
     assert first.model == "doubao-seed-2-1-pro-260628"
     assert first.expected_cost_micros is None
     assert first.validation_run_id is None
-    assert "原地互看" in str(first.frozen_input["prompt"])
+    assert "有后续回应的目光交流" in str(first.frozen_input["prompt"])
 
 
 def test_normal_ark_image_jobs_have_no_application_quota() -> None:

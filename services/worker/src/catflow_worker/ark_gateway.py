@@ -176,7 +176,7 @@ class ArkTypedGateway:
             prompt=prompt,
             image_paths=image_paths,
             output_schema=output_schema,
-            max_output_tokens=8000,
+            max_output_tokens=24000 if output_schema.get("properties", {}).get("formatVersion", {}).get("const") == 2 else 8000,
             input_instruction=input_instruction,
         )
 

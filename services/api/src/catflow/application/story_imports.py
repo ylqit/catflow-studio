@@ -72,7 +72,7 @@ class StoryProductionTarget(ContractModel):
     length_mode: SeriesLengthMode = Field(alias="lengthMode", default="fixed")
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=3, ge=2)
     default_episode_duration_seconds: int = Field(
-        alias="defaultEpisodeDurationSeconds", default=15, ge=8, le=15
+        alias="defaultEpisodeDurationSeconds", default=15, ge=8, le=60
     )
     narrative_mode: SeriesNarrativeMode = Field(alias="narrativeMode", default="continuous")
     adaptation_policy: Literal["condense_mainline"] = Field(
@@ -302,7 +302,7 @@ class StoryImportConfirmCommand(ContractModel):
     series_length_mode: SeriesLengthMode | None = Field(alias="seriesLengthMode", default=None)
     planned_episode_count: int | None = Field(alias="plannedEpisodeCount", default=None)
     default_episode_duration_seconds: int = Field(
-        alias="defaultEpisodeDurationSeconds", default=12, ge=8, le=15
+        alias="defaultEpisodeDurationSeconds", default=12, ge=8, le=60
     )
     narrative_mode: SeriesNarrativeMode | None = Field(alias="narrativeMode", default=None)
     adaptation_policy: Literal["preserve_all", "condense_mainline"] = Field(

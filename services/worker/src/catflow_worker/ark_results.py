@@ -201,7 +201,7 @@ class ArkResultLandingService:
             role = str(job.frozen_input_json["role"])
             shot_metadata = {
                 key: job.frozen_input_json[key]
-                for key in ("purpose", "targetShotId", "shotPlanVersionId", "shotDesignHash")
+                for key in ("purpose", "productionPropKey", "targetShotId", "shotPlanVersionId", "shotDesignHash", "productionPlanId", "productionUnitId", "unitDesignHash", "unitContentHash", "upstreamSelectionHash")
                 if key in job.frozen_input_json
             }
             result = dict(job.provider_result_json or {})
@@ -240,7 +240,7 @@ class ArkResultLandingService:
             historical = bool((job.execution_json or {}).get("historicalResult"))
             shot_metadata = {
                 key: job.frozen_input_json[key]
-                for key in ("purpose", "targetShotId", "shotPlanVersionId", "shotDesignHash")
+                for key in ("purpose", "productionPropKey", "targetShotId", "shotPlanVersionId", "shotDesignHash", "productionPlanId", "productionUnitId", "unitDesignHash", "unitContentHash", "upstreamSelectionHash")
                 if key in job.frozen_input_json
             }
             existing = session.scalar(

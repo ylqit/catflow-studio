@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { productionCapabilities } from "../productionCapabilities";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -30,7 +31,7 @@ const targetProjectBySuggestion = ref<Record<string, string>>({});
 const defaultTarget = ref<StoryProductionTarget>({ lengthMode: "fixed", plannedEpisodeCount: 3, defaultEpisodeDurationSeconds: 15, narrativeMode: "continuous", adaptationPolicy: "condense_mainline", mustKeep: [] });
 const targets = ref<Record<string, StoryProductionTarget>>({});
 const savedNotice = ref("");
-const targetValid = (value: StoryProductionTarget) => Number.isInteger(value.defaultEpisodeDurationSeconds) && value.defaultEpisodeDurationSeconds >= 8 && value.defaultEpisodeDurationSeconds <= 15 && (value.lengthMode === "ongoing" || (Number.isInteger(value.plannedEpisodeCount) && (value.plannedEpisodeCount ?? 0) >= 2));
+const targetValid = (value: StoryProductionTarget) => Number.isInteger(value.defaultEpisodeDurationSeconds) && value.defaultEpisodeDurationSeconds >= 8 && value.defaultEpisodeDurationSeconds <= productionCapabilities.maximumWorkSeconds && (value.lengthMode === "ongoing" || (Number.isInteger(value.plannedEpisodeCount) && (value.plannedEpisodeCount ?? 0) >= 2));
 const allTargetsValid = computed(() => targetValid(defaultTarget.value) && Object.values(targets.value).every(targetValid));
 async function saveTargets() {
   if (!document.value || !allTargetsValid.value) return;
@@ -178,7 +179,7 @@ function suggestionTarget(id: string): ImportTarget {
 async function confirm(suggestionId: string) {
   const target = suggestionTarget(suggestionId);
   const goal = targets.value[suggestionId] ?? defaultTarget.value;
-  if (!targetValid(goal)) { error.value = "固定系列至少 2 集，每集为 8–15 秒整数。"; return; }
+  if (!targetValid(goal)) { error.value = "固定系列至少 2 集，每集为 8–60 秒整数。"; return; }
   if (["new_series", "independent"].includes(target) && !goal.canonProfileId) { error.value = "请选择猫咪参考。"; return; }
   const seriesLengthMode = target === "new_series" ? goal.lengthMode : null;
   const scope = "story-import:confirm:" + document.value!.id + ":" + suggestionId;
@@ -258,7 +259,7 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); unsubscrib
         <p v-if="fileName" class="file-name">{{ fileName }}</p>
         <textarea v-model="rawText" :readonly="!!document" aria-label="故事来源文本" placeholder="粘贴单个故事、系列剧本、主题合集或后续修订稿…" />
         <ProductionTargetFields v-model="defaultTarget" label="新系列生产目标" />
-        <p v-if="!allTargetsValid" class="notice error">固定系列至少 2 集，每集时长为 8–15 秒整数。</p>
+        <p v-if="!allTargetsValid" class="notice error">固定系列至少 2 集，每集时长为 8–60 秒整数。</p>
         <button v-if="document" class="secondary" :disabled="busy || !allTargetsValid" @click="saveTargets">保存生产目标（不调用模型）</button>
         <p v-if="savedNotice" class="notice">{{ savedNotice }}</p>
         <div v-if="preview && !document" class="preview-summary"><span>{{ preview.characterCount }} 个字符</span><span>每次导入都会新建来源记录，并产生一次故事分析费用</span></div>
@@ -281,7 +282,7 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer); unsubscrib
             <div><span class="pill">关系建议</span><h3>{{ suggestion.title }}</h3><p>{{ suggestion.rationale }}</p></div>
             <div class="relation-action"><select v-model="targetBySuggestion[suggestion.id]" :aria-label="`${suggestion.title}的处理方式`"><option value="new_series">创建新系列</option><option value="append_series">追加到现有系列</option><option value="independent">创建独立短片</option><option value="revision">作为修订稿</option><option value="reference">作为参考资料</option></select><section v-if="['new_series', 'independent'].includes(suggestionTarget(suggestion.id))" class="series-length">
               <ProductionTargetFields v-if="suggestionTarget(suggestion.id) === 'new_series' && targets[suggestion.id]" v-model="targets[suggestion.id]" :label="suggestion.title + '生产目标'" />
-              <label v-else>短片时长（秒）<input v-if="targets[suggestion.id]" v-model.number="targets[suggestion.id].defaultEpisodeDurationSeconds" type="number" min="8" max="15" /></label>
+              <label v-else>短片时长（秒）<input v-if="targets[suggestion.id]" v-model.number="targets[suggestion.id].defaultEpisodeDurationSeconds" type="number" :min="productionCapabilities.minimumWorkSeconds" :max="productionCapabilities.maximumWorkSeconds" /></label>
               <CatReferenceSelector v-if="suggestionTarget(suggestion.id) === 'independent' && targets[suggestion.id]" v-model="targets[suggestion.id].canonProfileId" />
               <p>{{ suggestion.unitIds.length }} 个来源事件，按本组目标确认缩编方案。不同故事组独立设置。</p>
               <small>故事分析中的集数建议未考虑当前时长；以这里的生产目标为准。创建后只准备文字方案，逐集确认后制作。</small>

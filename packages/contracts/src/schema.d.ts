@@ -1104,6 +1104,195 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/production-props/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Prop */
+        post: operations["preview_prop_api_v1_projects__project_id__production_props_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-props/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Prop */
+        post: operations["generate_prop_api_v1_projects__project_id__production_props_generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Unit Jobs */
+        get: operations["unit_jobs_api_v1_projects__project_id__production_units__unit_id__jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Plans */
+        get: operations["plans_api_v1_projects__project_id__production_plans_get"];
+        put?: never;
+        /** Create Plan */
+        post: operations["create_plan_api_v1_projects__project_id__production_plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Plan */
+        post: operations["preview_plan_api_v1_projects__project_id__production_plans_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-plans/{plan_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Plan */
+        post: operations["activate_plan_api_v1_projects__project_id__production_plans__plan_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Unit */
+        post: operations["preview_unit_api_v1_projects__project_id__production_units__unit_id__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Unit */
+        post: operations["generate_unit_api_v1_projects__project_id__production_units__unit_id__generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/selections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Selections */
+        get: operations["selections_api_v1_projects__project_id__production_units__unit_id__selections_get"];
+        put?: never;
+        /** Select Unit */
+        post: operations["select_unit_api_v1_projects__project_id__production_units__unit_id__selections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-units/{unit_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evidence */
+        post: operations["evidence_api_v1_projects__project_id__production_units__unit_id__evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/production-plans/{plan_id}/assemble": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Assemble */
+        post: operations["assemble_api_v1_projects__project_id__production_plans__plan_id__assemble_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/shot-production/context": {
         parameters: {
             query?: never;
@@ -2067,9 +2256,17 @@ export interface components {
             catAction: string;
             /** Visiblechange */
             visibleChange: string;
+            /**
+             * Environmentaction
+             * @default
+             */
+            environmentAction: string;
             catPerformance?: components["schemas"]["CatPerformance"] | null;
         };
-        /** AdaptationRiskDraft */
+        /**
+         * AdaptationRiskDraft
+         * @description 改编风险声明 —— blocking=True 时作为阻塞问题,方案需人工调整后才能采用。
+         */
         AdaptationRiskDraft: {
             /** Message */
             message: string;
@@ -2552,6 +2749,12 @@ export interface components {
         };
         /** DirectorPlanPayload */
         DirectorPlanPayload: {
+            /**
+             * Formatversion
+             * @default 1
+             * @enum {integer}
+             */
+            formatVersion: 1 | 2;
             /** Targetdurationseconds */
             targetDurationSeconds: number;
             directorTreatment: components["schemas"]["DirectorStoryTreatment"];
@@ -2621,6 +2824,11 @@ export interface components {
              * @default false
              */
             requireAudio: boolean;
+            /**
+             * Muted
+             * @default false
+             */
+            muted: boolean;
             /**
              * Fadeinms
              * @default 0
@@ -2726,6 +2934,10 @@ export interface components {
             transitions?: components["schemas"]["EditTransitionV2"][];
             audio: components["schemas"]["EditAudioV3"];
             output: components["schemas"]["EditOutputV2"];
+            /** Productionevidence */
+            productionEvidence?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** EditOutputDto */
         EditOutputDto: {
@@ -2898,6 +3110,28 @@ export interface components {
             development: string;
             /** Resolution */
             resolution: string;
+        };
+        /** EndState */
+        EndState: {
+            /** Facts */
+            facts: components["schemas"]["ObservedFact"][];
+            /**
+             * Unfinishedactions
+             * @default
+             */
+            unfinishedActions: string;
+            /** Evidenceframe */
+            evidenceFrame: number;
+            /**
+             * Evidenceassetid
+             * Format: uuid
+             */
+            evidenceAssetId: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
         };
         /** EnvironmentDraftSaveCommand */
         EnvironmentDraftSaveCommand: {
@@ -3098,7 +3332,10 @@ export interface components {
             /** Endingimage */
             endingImage: string;
         };
-        /** EpisodeCountRecommendationDto */
+        /**
+         * EpisodeCountRecommendationDto
+         * @description 非阻塞的系列集数建议 —— 最小/首选/最大三档加理由;只是建议,最终集数由用户确认。
+         */
         EpisodeCountRecommendationDto: {
             /** Minimumrecommended */
             minimumRecommended: number;
@@ -3109,7 +3346,11 @@ export interface components {
             /** Rationale */
             rationale: string;
         };
-        /** EpisodeSourceCoverageDto */
+        /**
+         * EpisodeSourceCoverageDto
+         * @description 单集对一个来源剧情节拍的覆盖声明 —— sourceUnitOrdinal 只能引用系列绑定的
+         *     安全序号(validate_series_plan 会拦截越界与非连续复用)。
+         */
         EpisodeSourceCoverageDto: {
             /** Sourceunitordinal */
             sourceUnitOrdinal: number;
@@ -3120,6 +3361,27 @@ export interface components {
             coverage: "whole" | "partial" | "continuation";
             /** Coveragenote */
             coverageNote: string;
+        };
+        /** EventObservation */
+        EventObservation: {
+            /** Shotid */
+            shotId: string;
+            /** Eventid */
+            eventId: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "pass" | "warning" | "fail" | "unknown" | "not_applicable";
+            /** Sourcestartframe */
+            sourceStartFrame: number;
+            /** Sourceendframe */
+            sourceEndFrame: number;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
         };
         /** ExportCommand */
         ExportCommand: {
@@ -3357,7 +3619,10 @@ export interface components {
                 [key: string]: string;
             }[];
         };
-        /** GenerationPromptSectionDto */
+        /**
+         * GenerationPromptSectionDto
+         * @description prompt 分节 DTO —— key/title/content 三元组,供前端按小节展示与编辑预览。
+         */
         GenerationPromptSectionDto: {
             /**
              * Key
@@ -3763,6 +4028,43 @@ export interface components {
             /** Pricesource */
             priceSource?: string | null;
         };
+        /** KeyEvent */
+        KeyEvent: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Startframe */
+            startFrame: number;
+            /** Endframe */
+            endFrame: number;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+        };
+        /** LayoutPoint */
+        LayoutPoint: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "region" | "furniture" | "support" | "child" | "cat" | "prop" | "camera";
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /**
+             * Direction
+             * @default
+             */
+            direction: string;
+        };
         /** LensDesign */
         LensDesign: {
             /** Focallengthequivalent */
@@ -3776,6 +4078,12 @@ export interface components {
         };
         /** LifeClipSpec */
         LifeClipSpec: {
+            /**
+             * Formatversion
+             * @default 1
+             * @enum {integer}
+             */
+            formatVersion: 1 | 2;
             /** Durationseconds */
             durationSeconds: number;
             /**
@@ -3805,6 +4113,7 @@ export interface components {
         };
         /** LifeStoryProposalDto */
         LifeStoryProposalDto: {
+            narrativeDesign?: components["schemas"]["NarrativeDesign"] | null;
             /**
              * Id
              * Format: uuid
@@ -3866,6 +4175,49 @@ export interface components {
             visibleChange: string;
             /** Warmending */
             warmEnding: string;
+        };
+        /** NarrativeDesign */
+        NarrativeDesign: {
+            /** Charactergoal */
+            characterGoal: string;
+            /** Audienceexpectation */
+            audienceExpectation: string;
+            /**
+             * Smalldisruption
+             * @default
+             */
+            smallDisruption: string;
+            /**
+             * Reveal
+             * @default
+             */
+            reveal: string;
+            /** Response */
+            response: string;
+            /** Payoff */
+            payoff: string;
+            /**
+             * Adaptationnotes
+             * @default
+             */
+            adaptationNotes: string;
+        };
+        /** ObservedFact */
+        ObservedFact: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+            /**
+             * Certainty
+             * @enum {string}
+             */
+            certainty: "observed" | "unobserved" | "uncertain";
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
         };
         /** PhysicalChangeDesign */
         PhysicalChangeDesign: {
@@ -3994,7 +4346,11 @@ export interface components {
             proposals: components["schemas"]["LifeStoryProposalDto"][];
             latestJob?: components["schemas"]["PlannerJobDto"] | null;
         };
-        /** PreservedRequirementDraft */
+        /**
+         * PreservedRequirementDraft
+         * @description 用户"必须保留要求"的落实说明 —— 每条 must_keep 须恰好对应一份,
+         *     写明处理方式(handling)与落实到的集数(校验时逐条对账)。
+         */
         PreservedRequirementDraft: {
             /** Requirement */
             requirement: string;
@@ -4002,6 +4358,94 @@ export interface components {
             handling: string;
             /** Episodeorders */
             episodeOrders?: number[];
+        };
+        /** ProductionActivation */
+        ProductionActivation: {
+            /** Expectedactiveplanid */
+            expectedActivePlanId: string | null;
+        };
+        /** ProductionAssembly */
+        ProductionAssembly: {
+            /** Expectedselectionhashes */
+            expectedSelectionHashes: {
+                [key: string]: string;
+            };
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** ProductionPlanDraft */
+        ProductionPlanDraft: {
+            /**
+             * Shotplanversionid
+             * Format: uuid
+             */
+            shotPlanVersionId: string;
+            /** Scenes */
+            scenes?: components["schemas"]["SceneBinding"][];
+            /** Props */
+            props?: components["schemas"]["PropBinding"][];
+            /** Units */
+            units?: components["schemas"]["ProductionUnit"][];
+            /** Expectedactiveplanid */
+            expectedActivePlanId?: string | null;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** ProductionPlanDto */
+        ProductionPlanDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /** Revision */
+            revision: number;
+            /** Active */
+            active: boolean;
+            /** Inputhash */
+            inputHash: string;
+            /** Requesthash */
+            requestHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** ProductionUnit */
+        ProductionUnit: {
+            /** Id */
+            id: string;
+            /** Shotids */
+            shotIds: string[];
+            /**
+             * Continuity
+             * @default reset
+             * @enum {string}
+             */
+            continuity: "inherit" | "reset";
+            /**
+             * Reason
+             * @default 首个单元建立起点
+             */
+            reason: string;
+            /**
+             * Generationmode
+             * @default references
+             * @enum {string}
+             */
+            generationMode: "references" | "from_frame";
         };
         /** ProjectCollectionCreate */
         ProjectCollectionCreate: {
@@ -4269,7 +4713,10 @@ export interface components {
              */
             createdAt: string;
         };
-        /** ProjectSeriesContextDto */
+        /**
+         * ProjectSeriesContextDto
+         * @description 项目所属系列上下文 —— 供单集制作页读取系列设定、当前集与全部兄弟剧集。
+         */
         ProjectSeriesContextDto: {
             series: components["schemas"]["StorySeriesDto"];
             episode: components["schemas"]["SeriesEpisodeDto"];
@@ -4306,6 +4753,67 @@ export interface components {
              * @constant
              */
             currency: "CNY";
+        };
+        /** PropBinding */
+        PropBinding: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256?: string | null;
+            /** Identity */
+            identity: string;
+            /** Initialstate */
+            initialState: string;
+            /**
+             * Plannedchange
+             * @default
+             */
+            plannedChange: string;
+            /** Location */
+            location: string;
+            /**
+             * Owner
+             * @default environment
+             * @enum {string}
+             */
+            owner: "child" | "cat" | "environment";
+        };
+        /** PropImageGeneration */
+        PropImageGeneration: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Appearance */
+            appearance: string;
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** PropImageInput */
+        PropImageInput: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Appearance */
+            appearance: string;
         };
         /** PropStateChange */
         PropStateChange: {
@@ -4435,7 +4943,10 @@ export interface components {
             /** Denominator */
             denominator: number;
         };
-        /** RecurringLocationDraft */
+        /**
+         * RecurringLocationDraft
+         * @description 常驻场景草稿 —— key 是单集大纲 recurringLocationKeys 必须引用的标识符。
+         */
         RecurringLocationDraft: {
             /**
              * Key
@@ -4453,7 +4964,10 @@ export interface components {
              */
             description: string;
         };
-        /** RecurringPropDraft */
+        /**
+         * RecurringPropDraft
+         * @description 常驻道具草稿 —— key 供单集大纲 recurringPropKeys 引用;continuityRule 写跨集一致性要求。
+         */
         RecurringPropDraft: {
             /**
              * Key
@@ -4525,6 +5039,27 @@ export interface components {
             acknowledgeDuplicateCharge: true;
             /** Idempotencykey */
             idempotencyKey: string;
+        };
+        /** SceneBinding */
+        SceneBinding: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sha256 */
+            sha256?: string | null;
+            /** Layout */
+            layout?: components["schemas"]["LayoutPoint"][];
+            /**
+             * Axis
+             * @default
+             */
+            axis: string;
         };
         /** SegmentEditInputDto */
         SegmentEditInputDto: {
@@ -5173,7 +5708,12 @@ export interface components {
             /** Bindings */
             bindings: components["schemas"]["SeriesAssetBindingCommand"][];
         };
-        /** SeriesBibleDraft */
+        /**
+         * SeriesBibleDraft
+         * @description 整季系列圣经草稿 —— LLM 策划输出的整季核心设定(核心一句话/主题/世界规则/
+         *     情绪弧线/常驻场景与道具/服装与连续性规则/视听母题/禁止改动)。
+         *     prompt 内嵌与界面展示时由 series_prompt_text.render_series_bible 渲染成中文分项。
+         */
         SeriesBibleDraft: {
             /**
              * Logline
@@ -5205,7 +5745,12 @@ export interface components {
             /** Forbiddenchanges */
             forbiddenChanges?: string[];
         };
-        /** SeriesCreateCommand */
+        /**
+         * SeriesCreateCommand
+         * @description 创建系列命令 —— 用户在策划页确认的系列设定:标题/核心构想/叙事与长度模式/
+         *     每集时长/世界设定/情绪方向/结局目标,以及 must_keep(必须保留)、must_avoid(必须避免)
+         *     与 additional_notes(补充制作约束);后续所有策划 prompt 都从这里取材。
+         */
         SeriesCreateCommand: {
             /** Canonprofileid */
             canonProfileId?: string | null;
@@ -5249,7 +5794,10 @@ export interface components {
             /** Additionalnotes */
             additionalNotes?: string | null;
         };
-        /** SeriesEmotionalArcDraft */
+        /**
+         * SeriesEmotionalArcDraft
+         * @description 整季情绪弧线 —— 开场 / 发展 / 高潮 / 收束四段,采用前均为必填(validate 检查)。
+         */
         SeriesEmotionalArcDraft: {
             /**
              * Opening
@@ -5272,7 +5820,11 @@ export interface components {
              */
             resolution: string;
         };
-        /** SeriesEpisodeDto */
+        /**
+         * SeriesEpisodeDto
+         * @description 系列单集 DTO —— order 在系列内全局递增;status 覆盖从大纲到成片的生产管线;
+         *     project_id 在物化(materialize)后指向单集制作项目,outline 为当前激活大纲版本。
+         */
         SeriesEpisodeDto: {
             /**
              * Id
@@ -5314,12 +5866,20 @@ export interface components {
              */
             updatedAt: string;
         };
-        /** SeriesEpisodeMaterializeCommand */
+        /**
+         * SeriesEpisodeMaterializeCommand
+         * @description 物化单集命令 —— 为该集创建制作项目(project),仅携带幂等键。
+         */
         SeriesEpisodeMaterializeCommand: {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesEpisodeOutlineDraft */
+        /**
+         * SeriesEpisodeOutlineDraft
+         * @description 单集大纲草稿 —— LLM 策划为每集输出的一条可在目标时长内完成的可见事件:
+         *     开场状态→触发→儿童目标/动作→猫咪回应→可见变化→结尾状态的因果链,
+         *     附带来源节拍覆盖声明(sourceCoverage)与常驻场景/道具 key 引用。
+         */
         SeriesEpisodeOutlineDraft: {
             /**
              * Order
@@ -5387,7 +5947,10 @@ export interface components {
             /** Sourcecoverage */
             sourceCoverage?: components["schemas"]["EpisodeSourceCoverageDto"][];
         };
-        /** SeriesEpisodeStoryGenerationCommand */
+        /**
+         * SeriesEpisodeStoryGenerationCommand
+         * @description 提交单集故事生成命令 —— 对账预览冻结的 input hash,可携带本次扩写的用户补充。
+         */
         SeriesEpisodeStoryGenerationCommand: {
             replacement?: components["schemas"]["UnknownJobReplacement"] | null;
             /**
@@ -5404,12 +5967,19 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesEpisodeStoryPreviewCommand */
+        /**
+         * SeriesEpisodeStoryPreviewCommand
+         * @description 单集故事预览命令 —— 仅携带用户补充(拼进 prompt 的"用户补充"行)。
+         */
         SeriesEpisodeStoryPreviewCommand: {
             /** Additionalnotes */
             additionalNotes?: string | null;
         };
-        /** SeriesEpisodeStoryPreviewDto */
+        /**
+         * SeriesEpisodeStoryPreviewDto
+         * @description 单集故事生成预览 DTO —— 冻结的 prompt/schema、inputHash,以及系列/方案/单集/
+         *     大纲/项目全部版本 id 与进入本集的连续性,供 worker 提交付费任务时对账。
+         */
         SeriesEpisodeStoryPreviewDto: {
             /**
              * Seriesid
@@ -5455,7 +6025,10 @@ export interface components {
             /** Promptrevision */
             promptRevision: string;
         };
-        /** SeriesPatchCommand */
+        /**
+         * SeriesPatchCommand
+         * @description 系列设定局部更新命令 —— 所有字段可选但至少提供一项(require_change 校验)。
+         */
         SeriesPatchCommand: {
             /** Plannedepisodecount */
             plannedEpisodeCount?: number | null;
@@ -5476,14 +6049,22 @@ export interface components {
             /** Additionalnotes */
             additionalNotes?: string | null;
         };
-        /** SeriesPlanActivationCommand */
+        /**
+         * SeriesPlanActivationCommand
+         * @description 激活整季方案命令 —— 期望的当前激活版本(首次激活为空)防止并发覆盖。
+         */
         SeriesPlanActivationCommand: {
             /** Expectedactiveplanversionid */
             expectedActivePlanVersionId?: string | null;
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesPlanDraft */
+        /**
+         * SeriesPlanDraft
+         * @description 系列方案完整草稿 —— 整季/续段策划 LLM 的输出契约(series_plan_output_schema
+         *     即由它生成):系列圣经 + 逐集大纲(至少一集),缩编路线下另附来源处理决定、
+         *     改编风险与必须保留要求的落实说明。
+         */
         SeriesPlanDraft: {
             /** Sourcetreatments */
             sourceTreatments?: components["schemas"]["SourceTreatmentDraft"][];
@@ -5495,7 +6076,11 @@ export interface components {
             /** Episodes */
             episodes: components["schemas"]["SeriesEpisodeOutlineDraft"][];
         };
-        /** SeriesPlanGenerationCommand */
+        /**
+         * SeriesPlanGenerationCommand
+         * @description 提交整季方案生成命令 —— expectedInputHash 必须等于预览返回的 inputHash,
+         *     配合幂等键防止重复付费。
+         */
         SeriesPlanGenerationCommand: {
             replacement?: components["schemas"]["UnknownJobReplacement"] | null;
             /**
@@ -5510,7 +6095,12 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesPlanMaterializeCommand */
+        /**
+         * SeriesPlanMaterializeCommand
+         * @description 物化方案为新候选版本的命令 —— source=saved_result 基于已保存结果重放
+         *     (以 expectedSettingsHash 对账设定未漂移);source=edited 提交用户编辑后的 plan;
+         *     两条路径互斥(validate_source 强制)。
+         */
         SeriesPlanMaterializeCommand: {
             /**
              * Baseplanversionid
@@ -5529,7 +6119,12 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesPlanPreviewDto */
+        /**
+         * SeriesPlanPreviewDto
+         * @description 整季方案生成预览 DTO —— 返回冻结的 prompt/schema 与 inputHash(worker 提交
+         *     付费任务时对账,保证所见即所付),settingsInputHash 绑定可编辑设定供本地重校验,
+         *     并给出本批集数 / 系列总集数 / 剩余集数。
+         */
         SeriesPlanPreviewDto: {
             /**
              * Seriesid
@@ -5568,7 +6163,10 @@ export interface components {
             /** Promptrevision */
             promptRevision: string;
         };
-        /** SeriesPlanSegmentActivationCommand */
+        /**
+         * SeriesPlanSegmentActivationCommand
+         * @description 激活续段方案命令 —— 校验期望的整季方案版本与上一续段版本未变后再置为 active。
+         */
         SeriesPlanSegmentActivationCommand: {
             /**
              * Expectedseriesplanversionid
@@ -5580,7 +6178,11 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesPlanSegmentCommand */
+        /**
+         * SeriesPlanSegmentCommand
+         * @description 长系列续段策划请求 —— 指定起始集号与本批集数,并携带期望的整季方案版本与
+         *     上一续段版本(乐观并发:两者任一变化即拒绝,防止基于过期基线续写)。
+         */
         SeriesPlanSegmentCommand: {
             /** Startepisodeorder */
             startEpisodeOrder: number;
@@ -5594,7 +6196,10 @@ export interface components {
             /** Expectedprevioussegmentversionid */
             expectedPreviousSegmentVersionId?: string | null;
         };
-        /** SeriesPlanSegmentGenerationCommand */
+        /**
+         * SeriesPlanSegmentGenerationCommand
+         * @description 提交续段生成命令 —— 在续段请求之上对账预览冻结的 input hash,防止重复付费。
+         */
         SeriesPlanSegmentGenerationCommand: {
             replacement?: components["schemas"]["UnknownJobReplacement"] | null;
             /**
@@ -5620,7 +6225,11 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** SeriesPlanSegmentPreviewDto */
+        /**
+         * SeriesPlanSegmentPreviewDto
+         * @description 续段方案生成预览 DTO —— 冻结的 prompt/schema 与 inputHash,并回显期望的
+         *     整季方案版本 / 上一续段版本与剩余集数(仅固定集数模式)。
+         */
         SeriesPlanSegmentPreviewDto: {
             /**
              * Seriesid
@@ -5657,7 +6266,11 @@ export interface components {
             /** Promptrevision */
             promptRevision: string;
         };
-        /** SeriesPlanSegmentVersionDto */
+        /**
+         * SeriesPlanSegmentVersionDto
+         * @description 续段方案版本 DTO —— 记录段范围(起始集号/集数)、处置结论与期望基线版本链,
+         *     inputHash 冻结生成输入,激活后其大纲用于物化对应区间的单集。
+         */
         SeriesPlanSegmentVersionDto: {
             /**
              * Id
@@ -5716,7 +6329,11 @@ export interface components {
              */
             createdAt: string;
         };
-        /** SeriesPlanVersionDto */
+        /**
+         * SeriesPlanVersionDto
+         * @description 方案版本 DTO —— 每次生成/编辑保存为一个不可变版本;inputHash 冻结生成时的
+         *     prompt+schema 输入,active 标记当前被系列采用的版本。
+         */
         SeriesPlanVersionDto: {
             /**
              * Id
@@ -5761,7 +6378,12 @@ export interface components {
              */
             createdAt: string;
         };
-        /** SeriesSourceBeatDto */
+        /**
+         * SeriesSourceBeatDto
+         * @description 系列绑定的来源剧情节拍 DTO(来自故事导入的 source unit)——
+         *     binding_order 是 prompt 与 sourceCoverage 唯一允许引用的"安全序号",
+         *     raw_text 为该节拍的来源原文。
+         */
         SeriesSourceBeatDto: {
             /**
              * Id
@@ -5794,7 +6416,11 @@ export interface components {
              */
             createdAt: string;
         };
-        /** SeriesValidationIssueDto */
+        /**
+         * SeriesValidationIssueDto
+         * @description 单条校验/规范化问题 —— code 标识规则、path 指向字段、severity 决定处置结论;
+         *     规范化产生的问题额外带 beforeValue/afterValue 供界面展示改动。
+         */
         SeriesValidationIssueDto: {
             /** Code */
             code: string;
@@ -5816,7 +6442,10 @@ export interface components {
             /** Aftervalue */
             afterValue?: string | null;
         };
-        /** ShotAssemblyCommand */
+        /**
+         * ShotAssemblyCommand
+         * @description 镜头组装命令 —— 按当前分镜顺序为每个镜头选一份素材,生成 9:16 剪辑草稿(EDL v3)。
+         */
         ShotAssemblyCommand: {
             /**
              * Shotplanversionid
@@ -5828,7 +6457,10 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** ShotFrameConfirmCommand */
+        /**
+         * ShotFrameConfirmCommand
+         * @description 起始帧人工确认命令 —— 创作者核对画面后,把图片资产固定为该镜头的严格首帧。
+         */
         ShotFrameConfirmCommand: {
             /**
              * Shotplanversionid
@@ -5847,7 +6479,10 @@ export interface components {
             /** Checks */
             checks: ("identity_scale" | "placement_state" | "movement_space" | "action_start" | "continuity")[];
         };
-        /** ShotFrameExtractCommand */
+        /**
+         * ShotFrameExtractCommand
+         * @description 视频取帧命令 —— 用本地 ffmpeg 从真实镜头视频提取一帧,作为起始帧候选(不付费)。
+         */
         ShotFrameExtractCommand: {
             /**
              * Shotplanversionid
@@ -5866,7 +6501,41 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** ShotMediaCommand */
+        /** ShotInformation */
+        ShotInformation: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "establish" | "action" | "reaction" | "reveal" | "payoff" | "transition";
+            /** Newinformation */
+            newInformation: string;
+            /** Visiblesubjects */
+            visibleSubjects: ("child" | "cat" | "prop" | "environment")[];
+            /**
+             * Narrativelink
+             * @default
+             */
+            narrativeLink: string;
+            /** Keyevents */
+            keyEvents?: components["schemas"]["KeyEvent"][];
+            /**
+             * Scenekey
+             * @default main
+             */
+            sceneKey: string;
+            /** Propkeys */
+            propKeys?: string[];
+            /**
+             * Isolategeneration
+             * @default false
+             */
+            isolateGeneration: boolean;
+        };
+        /**
+         * ShotMediaCommand
+         * @description 镜头媒体付费提交命令 —— 在预览命令之上追加防漂移与防重复字段。
+         */
         ShotMediaCommand: {
             replacement?: components["schemas"]["UnknownJobReplacement"] | null;
             /**
@@ -5893,7 +6562,10 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** ShotMediaPreviewCommand */
+        /**
+         * ShotMediaPreviewCommand
+         * @description 镜头媒体预览命令(免费) —— 只编译 prompt 并冻结输入,不创建任务。
+         */
         ShotMediaPreviewCommand: {
             /**
              * Shotplanversionid
@@ -6149,6 +6821,13 @@ export interface components {
         };
         /** ShotSpec */
         ShotSpec: {
+            /**
+             * Formatversion
+             * @default 1
+             * @enum {integer}
+             */
+            formatVersion: 1 | 2;
+            information?: components["schemas"]["ShotInformation"] | null;
             /** Id */
             id: string;
             /** Order */
@@ -6202,7 +6881,10 @@ export interface components {
             /** Actionbeats */
             actionBeats?: components["schemas"]["ActionBeat"][] | null;
         };
-        /** ShotTake */
+        /**
+         * ShotTake
+         * @description 组装素材条目 —— 一个镜头选用的一份镜头视频资产及其入点帧。
+         */
         ShotTake: {
             /** Shotid */
             shotId: string;
@@ -6214,7 +6896,10 @@ export interface components {
             /** Sourceinframe */
             sourceInFrame: number;
         };
-        /** ShotTarget */
+        /**
+         * ShotTarget
+         * @description 分镜操作定位目标 —— 当前激活分镜计划版本中的一个镜头。
+         */
         ShotTarget: {
             /**
              * Shotplanversionid
@@ -6224,7 +6909,11 @@ export interface components {
             /** Shotid */
             shotId: string;
         };
-        /** SourceTreatmentDraft */
+        /**
+         * SourceTreatmentDraft
+         * @description 缩编主线下对一个来源事件的处理决定 —— retained/merged/simplified/omitted,
+         *     每个来源必须恰好一份,列出实际使用它的集数与理由(与 sourceCoverage 交叉校验)。
+         */
         SourceTreatmentDraft: {
             /** Sourceunitordinal */
             sourceUnitOrdinal: number;
@@ -6240,6 +6929,7 @@ export interface components {
         };
         /** StoryCreateCommand */
         StoryCreateCommand: {
+            narrativeDesign?: components["schemas"]["NarrativeDesign"] | null;
             /** Title */
             title: string;
             /** Body */
@@ -6255,7 +6945,10 @@ export interface components {
             /** Environmentintent */
             environmentIntent: string;
         };
-        /** StoryImportAnalysisJobDto */
+        /**
+         * StoryImportAnalysisJobDto
+         * @description 分析任务 DTO —— 执行状态机、所用 Provider/模型、实际用量与成本、计费状态。
+         */
         StoryImportAnalysisJobDto: {
             execution?: components["schemas"]["JobExecutionDto"] | null;
             /**
@@ -6303,7 +6996,13 @@ export interface components {
              */
             updatedAt: string;
         };
-        /** StoryImportConfirmCommand */
+        /**
+         * StoryImportConfirmCommand
+         * @description 用户确认某条关系建议去向的命令 —— target 为最终关系类型:
+         *     append_series 必须指定既有系列;revision/reference 须指定系列或项目其一;
+         *     new_series/independent 不得引用既有目标,且 new_series 必须给出长度模式
+         *     (固定集数须 ≥2 集,连载不设集数);全部组合由 validate_target 强制。
+         */
         StoryImportConfirmCommand: {
             /** Canonprofileid */
             canonProfileId?: string | null;
@@ -6343,7 +7042,11 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** StoryImportCreateCommand */
+        /**
+         * StoryImportCreateCommand
+         * @description 创建故事来源文档并提交付费分析命令 —— expectedInputHash 对账预览冻结的
+         *     input hash,配合幂等键防重复付费;可随创建预置各关系建议的生产目标。
+         */
         StoryImportCreateCommand: {
             replacement?: components["schemas"]["UnknownJobReplacement"] | null;
             /**
@@ -6371,14 +7074,20 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** StoryImportCreateResultDto */
+        /**
+         * StoryImportCreateResultDto
+         * @description 创建来源文档的结果 —— 文档本体、本次提交的分析任务(如有)与是否幂等重放。
+         */
         StoryImportCreateResultDto: {
             document: components["schemas"]["StorySourceDocumentDto"];
             analysisJob?: components["schemas"]["StoryImportAnalysisJobDto"] | null;
             /** Idempotencyreplayed */
             idempotencyReplayed: boolean;
         };
-        /** StoryImportMaterializationDto */
+        /**
+         * StoryImportMaterializationDto
+         * @description 一次确认的物化记录 —— 选定的关系类型与目标,以及创建/挂接的系列或项目。
+         */
         StoryImportMaterializationDto: {
             /**
              * Id
@@ -6408,7 +7117,11 @@ export interface components {
              */
             createdAt: string;
         };
-        /** StoryImportPreviewCommand */
+        /**
+         * StoryImportPreviewCommand
+         * @description 故事导入预览命令 —— 来源原文(至多 50 万字符)加格式与文件名;
+         *     reject_blank_text 强制原文非空白,并校验格式与文件名的搭配规则。
+         */
         StoryImportPreviewCommand: {
             /** Rawtext */
             rawText: string;
@@ -6420,7 +7133,12 @@ export interface components {
             /** Filename */
             fileName?: string | null;
         };
-        /** StoryImportPreviewDto */
+        /**
+         * StoryImportPreviewDto
+         * @description 分析预览 DTO —— contentHash 标识规范化后的原文(内容级幂等去重),
+         *     inputHash 冻结 prompt+schema+模型配置的全部输入(worker 提交时对账),
+         *     并返回 prompt / outputSchema / promptRevision 供界面展示。
+         */
         StoryImportPreviewDto: {
             /** Contenthash */
             contentHash: string;
@@ -6437,7 +7155,10 @@ export interface components {
             /** Promptrevision */
             promptRevision: string;
         };
-        /** StoryImportProjectDto */
+        /**
+         * StoryImportProjectDto
+         * @description 确认导入后创建的项目摘要(id/标题/主题/目标时长)—— 用于回显物化结果。
+         */
         StoryImportProjectDto: {
             /**
              * Id
@@ -6451,7 +7172,10 @@ export interface components {
             /** Targetdurationseconds */
             targetDurationSeconds: number;
         };
-        /** StoryImportReanalyzeCommand */
+        /**
+         * StoryImportReanalyzeCommand
+         * @description 重新分析既有来源文档命令 —— 同样对账 input hash 并以幂等键防重复付费。
+         */
         StoryImportReanalyzeCommand: {
             replacement?: components["schemas"]["UnknownJobReplacement"] | null;
             /**
@@ -6466,7 +7190,11 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** StoryProductionTarget */
+        /**
+         * StoryProductionTarget
+         * @description 一组来源单元落地为系列时的生产目标 —— 集数/每集时长/叙事模式等预置参数;
+         *     改编策略固定为 condense_mainline(导入的长文本按生产目标缩编主线)。
+         */
         StoryProductionTarget: {
             /** Canonprofileid */
             canonProfileId?: string | null;
@@ -6501,7 +7229,11 @@ export interface components {
             /** Mustkeep */
             mustKeep?: string[];
         };
-        /** StoryProductionTargetsCommand */
+        /**
+         * StoryProductionTargetsCommand
+         * @description 批量保存生产目标命令 —— 键为 "default" 或关系建议 id;
+         *     expectedUpdatedAt 乐观并发,文档已在别处变化时拒绝保存。
+         */
         StoryProductionTargetsCommand: {
             /**
              * Expectedupdatedat
@@ -6513,7 +7245,11 @@ export interface components {
                 [key: string]: components["schemas"]["StoryProductionTarget"];
             };
         };
-        /** StorySeriesDto */
+        /**
+         * StorySeriesDto
+         * @description 系列完整 DTO —— 创建设定之外附加 id、规范角色档案、当前激活方案版本与集数统计
+         *     (planned/materialized/completed)。
+         */
         StorySeriesDto: {
             /**
              * Canonprofileid
@@ -6592,7 +7328,11 @@ export interface components {
              */
             updatedAt: string;
         };
-        /** StorySourceDocumentDto */
+        /**
+         * StorySourceDocumentDto
+         * @description 故事来源文档 DTO —— 原文全文与 contentHash、格式/文件名、分析状态、
+         *     生产目标,以及解析出的全部来源单元与关系建议。
+         */
         StorySourceDocumentDto: {
             /**
              * Id
@@ -6636,7 +7376,11 @@ export interface components {
              */
             updatedAt: string;
         };
-        /** StorySourceRelationSuggestionDto */
+        /**
+         * StorySourceRelationSuggestionDto
+         * @description 已持久化的关系建议 DTO —— unitOrdinals 已映射为真实单元 id,
+         *     status 记录 suggested/accepted/rejected 处理状态。
+         */
         StorySourceRelationSuggestionDto: {
             /**
              * Id
@@ -6677,7 +7421,10 @@ export interface components {
              */
             createdAt: string;
         };
-        /** StorySourceUnitDto */
+        /**
+         * StorySourceUnitDto
+         * @description 已持久化的来源单元 DTO —— 草稿之上附加 id 与所属文档 id。
+         */
         StorySourceUnitDto: {
             /** Ordinal */
             ordinal: number;
@@ -6709,6 +7456,7 @@ export interface components {
         };
         /** StoryVersionDto */
         StoryVersionDto: {
+            narrativeDesign?: components["schemas"]["NarrativeDesign"] | null;
             /**
              * Id
              * Format: uuid
@@ -6744,6 +7492,132 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** UnitEvidenceCommand */
+        UnitEvidenceCommand: {
+            /**
+             * Planid
+             * Format: uuid
+             */
+            planId: string;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Sourceframe */
+            sourceFrame: number;
+        };
+        /** UnitGeneration */
+        UnitGeneration: {
+            replacement?: components["schemas"]["UnknownJobReplacement"] | null;
+            /**
+             * Prepareonly
+             * @default false
+             */
+            prepareOnly: boolean;
+            /** Replacementjobid */
+            replacementJobId?: string | null;
+            /**
+             * Planid
+             * Format: uuid
+             */
+            planId: string;
+            /** Expectedinputhash */
+            expectedInputHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** UnitSelectionCommand */
+        UnitSelectionCommand: {
+            /**
+             * Planid
+             * Format: uuid
+             */
+            planId: string;
+            /** Expecteddesignhash */
+            expectedDesignHash: string;
+            /** Expectedselectionid */
+            expectedSelectionId?: string | null;
+            /**
+             * Assetid
+             * Format: uuid
+             */
+            assetId: string;
+            /** Takes */
+            takes: components["schemas"]["UnitTake"][];
+            /** Events */
+            events?: components["schemas"]["EventObservation"][];
+            endState: components["schemas"]["EndState"];
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "accepted" | "accepted_with_issues" | "rejected";
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /**
+             * Audiopolicy
+             * @default native
+             * @enum {string}
+             */
+            audioPolicy: "native" | "mute";
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
+        /** UnitSelectionDto */
+        UnitSelectionDto: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Projectid
+             * Format: uuid
+             */
+            projectId: string;
+            /** Unitid */
+            unitId: string;
+            /** Revision */
+            revision: number;
+            /** Active */
+            active: boolean;
+            /** Inputhash */
+            inputHash: string;
+            /** Requesthash */
+            requestHash: string;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** UnitTake */
+        UnitTake: {
+            /** Shotid */
+            shotId: string;
+            /** Sourceinframe */
+            sourceInFrame: number;
+            /** Durationframes */
+            durationFrames: number;
+        };
+        /** UnitTarget */
+        UnitTarget: {
+            /**
+             * Planid
+             * Format: uuid
+             */
+            planId: string;
         };
         /** UnknownJobReplacement */
         UnknownJobReplacement: {
@@ -7030,7 +7904,15 @@ export interface components {
              */
             createdAt: string;
         };
-        /** VideoEditDraftInputCommand */
+        /**
+         * VideoEditDraftInputCommand
+         * @description 编辑草稿"输入内容"更新接口的命令体。
+         *
+         *     expected_revision 做乐观锁:与服务端当前草稿修订号不一致时拒绝写入,
+         *     防止并发覆盖。editing_input 是前端维护的完整输入快照,落库前服务端会
+         *     取其中属于 VideoEditOptions 契约的键重新校验,并核对项目 / 草稿 /
+         *     来源任务的归属一致性。
+         */
         VideoEditDraftInputCommand: {
             /** Expectedrevision */
             expectedRevision: number;
@@ -7160,7 +8042,18 @@ export interface components {
             /** Idempotencykey */
             idempotencyKey: string;
         };
-        /** VideoEditPlanSuggestion */
+        /**
+         * VideoEditPlanSuggestion
+         * @description 编辑规划 LLM(plan_video_edit 任务)的结构化输出 schema。
+         *
+         *     本类的 JSON Schema 随 frozen input 一起下发(outputSchema 字段),LLM 必须
+         *     按此返回:对用户修改要求的改写(instruction)、四段意图原文建议
+         *     (preserveContent / startState / actionProcess / desiredEndState /
+         *     avoidProblems)、推荐的生成模式(edit_existing 编辑原片段 / from_frame
+         *     从正确起始帧重生成)、推荐的结束状态策略与参考图角色,以及 notes ——
+         *     notes 用于按 planning_prompt 的要求明确标记"已观察到的事实"与
+         *     "不确定建议"。所有字段均为建议,不自动执行生成。
+         */
         VideoEditPlanSuggestion: {
             /** Instruction */
             instruction: string;
@@ -9776,6 +10669,457 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoryVersionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_prop_api_v1_projects__project_id__production_props_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropImageInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_prop_api_v1_projects__project_id__production_props_generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropImageGeneration"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unit_jobs_api_v1_projects__project_id__production_units__unit_id__jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plans_api_v1_projects__project_id__production_plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionPlanDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_plan_api_v1_projects__project_id__production_plans_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionPlanDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionPlanDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_plan_api_v1_projects__project_id__production_plans_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionPlanDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_plan_api_v1_projects__project_id__production_plans__plan_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionActivation"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionPlanDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_unit_api_v1_projects__project_id__production_units__unit_id__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitTarget"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_unit_api_v1_projects__project_id__production_units__unit_id__generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitGeneration"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    selections_api_v1_projects__project_id__production_units__unit_id__selections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSelectionDto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    select_unit_api_v1_projects__project_id__production_units__unit_id__selections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitSelectionCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSelectionDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evidence_api_v1_projects__project_id__production_units__unit_id__evidence_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitEvidenceCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDto"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assemble_api_v1_projects__project_id__production_plans__plan_id__assemble_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionAssembly"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoEditDraftDto"];
                 };
             };
             /** @description Validation Error */

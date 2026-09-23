@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkDurationInput from "../components/WorkDurationInput.vue";
 import { reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -69,7 +70,7 @@ async function create() {
         <fieldset class="field length-mode"><legend>系列长度</legend><label><input v-model="form.lengthMode" type="radio" value="fixed" /> 固定集数</label><label><input v-model="form.lengthMode" type="radio" value="ongoing" /> 持续连载</label></fieldset>
         <label v-if="form.lengthMode === 'fixed'" class="field"><span>计划集数</span><input v-model.number="form.plannedEpisodeCount" aria-label="计划集数" type="number" min="2" required /></label>
         <p v-else class="field ongoing-copy">持续连载不设置总集数。每次规划只处理一段，单次最多 30 集。</p>
-        <label class="field"><span>每集时长：{{ form.defaultEpisodeDurationSeconds }} 秒</span><input v-model.number="form.defaultEpisodeDurationSeconds" type="range" min="8" max="15" /></label>
+        <WorkDurationInput v-model="form.defaultEpisodeDurationSeconds" label="每集时长" />
         <label class="field wide"><span>世界与环境</span><textarea v-model="form.worldSetting" aria-label="世界与环境" required maxlength="2000" placeholder="故事发生在哪里，时间、季节和环境有哪些稳定规则" /></label>
         <label class="field"><span>情绪方向</span><textarea v-model="form.emotionalDirection" aria-label="情绪方向" required maxlength="1000" placeholder="从期待到满足，再温暖返程" /></label>
         <label class="field"><span>最终目标（可选）</span><textarea v-model="form.endingGoal" maxlength="1000" placeholder="最后一集希望抵达什么状态" /></label>

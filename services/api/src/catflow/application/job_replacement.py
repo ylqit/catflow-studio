@@ -139,6 +139,12 @@ def replace_unknown_job(
             source.id, StoryImportReanalyzeCommand(expectedInputHash=preview.input_hash, **common)
         )
     if old.kind == "generate_image":
+        if frozen.get("purpose") == "production_prop":
+            from .production_props import PropImageInput, PropImageGeneration, prop_image_preview, generate_prop_image
+            prop_input = PropImageInput.model_validate(frozen["propInput"])
+            preview = prop_image_preview(service, project, prop_input)
+            return generate_prop_image(service, project, PropImageGeneration(
+                **prop_input.model_dump(), expectedInputHash=preview["inputHash"], **common))
         preview = service.preview_asset_generation(
             project, AssetGenerationPreviewCommand(kind=frozen["role"])
         )
@@ -150,6 +156,12 @@ def replace_unknown_job(
             ),
         )
     if old.kind == "generate_video":
+        if frozen.get("purpose") == "production_unit":
+            from .production_plan import UnitGeneration
+            plan_id, unit_id = uuid.UUID(frozen["productionPlanId"]), frozen["productionUnitId"]
+            preview = service.production.preview_unit(project, unit_id, plan_id)
+            return service.production.generate_unit(project, unit_id, UnitGeneration(
+                planId=plan_id, expectedInputHash=preview["inputHash"], **common))
         target = GenerationPreviewCommand(
             includePreviousEpisodeVideo=bool(frozen.get("previousEpisodeVideoAssetId"))
         )

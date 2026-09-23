@@ -28,10 +28,11 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from .models import DirectorPlanPayload, PerformanceDirectorOutput, ProfessionalDirectorOutput
+from .models import DirectorPlanPayload, PerformanceDirectorOutput, ProfessionalDirectorOutput, NarrativeDirectorOutput
 
 # 当前导演输出契约与归一化算法版本(语义见模块 docstring)
 DIRECTOR_OUTPUT_CONTRACT = "professional-director-v4-performance"
+NARRATIVE_OUTPUT_CONTRACT = "professional-director-v5-narrative"
 DIRECTOR_NORMALIZATION_REVISION = "director-normalizer-v4-performance"
 
 DirectorResultDisposition = Literal["candidate_ready", "needs_input", "invalid"]
@@ -317,8 +318,8 @@ def _blocking_issue(error: dict[str, Any]) -> DirectorValidationIssue:
             code="too_many_meaningful_shots",
             severity="blocking",
             path="shots",
-            message="分镜包含超过 4 个有内容的镜头，需要在采用前精简。",
-            suggested_action="保留 1–4 个有意义镜头，并确保总时长闭合。",
+            message=f"分镜包含超过 {error.get('ctx', {}).get('max_length', 4)} 个有内容的镜头，需要在采用前精简。",
+            suggested_action="按当前格式的镜头上限精简，并确保总帧数与作品时长一致。",
         )
     message = str(error.get("msg", "该字段需要补充或修正。"))
     if error_type == "value_error" and message.startswith("Value error, "):
@@ -530,8 +531,10 @@ def normalize_director_result(
                 contract = DirectorPlanPayload
             elif output_contract_revision == "professional-director-v3":
                 contract = ProfessionalDirectorOutput
-            elif output_contract_revision == DIRECTOR_OUTPUT_CONTRACT:
+            elif output_contract_revision == "professional-director-v4-performance":
                 contract = PerformanceDirectorOutput
+            elif output_contract_revision == NARRATIVE_OUTPUT_CONTRACT:
+                contract = NarrativeDirectorOutput
             else:
                 raise ValueError(f"unsupported director contract: {output_contract_revision}")
             plan = contract.model_validate(normalized)
@@ -556,7 +559,8 @@ def normalize_director_result(
                 # 被阻断时不下发 plan,防止未经人工处理的结果被自动采用
                 plan=None if blocked else plan,
                 normalization_revision=(
-                    "director-normalizer-v1" if legacy else DIRECTOR_NORMALIZATION_REVISION
+                    "director-normalizer-v1" if legacy else "director-normalizer-v5-narrative"
+                    if output_contract_revision == NARRATIVE_OUTPUT_CONTRACT else DIRECTOR_NORMALIZATION_REVISION
                 ),
             )
         except ValidationError as exc:
@@ -598,12 +602,13 @@ def normalize_director_result(
                 disposition="needs_input",
                 issues=tuple(issues) + blocking,
                 normalization_revision=(
-                    "director-normalizer-v1" if legacy else DIRECTOR_NORMALIZATION_REVISION
+                    "director-normalizer-v1" if legacy else "director-normalizer-v5-narrative"
+                    if output_contract_revision == NARRATIVE_OUTPUT_CONTRACT else DIRECTOR_NORMALIZATION_REVISION
                 ),
             )
 
 
-def director_provider_output_schema() -> dict[str, object]:
+def director_provider_output_schema(*, narrative: bool = False) -> dict[str, object]:
     """生成下发给 Provider 的 JSON-Schema:只描述可解析的输出结构,不写入创意密度上限。
 
     创意列表字段(声音/微动作/风险等)的 maxItems 被递归移除 ——
@@ -611,7 +616,7 @@ def director_provider_output_schema() -> dict[str, object]:
     """
 
     # 深拷贝后再原地修改,不动模型类生成的原始 schema
-    schema: dict[str, object] = deepcopy(PerformanceDirectorOutput.model_json_schema(by_alias=True))
+    schema: dict[str, object] = deepcopy((NarrativeDirectorOutput if narrative else PerformanceDirectorOutput).model_json_schema(by_alias=True))
 
     def visit(node: object, field_name: str | None = None) -> None:
         # 递归遍历:properties 的子节点带各自字段名,其余节点(items/anyOf/$defs 等)

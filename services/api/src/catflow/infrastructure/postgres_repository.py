@@ -143,10 +143,11 @@ from .models import (
 )
 
 
+from .postgres_production import PostgresProduction, validate_production_job
 from .postgres_character_references import PostgresCharacterReferences, mark_reference_production, lock_reference_owner
 
 
-class PostgresStudioRepository(PostgresCharacterReferences):
+class PostgresStudioRepository(PostgresProduction, PostgresCharacterReferences):
     """PostgreSQL owns every durable CatFlow business fact and transaction boundary."""
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
@@ -2177,6 +2178,7 @@ class PostgresStudioRepository(PostgresCharacterReferences):
                     "dialoguePolicy": proposal.dialogue_policy,
                     "environmentIntent": proposal.environment_intent,
                     "propIntent": proposal.prop_intent,
+                    **({"narrativeDesign": proposal.narrative_design.model_dump(mode="json", by_alias=True)} if proposal.narrative_design else {}),
                     "warnings": [],
                 },
             )
@@ -2241,6 +2243,7 @@ class PostgresStudioRepository(PostgresCharacterReferences):
                 target_duration_seconds=int(payload["targetDurationSeconds"]),
                 dialogue_policy=str(payload["dialoguePolicy"]),
                 environment_intent=str(payload["environmentIntent"]),
+                narrative_design_json=payload.get("narrativeDesign"),
                 active=True,
             )
             proposal.status = "adopted"
@@ -2298,6 +2301,7 @@ class PostgresStudioRepository(PostgresCharacterReferences):
                 target_duration_seconds=command.target_duration_seconds,
                 dialogue_policy=command.dialogue_policy,
                 environment_intent=command.environment_intent,
+                narrative_design_json=command.narrative_design.model_dump(mode="json", by_alias=True) if command.narrative_design else None,
                 active=True,
             )
             session.add(record)
@@ -2713,6 +2717,7 @@ class PostgresStudioRepository(PostgresCharacterReferences):
                 _require_same_input(existing, job.input_hash)
                 return _job_dto(session, existing)
             mark_reference_production(session, project_id=job.project_id, series_id=job.series_id, job=job)
+            validate_production_job(session, job)
             shot_media = (
                 job.frozen_input.get("purpose") in {"shot_frame", "shot_video"}
                 and job.provider != "local_ffmpeg"
@@ -3059,11 +3064,10 @@ class PostgresStudioRepository(PostgresCharacterReferences):
         self,
         draft: VideoEditDraftDto,
         edit: EditVersionDto,
+        *, production_guard: dict | None = None,
     ) -> VideoEditDraftDto:
         with self._sessions.begin() as session:
-            session.scalar(
-                select(ProjectRecord).where(ProjectRecord.id == draft.project_id).with_for_update()
-            )
+            lock_reference_owner(session, project_id=draft.project_id)
             existing = session.scalar(
                 select(VideoEditDraftRecord).where(
                     VideoEditDraftRecord.idempotency_key == draft.idempotency_key,
@@ -3073,6 +3077,9 @@ class PostgresStudioRepository(PostgresCharacterReferences):
                 if existing.input_hash != draft.input_hash:
                     raise StudioIdempotencyInputConflictError("editing draft input changed")
                 return _edit_draft_dto(existing)
+            if production_guard:
+                from .postgres_production import validate_production_assembly
+                validate_production_assembly(session, draft.project_id, production_guard)
             record = VideoEditDraftRecord(
                 id=draft.id,
                 project_id=draft.project_id,
@@ -3873,6 +3880,7 @@ def _proposal_dto(record: LifePlannerProposalRecord) -> LifeStoryProposalDto:
         dialoguePolicy=payload["dialoguePolicy"],
         environmentIntent=payload["environmentIntent"],
         propIntent=payload.get("propIntent"),
+        narrativeDesign=payload.get("narrativeDesign"),
         contextHash=record.context_hash,
         warnings=payload.get("warnings", []),
     )
@@ -3885,6 +3893,7 @@ def _story_dto(record: StoryVersionRecord) -> StoryVersionDto:
         revision=record.revision,
         sourceProposalId=record.source_proposal_id,
         title=record.title,
+        narrativeDesign=record.narrative_design_json,
         body=record.body,
         microEvent=MicroEvent.model_validate(record.micro_event_json),
         targetDurationSeconds=record.target_duration_seconds,

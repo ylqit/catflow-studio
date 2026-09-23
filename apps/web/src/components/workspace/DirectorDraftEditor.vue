@@ -44,6 +44,10 @@ function fields(shot: Record<string, unknown>): Field[] {
   for (const key of ['framing', 'cameraMovement', 'childAction', 'catAction', 'environmentChange', 'cameraSpatialRelation', 'interactionConstraints', 'visualExclusions', ...Object.keys(requiredGroups), 'directorIntent']) {
     const children = requiredGroups[key];
     if (children) {
+      if (shot.formatVersion === 2 && ['childBlocking','catBlocking'].includes(key)) {
+        const info = shot.information as { visibleSubjects?: string[] } | undefined;
+        if (!info?.visibleSubjects?.includes(key === 'childBlocking' ? 'child' : 'cat')) continue;
+      }
       const group = shot[key] && typeof shot[key] === 'object' ? shot[key] as Record<string, unknown> : {};
       for (const child of new Set([...children, ...Object.keys(group)])) add([key, child], group[child], children.includes(child));
     } else add([key], shot[key], true);
@@ -75,8 +79,9 @@ function update(index: number, path: string[], value: string, list = false) {
     target = target[key];
   }
   const key = path[path.length - 1];
-  target[key] = list ? value.split('\n').filter(line => line.trim()) : key === 'durationSeconds' ? Number(value) : value;
+  target[key] = list ? value.split('\n').filter(line => line.trim()) : ['durationSeconds','durationFrames'].includes(key) ? Number(value) : value;
   if (key === 'durationSeconds') target.durationFrames = Number(value) * 24;
+  if (key === 'durationFrames') target.durationSeconds = Number(value) / 24;
   emit('update:modelValue', JSON.stringify(next, null, 2));
 }
 </script>
@@ -88,7 +93,8 @@ function update(index: number, path: string[], value: string, list = false) {
       <h3>镜头 {{ index + 1 }} · 已返回内容</h3>
       <ActionBeatsEditor v-if="shot.actionBeats == null || editableBeats(shot)" :model-value="editableBeats(shot)" :duration-frames="Number(shot.durationSeconds ?? 2) * 24" :initial-child-action="String(shot.childAction ?? '')" :initial-cat-action="String(shot.catAction ?? '')" :initial-visible-change="String(shot.environmentChange ?? '')" @update:model-value="updateBeats(index, $event)" />
       <p v-else role="alert">节拍字段结构不完整，原结果已保留，请在高级编辑中修正 actionBeats 后使用表单。</p>
-      <label>时长（秒）<input type="number" min="2" max="15" :aria-label="`镜头 ${index + 1} 时长`" :value="shot.durationSeconds" @input="update(index, ['durationSeconds'], ($event.target as HTMLInputElement).value)" /></label>
+      <label v-if="shot.formatVersion === 2">取用帧数（24 fps）<input type="number" min="24" max="360" :aria-label="`镜头 ${index + 1} 帧数`" :value="shot.durationFrames" @input="update(index, ['durationFrames'], ($event.target as HTMLInputElement).value)" /></label>
+      <label v-else>时长（秒）<input type="number" min="2" max="15" :aria-label="`镜头 ${index + 1} 时长`" :value="shot.durationSeconds" @input="update(index, ['durationSeconds'], ($event.target as HTMLInputElement).value)" /></label>
       <details open><summary>动作、画面与声音</summary>
         <label v-for="field in fields(shot)" :key="field.path.join('.')" :class="{ missing: field.missing }">
           {{ field.label }} <strong v-if="field.missing">待补充</strong>

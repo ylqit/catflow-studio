@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import Field, model_serializer, model_validator
 
 from .contract import ContractModel
+from .narrative import NarrativeDesign, ShotInformation
 
 
 class MicroEvent(ContractModel):
@@ -17,6 +18,7 @@ class MicroEvent(ContractModel):
 
 
 class LifeStoryProposalDraft(ContractModel):
+    narrative_design: NarrativeDesign | None = Field(alias="narrativeDesign", default=None)
     title: str = Field(min_length=1, max_length=160)
     summary: str = Field(min_length=1, max_length=500)
     body: str = Field(min_length=1, max_length=4_000)
@@ -25,10 +27,18 @@ class LifeStoryProposalDraft(ContractModel):
     cat_response: str = Field(alias="catResponse", min_length=1, max_length=500)
     visible_change: str = Field(alias="visibleChange", min_length=1, max_length=500)
     warm_ending: str = Field(alias="warmEnding", min_length=1, max_length=500)
-    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=15)
+    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=60)
     dialogue_policy: Literal["none", "minimal"] = Field(alias="dialoguePolicy")
     environment_intent: str = Field(alias="environmentIntent", min_length=1, max_length=500)
     prop_intent: str | None = Field(alias="propIntent", default=None, max_length=300)
+
+    @model_serializer(mode="wrap")
+    def historical_serialization(self, handler):
+        result = handler(self)
+        if self.narrative_design is None:
+            result.pop("narrativeDesign", None)
+            result.pop("narrative_design", None)
+        return result
 
     @property
     def micro_event(self) -> MicroEvent:
@@ -42,7 +52,8 @@ class LifeStoryProposalDraft(ContractModel):
 
 
 class LifeClipSpec(ContractModel):
-    duration_seconds: int = Field(alias="durationSeconds", ge=8, le=15)
+    format_version: Literal[1, 2] = Field(alias="formatVersion", default=1)
+    duration_seconds: int = Field(alias="durationSeconds", ge=8, le=60)
     aspect_ratio: Literal["9:16"] = Field(alias="aspectRatio")
     micro_event: str = Field(alias="microEvent", min_length=1, max_length=500)
     child_action: str = Field(alias="childAction", min_length=1, max_length=500)
@@ -56,6 +67,21 @@ class LifeClipSpec(ContractModel):
     dialogue_policy: Literal["none", "minimal"] = Field(alias="dialoguePolicy")
     environment_intent: str = Field(alias="environmentIntent", min_length=1, max_length=500)
     prop_intent: str | None = Field(alias="propIntent", default=None, max_length=300)
+
+
+    @model_validator(mode="after")
+    def legacy_duration(self):
+        if self.format_version == 1 and self.duration_seconds > 15:
+            raise ValueError("历史短片格式最多15秒，请创建新版分镜")
+        return self
+
+    @model_serializer(mode="wrap")
+    def historical_serialization(self, handler):
+        result = handler(self)
+        if self.format_version == 1:
+            result.pop("formatVersion", None)
+            result.pop("format_version", None)
+        return result
 
 
 class LensDesign(ContractModel):
@@ -140,28 +166,50 @@ class ActionBeat(ContractModel):
     child_action: str = Field(alias="childAction", max_length=300)
     cat_action: str = Field(alias="catAction", max_length=300)
     visible_change: str = Field(alias="visibleChange", min_length=1, max_length=300)
+    environment_action: str = Field(alias="environmentAction", default="", max_length=300)
     cat_performance: CatPerformance | None = Field(alias="catPerformance", default=None)
 
     @model_validator(mode="after")
     def validate_beat(self) -> ActionBeat:
         if self.end_frame <= self.start_frame:
             raise ValueError("节拍结束帧必须晚于开始帧")
-        if not self.child_action.strip() and not self.cat_action.strip():
+        if not any((self.child_action.strip(), self.cat_action.strip(), self.environment_action.strip())):
             raise ValueError("节拍至少需要一个角色的可见动作或反应")
         if not self.visible_change.strip():
             raise ValueError("节拍需要说明可见的新变化")
         return self
 
 
+    @model_serializer(mode="wrap")
+    def historical_serialization(self, handler):
+        result = handler(self)
+        if not self.environment_action:
+            result.pop("environmentAction", None)
+            result.pop("environment_action", None)
+        return result
+
+
 class ShotSpec(ContractModel):
+    format_version: Literal[1, 2] = Field(alias="formatVersion", default=1)
+    information: ShotInformation | None = None
     id: str = Field(min_length=1, max_length=80)
-    order: int = Field(ge=1, le=4)
-    duration_seconds: int = Field(alias="durationSeconds", ge=2, le=15)
-    duration_frames: int | None = Field(alias="durationFrames", default=None, ge=48, le=360)
+    order: int = Field(ge=1, le=24)
+    duration_seconds: float = Field(alias="durationSeconds", ge=1, le=15)
+    duration_frames: int | None = Field(alias="durationFrames", default=None, ge=24, le=360)
+
+    @model_validator(mode="before")
+    @classmethod
+    def frame_authority(cls, value):
+        if isinstance(value, dict) and value.get("formatVersion", value.get("format_version", cls.model_fields["format_version"].default)) == 2:
+            frames = value.get("durationFrames", value.get("duration_frames"))
+            if isinstance(frames, int) and not isinstance(frames, bool):
+                value = {**value, "durationSeconds": frames / 24}
+                value.pop("duration_seconds", None)
+        return value
     framing: str = Field(min_length=1, max_length=200)
     camera_movement: str = Field(alias="cameraMovement", min_length=1, max_length=200)
-    child_action: str = Field(alias="childAction", min_length=1, max_length=500)
-    cat_action: str = Field(alias="catAction", min_length=1, max_length=500)
+    child_action: str = Field(alias="childAction", max_length=500)
+    cat_action: str = Field(alias="catAction", max_length=500)
     environment_change: str = Field(alias="environmentChange", min_length=1, max_length=500)
     transition: Literal["continuous", "soft_cut", "hard_cut"]
     lens: LensDesign | None = None
@@ -189,6 +237,14 @@ class ShotSpec(ContractModel):
     @model_serializer(mode="wrap")
     def preserve_historical_document(self, handler):
         document = handler(self)
+        if self.format_version == 1:
+            document.pop("formatVersion", None)
+            document.pop("format_version", None)
+            for key in ("durationSeconds", "duration_seconds"):
+                if key in document:
+                    document[key] = int(self.duration_seconds)
+        if self.information is None:
+            document.pop("information", None)
         # Absent performance design must not change old snapshots or design hashes.
         if self.action_beats is None:
             document.pop("actionBeats", None)
@@ -197,7 +253,17 @@ class ShotSpec(ContractModel):
 
     @model_validator(mode="after")
     def validate_frame_duration(self) -> ShotSpec:
-        if self.duration_frames is not None and self.duration_frames != self.duration_seconds * 24:
+        if self.format_version == 1:
+            if self.order > 4 or self.duration_seconds < 2 or not float(self.duration_seconds).is_integer():
+                raise ValueError("历史分镜最多4镜且每镜为2至15整数秒")
+            if not self.child_action or not self.cat_action:
+                raise ValueError("历史分镜需要儿童和猫咪动作")
+        else:
+            if self.duration_frames is None or self.information is None:
+                raise ValueError("新版分镜需要durationFrames与information")
+            if any(e.end_frame > self.duration_frames for e in self.information.key_events):
+                raise ValueError("关键事件超出镜头")
+        if self.duration_frames is not None and abs(self.duration_frames - self.duration_seconds * 24) > 0.00001:
             raise ValueError("镜头帧数必须等于秒数乘24（24fps剪辑帧率）。")
         previous_end = 0
         for beat in self.action_beats or []:
@@ -255,7 +321,7 @@ class ShotPlanDraft(ContractModel):
         alias="expectedActiveShotPlanVersionId", default=None
     )
     clip: LifeClipSpec
-    shots: list[ShotSpec] = Field(min_length=1, max_length=4)
+    shots: list[ShotSpec] = Field(min_length=1, max_length=24)
     director_treatment: DirectorStoryTreatment | None = Field(
         alias="directorTreatment", default=None
     )
@@ -269,16 +335,20 @@ class ShotPlanDraft(ContractModel):
 
     @model_validator(mode="after")
     def validate_timeline(self) -> ShotPlanDraft:
+        if self.clip.format_version == 1 and len(self.shots) > 4:
+            raise ValueError("历史分镜最多4镜")
+        if any(s.format_version != self.clip.format_version for s in self.shots):
+            raise ValueError("镜头与计划格式版本不一致")
         expected_orders = list(range(1, len(self.shots) + 1))
         if [shot.order for shot in self.shots] != expected_orders:
             raise ValueError("镜头顺序必须从 1 开始且连续")
-        if self.total_duration_seconds != self.clip.duration_seconds:
+        if sum(round(s.duration_seconds * 24) for s in self.shots) != self.clip.duration_seconds * 24:
             raise ValueError("镜头总时长必须与短片目标总时长一致")
         return self
 
     @property
     def total_duration_seconds(self) -> int:
-        return sum(shot.duration_seconds for shot in self.shots)
+        return round(sum(shot.duration_seconds for shot in self.shots))
 
 
 class EmotionalArc(ContractModel):
@@ -343,15 +413,28 @@ class ProfessionalShotOutput(ShotSpec):
 
 
 class DirectorPlanPayload(ContractModel):
-    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=15)
+    format_version: Literal[1, 2] = Field(alias="formatVersion", default=1)
+    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=60)
     director_treatment: DirectorStoryTreatment = Field(alias="directorTreatment")
-    shots: list[ShotSpec] = Field(min_length=1, max_length=4)
+    shots: list[ShotSpec] = Field(min_length=1, max_length=24)
+
+    @model_serializer(mode="wrap")
+    def historical_serialization(self, handler):
+        result = handler(self)
+        if self.format_version == 1:
+            result.pop("formatVersion", None)
+            result.pop("format_version", None)
+        return result
 
     @model_validator(mode="after")
     def validate_professional_timeline(self) -> DirectorPlanPayload:
+        if self.format_version == 1 and (self.target_duration_seconds > 15 or len(self.shots) > 4):
+            raise ValueError("历史导演格式最多15秒4镜")
+        if any(s.format_version != self.format_version for s in self.shots):
+            raise ValueError("导演与镜头格式不一致")
         if [shot.order for shot in self.shots] != list(range(1, len(self.shots) + 1)):
             raise ValueError("镜头序号必须从1开始连续编号。")
-        if sum(shot.duration_seconds for shot in self.shots) != self.target_duration_seconds:
+        if sum(round(shot.duration_seconds * 24) for shot in self.shots) != self.target_duration_seconds * 24:
             raise ValueError(
                 f"各镜头秒数之和必须精确等于目标时长{self.target_duration_seconds}秒。"
             )
@@ -367,7 +450,9 @@ class DirectorPlanPayload(ContractModel):
             "director_intent",
         )
         for shot in self.shots:
-            missing = [name for name in required if getattr(shot, name) is None]
+            missing = [name for name in required if getattr(shot, name) is None
+                       and not (self.format_version == 2 and name in {"child_blocking", "cat_blocking"}
+                                and name.split("_")[0] not in shot.information.visible_subjects)]
             if shot.duration_frames is None:
                 missing.append("duration_frames")
             if missing:
@@ -410,7 +495,9 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
             "director_intent",
         )
         for shot in self.shots:
-            missing = [name for name in professional_fields if getattr(shot, name) is None]
+            missing = [name for name in professional_fields if getattr(shot, name) is None
+                       and not (shot.format_version == 2 and name in {"child_blocking", "cat_blocking"}
+                                and name.split("_")[0] not in shot.information.visible_subjects)]
             if shot.duration_frames is None:
                 missing.append("duration_frames")
             if missing:
@@ -431,3 +518,22 @@ class ProfessionalShotPlanDraft(ShotPlanDraft):
         if any(term in serialized for term in prohibited):
             raise ValueError("分镜包含成人化或超龄描述，请按角色设定修正。")
         return self
+
+
+class NarrativeShotOutput(ShotSpec):
+    format_version: Literal[2] = Field(alias="formatVersion", default=2)
+    information: ShotInformation
+    duration_frames: int = Field(alias="durationFrames", ge=24, le=360)
+    lens: LensDesign
+    composition: CompositionDesign
+    physical_change: PhysicalChangeDesign = Field(alias="physicalChange")
+    continuity: ContinuityDesign
+    lighting: LightingDesign
+    sound: ShotSoundDesign
+    director_intent: str = Field(alias="directorIntent", min_length=1, max_length=500)
+    action_beats: list[ActionBeat] = Field(alias="actionBeats", min_length=1)
+
+
+class NarrativeDirectorOutput(DirectorPlanPayload):
+    format_version: Literal[2] = Field(alias="formatVersion", default=2)
+    shots: list[NarrativeShotOutput] = Field(min_length=1, max_length=24)

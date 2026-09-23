@@ -315,6 +315,7 @@ def _shot_execution(
                     f"节拍 {start}–{end}秒 · {purposes[beat.purpose]}",
                     f"儿童：{beat.child_action}" if beat.child_action else "",
                     f"猫咪：{beat.cat_action}" if beat.cat_action else "",
+                    f"道具与环境：{beat.environment_action}" if beat.environment_action else "",
                     f"可见变化：{beat.visible_change}",
                 )
             )
@@ -474,7 +475,7 @@ def _shot_execution(
     title = (
         f"镜头 {shot.order} 起始画面"
         if initial_frame
-        else (f"镜头 {shot.order}（{start_seconds}–{start_seconds + shot.duration_seconds}秒）")
+        else (f"镜头 {shot.order}（{start_seconds:g}–{start_seconds + shot.duration_seconds:g}秒）")
     )
     return title + "\n" + "\n".join(paragraph for paragraph in paragraphs if paragraph)
 
@@ -722,7 +723,9 @@ def compile_shot_media_prompt(
     单镜头自身就是全部上下文,prompt_summary 直接复用正文;不做分节展示,
     prompt_sections 为空元组。
     """
-    if initial_frame and (shot.child_blocking is None or shot.cat_blocking is None):
+    visible = set(shot.information.visible_subjects) if shot.information else {"child", "cat"}
+    if initial_frame and (("child" in visible and shot.child_blocking is None)
+                          or ("cat" in visible and shot.cat_blocking is None)):
         raise ValueError(f"镜头{shot.order}缺少明确的人物或猫咪起始状态，请补充分镜后生成起始图")
     validate_system_prompt(
         shot.model_dump(

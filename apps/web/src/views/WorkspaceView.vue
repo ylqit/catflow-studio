@@ -29,7 +29,7 @@ let runtimeTimer: number | undefined;
 const steps = [
   { id: "planner", number: "01", label: "生活灵感", hint: "一个微事件" },
   { id: "assets", number: "02", label: "角色与画风", hint: "五个固定槽位" },
-  { id: "storyboard", number: "03", label: "分镜画布", hint: "1–4 个镜头" },
+  { id: "storyboard", number: "03", label: "分镜画布", hint: "信息与动作节拍" },
   { id: "generation", number: "04", label: "生成与选择", hint: "准备生成" },
   { id: "delivery", number: "05", label: "剪辑与导出", hint: "完成剪辑" },
 ] as const;

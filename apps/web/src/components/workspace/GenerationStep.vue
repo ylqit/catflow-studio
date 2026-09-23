@@ -33,6 +33,7 @@ import { subscribeJobs } from "../../jobUpdates";
 import { api } from "../../api/client";
 import ShotSequenceProduction from "./ShotSequenceProduction.vue";
 const productionMode = ref("whole");
+import ProductionWorkspace from "./ProductionWorkspace.vue";
 import type { AssetDto, GenerationPreviewDto, JobDto, ProjectSeriesContextDto, ProjectUsageSummaryDto, WorkspaceDto } from "../../api/types";
 import { buildAcceptanceEvidence } from "../../acceptanceEvidence";
 import { pendingIdempotencyKey, settleIdempotencyKey } from "../../idempotency";
@@ -41,6 +42,7 @@ import { useUiStore } from "../../stores/ui";
 
 const props = defineProps<{ projectId: string; workspace: WorkspaceDto; runtime?: PaidModelRuntime | null; seriesContext?: ProjectSeriesContextDto | null }>();
 const emit = defineEmits<{ changed: [] }>();
+watch(() => props.workspace.activeShotPlan?.clip.formatVersion, value => { if(value === 2) productionMode.value="units"; }, { immediate:true });
 const router = useRouter();
 const savingReview = ref(false);
 const confirmEditReferences = ref(false);
@@ -494,8 +496,9 @@ watch(
 </script>
 
 <template>
-  <section class="card production-mode"><label>视频生成方式<select v-model="productionMode"><option value="whole">整片一次生成（默认）</option><option value="shots">逐镜头生成（每镜头单独付费）</option></select></label><p>{{ productionMode === 'whole' ? '默认整片一次调用。已确认镜头图作为普通构图参考；不宣称多个严格首帧。' : '需要各镜头起点和机位更明确时使用。每个镜头需先在分镜画布确认起始画面。' }}</p></section>
-  <ShotSequenceProduction v-if="productionMode === 'shots'" :project-id="projectId" :workspace="workspace" :runtime="runtime" />
+  <section class="card production-mode"><label>视频生成方式<select v-model="productionMode"><option value="units">生产计划与选片（长短片统一）</option><option value="whole">整片一次生成（默认）</option><option value="shots">逐镜头生成（每镜头单独付费）</option></select></label><p>{{ productionMode === 'units' ? '按镜头分组生成，采用实际片段与结束状态后组装成片。' : productionMode === 'whole' ? '默认整片一次调用。已确认镜头图作为普通构图参考；不宣称多个严格首帧。' : '需要各镜头起点和机位更明确时使用。每个镜头需先在分镜画布确认起始画面。' }}</p></section>
+  <ProductionWorkspace v-if="productionMode === 'units'" :project-id="projectId" :workspace="workspace" :runtime="runtime" @changed="emit('changed')" />
+  <ShotSequenceProduction v-else-if="productionMode === 'shots'" :project-id="projectId" :workspace="workspace" :runtime="runtime" />
   <section v-else class="generation-layout">
     <div class="generation-main">
       <div class="preview-card card">

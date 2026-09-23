@@ -51,7 +51,7 @@ class LocalMediaJobExecutor:
             if job is None:
                 raise ValueError("job not found")
             if job.kind == "extract_continuity_frames":
-                if job.frozen_input_json.get("purpose") == "shot_frame":
+                if job.frozen_input_json.get("purpose") in {"shot_frame", "unit_evidence"}:
                     self._extract_shot_frame(job_id)
                 else:
                     self._extract_continuity_frames(job_id)
@@ -129,7 +129,7 @@ class LocalMediaJobExecutor:
         )
         self._persist_asset(
             job_id,
-            role="shot_frame",
+            role="unit_end_frame" if frozen.get("purpose") == "unit_evidence" else "shot_frame",
             storage_key=key,
             path=path,
             media_type="image",
@@ -781,15 +781,18 @@ class LocalMediaJobExecutor:
                             if asset.producing_job_id
                             else None
                         )
-                        if not (
-                            asset.role == "shot_video"
-                            and source_job is not None
-                            and source_job.project_id == job.project_id
-                            and source_job.frozen_input_json.get("purpose") == "shot_video"
-                            and source_job.frozen_input_json.get("shotDesignHash")
-                            == asset.metadata_json.get("shotDesignHash")
-                        ):
-                            raise ValueError("non-root audio requires candidate or shot provenance")
+                        if source_job is None or source_job.project_id != job.project_id:
+                            raise ValueError("non-root audio has no source job")
+                        purpose = source_job.frozen_input_json.get("purpose")
+                        if purpose == "production_unit" and asset.role == "production_unit_video":
+                            hash_key = "unitDesignHash"
+                        elif purpose == "shot_video" and asset.role == "shot_video":
+                            hash_key = "shotDesignHash"
+                        else:
+                            raise ValueError("non-root audio requires candidate, shot or unit provenance")
+                        if (not source_job.frozen_input_json.get(hash_key)
+                                or source_job.frozen_input_json[hash_key] != asset.metadata_json.get(hash_key)):
+                            raise ValueError("non-root audio design provenance changed")
                     path = self._media_store.resolve(asset.storage_key)
                     if interval["sourceInFrame"] + interval[
                         "durationFrames"
@@ -884,8 +887,8 @@ class LocalMediaJobExecutor:
             for index, (interval, fact) in enumerate(zip(audio["segments"], facts, strict=True)):
                 start_sample = interval["sourceInFrame"] * 2000
                 samples = interval["durationFrames"] * 2000
-                if not fact["hasAudio"]:
-                    if interval["requireAudio"]:
+                if interval.get("muted", False) or not fact["hasAudio"]:
+                    if interval["requireAudio"] and not interval.get("muted", False):
                         raise ValueError(
                             "candidate audio was requested for this trial but is absent"
                         )

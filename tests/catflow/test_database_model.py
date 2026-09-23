@@ -11,6 +11,8 @@ from alembic.operations import Operations
 from catflow.infrastructure.models import SCHEMA_NAME, Base
 
 EXPECTED_TABLES = {
+    "cat_reference_options", "character_remakes",
+    "production_plan_versions", "production_unit_selections",
     "projects",
     "canon_profiles",
     "assets",
@@ -177,6 +179,7 @@ def test_new_alembic_baseline_renders_the_original_goal_tables() -> None:
 
     sql = output.getvalue()
     for table_name in EXPECTED_TABLES - {
+        "cat_reference_options", "character_remakes", "production_plan_versions", "production_unit_selections",
         "validation_runs",
         "video_repairs",
         "video_edit_drafts",

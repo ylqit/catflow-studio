@@ -81,6 +81,7 @@ from catflow.domain.contract import ContractModel
 from catflow.domain.director_results import (
     DIRECTOR_NORMALIZATION_REVISION,
     DIRECTOR_OUTPUT_CONTRACT,
+    NARRATIVE_OUTPUT_CONTRACT,
     DirectorNormalizationResult,
     completed_director_text,
     director_provider_output_schema,
@@ -94,10 +95,12 @@ from catflow.domain.models import (
     MicroEvent,
     ProfessionalDirectorOutput,
     PerformanceDirectorOutput,
+    NarrativeDirectorOutput,
     ProfessionalShotPlanDraft,
     ShotPlanDraft,
     ShotSpec,
 )
+from catflow.domain.narrative import NarrativeDocument, NarrativeDesign, NARRATIVE_PLANNING, DIRECTOR_NARRATIVE
 from catflow.domain.references import CompiledReference, ProviderReference, compile_references
 from catflow.domain.video_repairs import (
     MAX_ISSUE_FRAMES,
@@ -371,14 +374,14 @@ class ProjectCreate(ContractModel):
     canon_profile_id: uuid.UUID | None = Field(alias="canonProfileId", default=None)
     title: str = Field(min_length=1, max_length=160)
     theme: str = Field(min_length=1, max_length=2_000)
-    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=15)
+    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=60)
 
 
 class ProjectPatch(ContractModel):
     title: str | None = Field(default=None, min_length=1, max_length=160)
     theme: str | None = Field(default=None, min_length=1, max_length=2_000)
     target_duration_seconds: int | None = Field(
-        alias="targetDurationSeconds", default=None, ge=8, le=15
+        alias="targetDurationSeconds", default=None, ge=8, le=60
     )
 
     @model_validator(mode="after")
@@ -501,7 +504,7 @@ class PlannerJobDto(ContractModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
-class LifeStoryProposalDto(ContractModel):
+class LifeStoryProposalDto(NarrativeDocument):
     id: uuid.UUID
     project_id: uuid.UUID = Field(alias="projectId")
     status: Literal["draft", "adopted", "outdated"]
@@ -526,7 +529,7 @@ class PlannerSnapshotDto(ContractModel):
     latest_job: PlannerJobDto | None = Field(alias="latestJob", default=None)
 
 
-class StoryVersionDto(ContractModel):
+class StoryVersionDto(NarrativeDocument):
     id: uuid.UUID
     project_id: uuid.UUID = Field(alias="projectId")
     revision: int
@@ -541,11 +544,11 @@ class StoryVersionDto(ContractModel):
     created_at: datetime = Field(alias="createdAt")
 
 
-class StoryCreateCommand(ContractModel):
+class StoryCreateCommand(NarrativeDocument):
     title: str = Field(min_length=1, max_length=160)
     body: str = Field(min_length=1, max_length=4_000)
     micro_event: MicroEvent = Field(alias="microEvent")
-    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=15)
+    target_duration_seconds: int = Field(alias="targetDurationSeconds", ge=8, le=60)
     dialogue_policy: Literal["none", "minimal"] = Field(alias="dialoguePolicy")
     environment_intent: str = Field(alias="environmentIntent", min_length=1, max_length=500)
 
@@ -1861,6 +1864,8 @@ class StudioService:
     ) -> None:
         self._provider_task_reader = provider_task_reader
         self._repository = repository
+        from .production_service import ProductionService
+        self.production = ProductionService(self, repository)
         self._provider_runtime = provider_runtime or ProviderRuntime.from_env(
             segment_reference_publishing_ready=False
         )
@@ -2850,14 +2855,16 @@ class StudioService:
         if existing is not None:
             return existing
         if job.frozen_input.get("outputContractRevision") in {
-            DIRECTOR_OUTPUT_CONTRACT, "professional-director-v3",
+            DIRECTOR_OUTPUT_CONTRACT,
+    NARRATIVE_OUTPUT_CONTRACT, "professional-director-v4-performance", "professional-director-v3",
         }:
             # Manual result repair shares the same generation contract as Provider output.
             # exclude_unset preserves the distinction between missing and explicitly empty lists.
             try:
                 output_model = (
-                    PerformanceDirectorOutput
-                    if job.frozen_input["outputContractRevision"] == DIRECTOR_OUTPUT_CONTRACT
+                    NarrativeDirectorOutput
+                    if job.frozen_input["outputContractRevision"] == NARRATIVE_OUTPUT_CONTRACT
+                    else PerformanceDirectorOutput if job.frozen_input["outputContractRevision"] == "professional-director-v4-performance"
                     else ProfessionalDirectorOutput
                 )
                 payload = output_model.model_validate(
@@ -2975,7 +2982,9 @@ class StudioService:
         if missing:
             raise StudioConflictError(f"missing asset selections: {', '.join(missing)}")
         self._require_paid_calls_enabled()
+        narrative = story.narrative_design is not None or story.target_duration_seconds > 15
         clip = LifeClipSpec(
+            formatVersion=2 if narrative else 1,
             durationSeconds=story.target_duration_seconds,
             aspectRatio="9:16",
             microEvent=story.title,
@@ -3011,7 +3020,7 @@ class StudioService:
                 "\n【已采用故事对应的用户补充（原文）】\n" + user_directions
                 + "\n依据已采用故事安排表演与节奏；不因补充说明增加第二条剧情或改写原始来源事实。"
             )
-        output_schema = director_provider_output_schema()
+        output_schema = director_provider_output_schema(narrative=narrative)
         selection_hash = self.current_selection_hash(project_id)
         base_shot_plan = self._repository.active_shot_plan(project_id)
         document = {
@@ -3028,10 +3037,10 @@ class StudioService:
             "targetDurationSeconds": project.target_duration_seconds,
             "aspectRatio": "9:16",
             "frameRate": 24,
-            "directorPromptRevision": "catflow-director-v8-performance",
+            "directorPromptRevision": "catflow-director-v9-narrative" if narrative else "catflow-director-v8-performance",
             "storyUserDirections": user_directions,
-            "outputContractRevision": DIRECTOR_OUTPUT_CONTRACT,
-            "normalizationRevision": DIRECTOR_NORMALIZATION_REVISION,
+            "outputContractRevision": NARRATIVE_OUTPUT_CONTRACT if narrative else DIRECTOR_OUTPUT_CONTRACT,
+            "normalizationRevision": "director-normalizer-v5-narrative" if narrative else DIRECTOR_NORMALIZATION_REVISION,
             "inputInstruction": "结合这些参考规划分镜，遵守指令中各图片的职责与顺序。",
             "referenceInputMode": "vision",
             "provider": self._provider_runtime.provider,
@@ -3126,6 +3135,9 @@ class StudioService:
             ):
                 raise StudioConflictError("镜头参考缺失或不属于当前项目。")
             references.append({"assetId": str(asset.id), "sha256": asset.sha256, "role": role})
+        preparation = self.production.shot_reference_context(project_id, shot) if shot.format_version == 2 else None
+        if preparation:
+            references = preparation["references"]
         design_hash = shot_design_hash(shot, references, story.environment_intent)
         frame = shot.confirmed_frame
         frame_current = bool(
@@ -3142,7 +3154,8 @@ class StudioService:
             "frameCurrent": frame_current,
             "environmentIntent": story.environment_intent,
             "storyBody": story.body,
-            "targetDurationFrames": shot.duration_seconds * 24,
+            "targetDurationFrames": shot.duration_frames or round(shot.duration_seconds * 24),
+            **({"productionPreparation": preparation} if preparation else {}),
             "jobs": [
                 job.model_dump(mode="json", by_alias=True)
                 for job in self._repository.list_project_jobs(project_id)
@@ -3164,7 +3177,7 @@ class StudioService:
             references = [
                 {"assetId": frame["assetId"], "sha256": frame["sha256"], "role": "first_frame"}
             ]
-        duration = max(4, shot["durationSeconds"])
+        duration = max(4, math.ceil(shot["durationSeconds"]))
         shot_spec = ShotSpec.model_validate(shot)
         try:
             compiled = compile_shot_media_prompt(shot=shot_spec, initial_frame=not is_video)
@@ -3175,6 +3188,8 @@ class StudioService:
             "严格从给定首帧开始，不重复动作填时长。\n"
             if is_video else "生成9:16、2K的镜头起始画面。\n"
         ) + compiled.prompt
+        if not is_video and context.get("productionPreparation"):
+            prompt += "\n起始场景与道具：" + context["productionPreparation"]["initialDescription"]
         final_prompt = compile_provider_media_prompt(
             prompt=prompt, negative_prompt=compiled.negative_prompt,
             reference_roles=tuple(item["role"] for item in references),
@@ -3861,6 +3876,8 @@ class StudioService:
         include_previous_episode_video: bool = False,
     ) -> GenerationPreviewDto:
         project = self._require_project(project_id)
+        if project.target_duration_seconds > 15:
+            raise StudioConflictError("超过当前单次生成能力，请使用生产计划与生成单元。")
         series_episode = self._repository.series_episode_for_project(project_id)
         previous_episode: SeriesEpisodeDto | None = None
         confirmed_continuity: EpisodeContinuitySnapshotDto | None = None
@@ -4577,6 +4594,22 @@ class StudioService:
             ),
             "outputSchema": _video_diagnostic_output_schema(),
         }
+        if video.metadata.get("productionUnitId") and video.producing_job_id:
+            source = self.get_job(video.producing_job_id)
+            unit_id = str(video.metadata["productionUnitId"])
+            selected = self._repository.active_unit_selection(project_id, unit_id)
+            observed = selected is not None and selected.document["assetId"] == str(video.id)
+            events = selected.document["events"] if observed else source.frozen_input.get("keyEvents", [])
+            ranges = [{"eventId": e.get("eventId", e.get("id")), "shotId": e["shotId"],
+                       "startFrame": e["sourceStartFrame"] if observed else e["unitStartFrame"],
+                       "endFrame": e["sourceEndFrame"] if observed else e["unitEndFrame"]} for e in events]
+            if not ranges:
+                raise StudioConflictError("请先标记关键事件再运行可选诊断")
+            frozen_input.update({"eventEvidence": ranges, "evidenceMapping": "observed" if observed else "planned",
+                "timestampsSeconds": sorted({(e["startFrame"] + e["endFrame"] - 1) / 48 for e in ranges}),
+                "referenceAssetIds": source.frozen_input["referenceAssetIds"],
+                "referenceRoles": source.frozen_input["referenceRoles"],
+                "prompt": "按关键事件区间的中点抽帧，检查身份、道具、空间与可见结果。单帧不能证明眨眼或动作完成；无法判断时说明需要连续播放。只返回建议。"})
         now = datetime.now(UTC)
         return self._create_job(
             JobDto(
@@ -6727,15 +6760,16 @@ def _planner_output_schema(target_duration_seconds: int) -> dict[str, Any]:
     """剧情策划(planner)LLM 的输出 JSON Schema —— 单集结构化提案的字段契约。
 
     约束要点:
-    - 目标时长只允许 8–15 秒,并以 const 锁死为项目设定值,模型无法更改;
+    - 目标时长只允许 8–60 秒,并以 const 锁死为项目设定值,模型无法更改;
     - title 限 4–12 个汉字,summary 不超过 60 字;
     - dialoguePolicy 仅 none / minimal(无对白或极少对白);
     - 其余叙事字段(trigger / childAction / catResponse / visibleChange /
       warmEnding / environmentIntent 等)全部必填且不得为空串。
     """
-    if not 8 <= target_duration_seconds <= 15:
-        raise ValueError("story duration must be between 8 and 15 seconds")
+    if not 8 <= target_duration_seconds <= 60:
+        raise ValueError("story duration must be between 8 and 60 seconds")
     required = [
+        "narrativeDesign",
         "title",
         "summary",
         "body",
@@ -6756,10 +6790,11 @@ def _planner_output_schema(target_duration_seconds: int) -> dict[str, Any]:
             **{
                 field: {"type": "string", "minLength": 1}
                 for field in required
-                if field not in {"targetDurationSeconds", "dialoguePolicy"}
+                if field not in {"targetDurationSeconds", "dialoguePolicy", "narrativeDesign"}
             },
             "title": {"type": "string", "minLength": 4, "maxLength": 12},
             "summary": {"type": "string", "minLength": 1, "maxLength": 60},
+            "narrativeDesign": NarrativeDesign.model_json_schema(by_alias=True),
             "targetDurationSeconds": {"type": "integer", "const": target_duration_seconds},
             "dialoguePolicy": {"type": "string", "enum": ["none", "minimal"]},
         },
@@ -6785,7 +6820,7 @@ def _planner_prompt(project: ProjectDto, user_text: str, cat_identity: str = "�
         f"用户主题：{user_text}。目标严格为{project.target_duration_seconds}秒、9:16、"
         "无对白或极少对白。只允许一个主要生活事件，并清楚表达"
         "触发、孩子动作、猫咪反应、可见变化和温暖结尾。"
-        f"{NARRATIVE_DIRECTION}{CAT_PERFORMANCE_DIRECTION}保持原创，不复制任何现有IP。"
+        f"{NARRATIVE_PLANNING}{NARRATIVE_DIRECTION}{CAT_PERFORMANCE_DIRECTION}保持原创，不复制任何现有IP。"
         "标题使用4至12个汉字，摘要不超过60个汉字；标题、摘要与触发字段不得整句重复，"
         "不得复述用户原文。禁止使用‘围绕……展开’、‘通过……呈现’、‘营造……氛围’、"
         "‘体现治愈感’等空泛套话；每个字段优先描述儿童、猫咪、道具或环境具体、可观察的"
@@ -6821,8 +6856,7 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
     return (
         f"你是CatFlow专业短片导演。把已采用故事《{story.title}》设计为"
         f"{project.target_duration_seconds}秒、24fps、9:16的一人一猫生活短片。"
-        "只允许1至4个镜头，单镜头至少2秒；各镜头durationSeconds之和必须精确等于"
-        "目标秒数，durationFrames必须等于durationSeconds乘24。"
+        f"{DIRECTOR_NARRATIVE if story.narrative_design or story.target_duration_seconds > 15 else '只允许1至4个镜头，单镜头至少2秒；各镜头durationSeconds之和必须精确等于目标秒数，durationFrames必须等于durationSeconds乘24。'}"
         "shots数组只能包含最终采用且内容完整的镜头；不得输出空占位镜头、备用镜头或修订镜头，"
         "不得在数组末尾追加用于解释、自我纠正或替换前文的条目。"
         f"场景意图：{story.environment_intent}。故事原文：{story.body}。"
@@ -6830,6 +6864,7 @@ def _director_prompt(project: ProjectDto, story: StoryVersionDto, cat_identity: 
         "请实际观察这些图片；场景保持外观、材质、光线与空间关系，允许每个镜头重新构图。"
         "场景图不是每个镜头的严格首帧。不要因环境图陈设而改写原故事因果链或道具约束。"
         "若角色落脚点、手臂动作空间、道具可见性与图像冲突，在feasibilityWarnings及generationRisks返回具体冲突与调整建议，不自动付费诊断。"
+        f"叙事设计：{story.narrative_design.model_dump(by_alias=True) if story.narrative_design else '沿用已采用故事'}。"
         f"唯一因果链：触发“{event.trigger}”；孩子动作“{event.child_action}”；"
         f"猫咪回应“{event.cat_response}”；可见变化“{event.visible_change}”；"
         f"主动结尾“{event.warm_ending}”。"

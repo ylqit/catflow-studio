@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkDurationInput from "./WorkDurationInput.vue";
 import CatReferenceSelector from "./CatReferenceSelector.vue";
 import { computed } from "vue";
 import type { StoryProductionTarget } from "../api/types";
@@ -16,7 +17,7 @@ const keepText = computed({
     <CatReferenceSelector :model-value="modelValue.canonProfileId" @update:model-value="change({ canonProfileId: $event })" />
     <label>系列长度<select :value="modelValue.lengthMode" @change="change(($event.target as HTMLSelectElement).value === 'ongoing' ? { lengthMode: 'ongoing', plannedEpisodeCount: null } : { lengthMode: 'fixed', plannedEpisodeCount: 3 })"><option value="fixed">固定集数</option><option value="ongoing">持续连载</option></select></label>
     <label v-if="modelValue.lengthMode === 'fixed'">计划集数<input :value="modelValue.plannedEpisodeCount" type="number" min="2" step="1" :aria-label="label + '计划集数'" @input="change({ plannedEpisodeCount: Number(($event.target as HTMLInputElement).value) })" /></label>
-    <label>每集时长（秒）<input :value="modelValue.defaultEpisodeDurationSeconds" type="number" min="8" max="15" step="1" :aria-label="label + '每集时长'" @input="change({ defaultEpisodeDurationSeconds: Number(($event.target as HTMLInputElement).value) })" /></label>
+    <WorkDurationInput :model-value="modelValue.defaultEpisodeDurationSeconds" :label="label + '每集时长'" @update:model-value="change({defaultEpisodeDurationSeconds:$event})" />
     <label>叙事方式<select :value="modelValue.narrativeMode" @change="change({ narrativeMode: ($event.target as HTMLSelectElement).value as StoryProductionTarget['narrativeMode'] })"><option value="continuous">连续剧情</option><option value="lightly_serialized">轻连续</option><option value="anthology">单元故事</option></select></label>
     <p v-if="modelValue.lengthMode === 'fixed'"><strong>{{ modelValue.plannedEpisodeCount }} 集 × {{ modelValue.defaultEpisodeDurationSeconds }} 秒 = {{ (modelValue.plannedEpisodeCount ?? 0) * modelValue.defaultEpisodeDurationSeconds }} 秒</strong><br />固定系列至少 2 集；只制作 1 集时，在分析结果中选择“创建独立短片”。</p>
     <p v-else>持续连载按规划段确认，不预设总时长。</p>
